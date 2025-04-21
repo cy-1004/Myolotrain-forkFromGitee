@@ -1,0 +1,94 @@
+/* 全局样式 */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f8f9fa;
+}
+
+/* 导航栏样式 */
+.navbar-brand {
+    font-weight: bold;
+}
+
+/* 表格样式 */
+.table {
+    background-color: white;
+    border-radius: 5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.table th {
+    background-color: #f1f1f1;
+}
+
+/* 卡片样式 */
+.card {
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    border-radius: 5px;
+}
+
+/* 按钮样式 */
+.btn-primary {
+    background-color: #0d6efd;
+    border-color: #0d6efd;
+}
+
+.btn-primary:hover {
+    background-color: #0b5ed7;
+    border-color: #0a58ca;
+}
+
+/* 进度条样式 */
+.progress {
+    margin-top: 10px;
+    height: 20px;
+}
+
+/* 上传进度容器样式 */
+.progress-container {
+    background-color: #f8f9fa;
+    border-radius: 5px;
+    padding: 15px;
+    margin-top: 15px;
+    border: 1px solid #dee2e6;
+}
+
+.progress-status {
+    font-weight: 500;
+    color: #495057;
+}
+
+.progress-details {
+    margin-top: 8px;
+    color: #6c757d;
+}
+
+.cancel-upload {
+    font-size: 0.8rem;
+    padding: 0.25rem 0.5rem;
+}
+
+/* 检测结果容器 */
+#result-container {
+    max-width: 100%;
+    margin: 0 auto;
+}
+
+#result-container img,
+#result-container video {
+    max-width: 100%;
+    border-radius: 5px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* 加载动画 */
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* 响应式调整 */
+@media (max-width: 768px) {
+    .container {
+        padding: 0 15px;
+    }
+}

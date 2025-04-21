@@ -1,0 +1,42 @@
+# 移除version字段，因为它已经过时
+
+services:
+  db:
+    image: registry.cn-hangzhou.aliyuncs.com/library/postgres:13
+    container_name: yolov8_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: yolov8_platform
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    # 增加健康检查
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+    container_name: yolov8_web
+    ports:
+      - "8000:8000"
+      - "6006:6006"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      - POSTGRES_SERVER=db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=yolov8_platform
+    volumes:
+      - ./app/static:/app/app/static
+      - ./logs:/app/logs
+    restart: always
+
+volumes:
+  postgres_data:

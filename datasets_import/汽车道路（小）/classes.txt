@@ -1,0 +1,7 @@
+bicycles
+buses
+crosswalks
+fire hydrants
+motorcycles
+traffic lights
+vehicles

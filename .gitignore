@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+ENV/
+
+# 项目特定文件
+app/static/uploads/*
+app/static/datasets/*
+app/static/models/*
+app/static/results/*
+logs/*
+*.log
+packages/*
+yolov8n/*
+
+# 数据库
+postgres_data/
+
+# 环境文件
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 系统文件
+.DS_Store
+Thumbs.db

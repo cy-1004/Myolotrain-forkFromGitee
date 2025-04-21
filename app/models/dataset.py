@@ -1,0 +1,20 @@
+import uuid
+from datetime import datetime
+from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, Boolean
+from sqlalchemy.dialects.postgresql import UUID
+
+from app.db.session import Base
+
+class Dataset(Base):
+    __tablename__ = "datasets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(String, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    path = Column(String, nullable=False)
+    classes = Column(JSON, nullable=False)
+    image_count = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    status = Column(String, default="processing")  # processing, available, error
+    is_external = Column(Boolean, default=False)  # 是否为外部数据集

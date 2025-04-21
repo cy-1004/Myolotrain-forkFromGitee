@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO训练平台</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">YOLO训练平台</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="datasets">数据集管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="models">模型管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="training">训练管理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="detection">模型测试</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div id="page-content">
+            <!-- 页面内容将通过JavaScript动态加载 -->
+            <div class="text-center py-5">
+                <h2>欢迎使用 YOLO训练平台</h2>
+                <p class="lead">请从上方菜单选择功能</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div class="modal fade" id="mainModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" class="btn btn-primary" id="modalSubmit">确定</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 页面模板 -->
+    <!-- 数据集管理页面 -->
+    <template id="datasets-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>数据集管理</h2>
+            </div>
+            <div class="col-auto">
+                <div class="btn-group" role="group">
+                    <button class="btn btn-primary" id="add-dataset-btn">上传ZIP数据集</button>
+                    <button class="btn btn-success" id="import-local-dataset-btn">服务器数据集</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="alert alert-info alert-dismissible fade show mb-4" role="alert">
+            <strong>提示：</strong> 对于大型数据集（超过500MB），建议先解压到服务器中的<code>datasets_import</code> 目录，然后使用“选择服务器数据集文件夹”功能。这样可以避免网页上传大文件导致的长时间等待。
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>描述</th>
+                        <th>类别数</th>
+                        <th>训练图像</th>
+                        <th>验证图像</th>
+                        <th>测试图像</th>
+                        <th>状态</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="datasets-table-body">
+                    <!-- 数据集列表将通过JavaScript动态加载 -->
+                </tbody>
+            </table>
+        </div>
+    </template>
+
+    <!-- 模型管理页面 -->
+    <template id="models-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>模型管理</h2>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary" id="add-model-btn">添加模型</button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>描述</th>
+                        <th>类型</th>
+                        <th>任务</th>
+                        <th>来源</th>
+                        <th>创建时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="models-table-body">
+                    <!-- 模型列表将通过JavaScript动态加载 -->
+                </tbody>
+            </table>
+        </div>
+    </template>
+
+    <!-- 训练管理页面 -->
+    <template id="training-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>训练管理</h2>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary" id="add-training-btn">创建训练任务</button>
+            </div>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>名称</th>
+                        <th>数据集</th>
+                        <th>模型</th>
+                        <th>状态</th>
+                        <th>开始时间</th>
+                        <th>结束时间</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="training-table-body">
+                    <!-- 训练任务列表将通过JavaScript动态加载 -->
+                </tbody>
+            </table>
+        </div>
+    </template>
+
+    <!-- 验证功能页面 -->
+    <template id="detection-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>验证功能</h2>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-body">
+                <form id="detection-form">
+                    <div class="mb-3">
+                        <label for="model-select" class="form-label">选择模型</label>
+                        <select class="form-select" id="model-select" required>
+                            <option value="">请选择模型</option>
+                            <!-- 模型选项将通过JavaScript动态加载 -->
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label for="detection-file" class="form-label">上传图片或视频</label>
+                        <input class="form-control" type="file" id="detection-file" accept="image/*,video/*" required>
+                    </div>
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label for="conf-threshold" class="form-label">置信度阈值</label>
+                            <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.25" id="conf-threshold">
+                            <div class="text-center"><span id="conf-value">0.25</span></div>
+                        </div>
+                        <div class="col">
+                            <label for="iou-threshold" class="form-label">IoU阈值</label>
+                            <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.45" id="iou-threshold">
+                            <div class="text-center"><span id="iou-value">0.45</span></div>
+                        </div>
+                    </div>
+                    <button type="submit" class="btn btn-primary">开始检测</button>
+                </form>
+            </div>
+        </div>
+        <div class="mt-4" id="detection-result" style="display: none;">
+            <h3>检测结果</h3>
+            <div class="text-center">
+                <div id="result-container"></div>
+            </div>
+        </div>
+    </template>
+
+    <!-- 添加数据集模态框内容 -->
+    <template id="add-dataset-template">
+        <form id="add-dataset-form">
+            <div class="mb-3">
+                <label for="dataset-name" class="form-label">数据集名称</label>
+                <input type="text" class="form-control" id="dataset-name" required>
+            </div>
+            <div class="mb-3">
+                <label for="dataset-description" class="form-label">描述</label>
+                <textarea class="form-control" id="dataset-description" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+                <label for="dataset-file" class="form-label">上传数据集 (ZIP格式)</label>
+                <input class="form-control" type="file" id="dataset-file" accept=".zip" required>
+                <div class="form-text">
+                    <strong>数据集结构要求：</strong>
+                    <ul class="mt-2">
+                        <li><code>train/images/</code> - 训练图像目录</li>
+                        <li><code>val/images/</code> - 验证图像目录</li>
+                        <li><code>test/images/</code> - 测试图像目录</li>
+                        <li><code>classes.txt</code> - 类别列表文件（每行一个类别名称）</li>
+                    </ul>
+                    <p class="small text-muted">如果缺少这些文件或目录，系统将尝试自动创建，但可能会影响训练效果。</p>
+                </div>
+            </div>
+
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" id="split-dataset-enabled">
+                <label class="form-check-label" for="split-dataset-enabled">自动分割数据集</label>
+                <div class="form-text">启用后，将自动将数据集分割为训练集、验证集和测试集</div>
+            </div>
+
+            <div id="split-options" style="display: none;">
+                <div class="card mt-3 mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">数据集分割设置</h5>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="train-ratio" class="form-label">训练集比例: <span id="train-ratio-value">70%</span></label>
+                                <input type="range" class="form-range" min="0.5" max="0.9" step="0.05" value="0.7" id="train-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="val-ratio" class="form-label">验证集比例: <span id="val-ratio-value">15%</span></label>
+                                <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="val-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="test-ratio" class="form-label">测试集比例: <span id="test-ratio-value">15%</span></label>
+                                <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="test-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col">
+                                <label for="random-seed" class="form-label">随机种子</label>
+                                <input type="number" class="form-control" id="random-seed" value="42">
+                                <div class="form-text">设置随机种子以确保分割结果可重现</div>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-warning mt-3">
+                            <strong>注意：</strong> 三个比例的总和必须为100%。当您调整一个比例时，其他比例将自动调整以保持总和为100%。
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="progress-container" style="display: none;">
+                <div class="mb-2 d-flex justify-content-between">
+                    <div class="progress-status">准备上传...</div>
+                    <button type="button" class="btn btn-sm btn-danger cancel-upload" style="display: none;">取消上传</button>
+                </div>
+                <div class="progress mb-2">
+                    <div class="progress-bar" role="progressbar" style="width: 0%">0%</div>
+                </div>
+                <div class="progress-details small text-muted"></div>
+            </div>
+        </form>
+    </template>
+
+    <!-- 服务器数据集模态框内容 -->
+    <template id="import-local-dataset-template">
+        <form id="import-local-dataset-form">
+            <div class="mb-3">
+                <label for="local-dataset-name" class="form-label">数据集名称</label>
+                <input type="text" class="form-control" id="local-dataset-name" required>
+            </div>
+            <div class="mb-3">
+                <label for="local-dataset-description" class="form-label">描述</label>
+                <textarea class="form-control" id="local-dataset-description" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+                <label for="local-dataset-dir" class="form-label">选择服务器数据集文件夹</label>
+                <div class="input-group">
+                    <input type="text" class="form-control" id="local-dataset-dir-path" placeholder="请选择数据集文件夹" readonly required>
+                    <button class="btn btn-outline-secondary" type="button" id="browse-dataset-dir-btn">浏览...</button>
+                    <button class="btn btn-outline-secondary" type="button" id="validate-dataset-dir-btn">验证</button>
+                </div>
+                <div class="form-text">选择 datasets_import 目录下的数据集文件夹，验证是可选的，不验证的数据集将标记为“未验证”</div>
+                <div id="local-dataset-info" class="mt-3" style="display: none;">
+                    <div class="card">
+                        <div class="card-body">
+                            <h5 class="card-title">数据集信息</h5>
+                            <div class="mb-2">
+                                <strong>训练图像：</strong> <span id="train-images-count">0</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>验证图像：</strong> <span id="val-images-count">0</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>测试图像：</strong> <span id="test-images-count">0</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>类别数量：</strong> <span id="classes-count">0</span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>类别列表：</strong> <span id="classes-list"></span>
+                            </div>
+                            <div class="mb-2">
+                                <strong>目录结构：</strong> <span id="structure-valid" class="badge bg-success">有效</span>
+                                <span id="structure-invalid" class="badge bg-danger" style="display: none;">无效</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-text">
+                    <strong>数据集结构要求：</strong>
+                    <ul class="mt-2">
+                        <li><code>train/images/</code> - 训练图像目录</li>
+                        <li><code>val/images/</code> - 验证图像目录</li>
+                        <li><code>test/images/</code> - 测试图像目录</li>
+                        <li><code>classes.txt</code> - 类别列表文件（每行一个类别名称）</li>
+                    </ul>
+                    <p class="small text-muted">如果缺少这些文件或目录，系统将尝试自动创建，但可能会影响训练效果。</p>
+                </div>
+            </div>
+
+            <div class="mb-3 form-check">
+                <input type="checkbox" class="form-check-input" id="local-split-dataset-enabled">
+                <label class="form-check-label" for="local-split-dataset-enabled">自动分割数据集</label>
+                <div class="form-text">启用后，将自动将数据集分割为训练集、验证集和测试集</div>
+            </div>
+
+            <div id="local-split-options" style="display: none;">
+                <div class="card mt-3 mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">数据集分割设置</h5>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="local-train-ratio" class="form-label">训练集比例: <span id="local-train-ratio-value">70%</span></label>
+                                <input type="range" class="form-range" min="0.5" max="0.9" step="0.05" value="0.7" id="local-train-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="local-val-ratio" class="form-label">验证集比例: <span id="local-val-ratio-value">15%</span></label>
+                                <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="local-val-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="local-test-ratio" class="form-label">测试集比例: <span id="local-test-ratio-value">15%</span></label>
+                                <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="local-test-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col">
+                                <label for="local-random-seed" class="form-label">随机种子</label>
+                                <input type="number" class="form-control" id="local-random-seed" value="42">
+                                <div class="form-text">设置随机种子以确保分割结果可重现</div>
+                            </div>
+                        </div>
+
+                        <div class="alert alert-warning mt-3">
+                            <strong>注意：</strong> 三个比例的总和必须为100%。当您调整一个比例时，其他比例将自动调整以保持总和为100%。
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="alert alert-info">
+                <strong>提示：</strong> 对于大型数据集，建议先保存至服务器datasets_import目录下，避免通过网页上传大文件。
+            </div>
+        </form>
+    </template>
+
+    <!-- 数据集分割模态框内容 -->
+    <template id="split-dataset-template">
+        <form id="split-dataset-form">
+            <div class="alert alert-info">
+                <strong>提示：</strong> 分割操作将从训练集中随机选择一部分图像作为测试集。此操作不可逆，请确保已备份数据集。
+            </div>
+
+            <div class="mb-3">
+                <label for="split-mode" class="form-label">分割模式</label>
+                <select class="form-select" id="split-mode">
+                    <option value="from_train">从训练集分割</option>
+                    <option value="redistribute">重新分配所有图像</option>
+                </select>
+                <div class="form-text">
+                    <ul>
+                        <li><strong>从训练集分割</strong>: 从现有训练集中分割出测试集，保留验证集不变</li>
+                        <li><strong>重新分配所有图像</strong>: 将所有图像重新分配到训练集、验证集和测试集</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card mt-3 mb-3">
+                <div class="card-body">
+                    <h5 class="card-title">数据集分割设置</h5>
+
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label for="split-train-ratio" class="form-label">训练集比例: <span id="split-train-ratio-value">70%</span></label>
+                            <input type="range" class="form-range" min="0.5" max="0.9" step="0.05" value="0.7" id="split-train-ratio">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label for="split-val-ratio" class="form-label">验证集比例: <span id="split-val-ratio-value">15%</span></label>
+                            <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="split-val-ratio">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col">
+                            <label for="split-test-ratio" class="form-label">测试集比例: <span id="split-test-ratio-value">15%</span></label>
+                            <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="split-test-ratio">
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col">
+                            <label for="split-random-seed" class="form-label">随机种子</label>
+                            <input type="number" class="form-control" id="split-random-seed" value="42">
+                            <div class="form-text">设置随机种子以确保分割结果可重现</div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-warning mt-3">
+                        <strong>注意：</strong> 三个比例的总和必须为100%。当您调整一个比例时，其他比例将自动调整以保持总和为100%。
+                    </div>
+                </div>
+            </div>
+        </form>
+    </template>
+
+    <!-- 添加模型模态框内容 -->
+    <template id="add-model-template">
+        <form id="add-model-form">
+            <div class="mb-3">
+                <label for="model-name" class="form-label">模型名称</label>
+                <input type="text" class="form-control" id="model-name" required>
+            </div>
+            <div class="mb-3">
+                <label for="model-description" class="form-label">描述</label>
+                <textarea class="form-control" id="model-description" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+                <label for="model-type" class="form-label">模型类型</label>
+                <select class="form-select" id="model-type" required>
+                    <option value="yolov8n">YOLOv8n</option>
+                    <option value="yolov8s">YOLOv8s</option>
+                    <option value="yolov8m">YOLOv8m</option>
+                    <option value="yolov8l">YOLOv8l</option>
+                    <option value="yolov8x">YOLOv8x</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="model-task" class="form-label">任务类型</label>
+                <select class="form-select" id="model-task" required>
+                    <option value="detect">检测 (Detection)</option>
+                    <option value="segment">分割 (Segmentation)</option>
+                    <option value="classify">分类 (Classification)</option>
+                    <option value="pose">姿态估计 (Pose)</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="model-file" class="form-label">上传模型文件 (.pt格式)</label>
+                <input class="form-control" type="file" id="model-file" accept=".pt" required>
+            </div>
+            <div class="progress" style="display: none;">
+                <div class="progress-bar" role="progressbar" style="width: 0%"></div>
+            </div>
+        </form>
+    </template>
+
+    <!-- 创建训练任务模态框内容 -->
+    <template id="add-training-template">
+        <form id="add-training-form">
+            <div class="mb-3">
+                <label for="training-name" class="form-label">任务名称</label>
+                <input type="text" class="form-control" id="training-name" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">数据集选择</label>
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="dataset-source" id="dataset-source-registered" value="registered" checked>
+                            <label class="form-check-label" for="dataset-source-registered">
+                                使用已注册数据集
+                            </label>
+                        </div>
+                        <div id="registered-dataset-container" class="mb-3">
+                            <select class="form-select" id="training-dataset">
+                                <option value="">请选择数据集</option>
+                                <!-- 数据集选项将通过JavaScript动态加载 -->
+                            </select>
+                        </div>
+
+
+                    </div>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="training-model" class="form-label">选择预训练模型 (可选)</label>
+                <select class="form-select" id="training-model">
+                    <option value="">无 (从头开始训练)</option>
+                    <!-- 模型选项将通过JavaScript动态加载 -->
+                </select>
+            </div>
+            <div class="mb-3">
+                <label for="training-epochs" class="form-label">训练轮数</label>
+                <input type="number" class="form-control" id="training-epochs" value="100" min="1" required>
+            </div>
+            <div class="mb-3">
+                <label for="training-batch-size" class="form-label">批次大小</label>
+                <input type="number" class="form-control" id="training-batch-size" value="16" min="1" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">图像大小设置</label>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="form-check mb-3">
+                            <input class="form-check-input" type="checkbox" id="enable-rect-training">
+                            <label class="form-check-label" for="enable-rect-training">
+                                启用矩形训练模式（适用于非1:1比例图像）
+                            </label>
+                        </div>
+
+                        <div id="square-size-container">
+                            <label for="training-img-size" class="form-label">图像大小（正方形）</label>
+                            <input type="number" class="form-control" id="training-img-size" value="640" min="32" step="32" required>
+                        </div>
+
+                        <div id="rect-size-container" style="display: none;">
+                            <div class="row">
+                                <div class="col">
+                                    <label for="training-img-width" class="form-label">图像宽度</label>
+                                    <input type="number" class="form-control" id="training-img-width" value="640" min="32" step="32">
+                                </div>
+                                <div class="col">
+                                    <label for="training-img-height" class="form-label">图像高度</label>
+                                    <input type="number" class="form-control" id="training-img-height" value="480" min="32" step="32">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label for="training-lr" class="form-label">学习率</label>
+                <input type="number" class="form-control" id="training-lr" value="0.01" min="0.0001" step="0.0001" required>
+            </div>
+
+            <!-- 硬件配置部分 -->
+            <div class="mb-3">
+                <label class="form-label">硬件配置</label>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="device-type" class="form-label">设备类型</label>
+                            <select class="form-select" id="device-type">
+                                <option value="cpu">CPU</option>
+                                <option value="gpu">GPU</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3 cpu-option">
+                            <label for="cpu-cores" class="form-label">CPU 核心数</label>
+                            <input type="number" class="form-control" id="cpu-cores" value="4" min="1">
+                        </div>
+
+                        <div class="mb-3 gpu-option" style="display: none;">
+                            <button type="button" class="btn btn-info mb-3" id="get-gpu-info">获取GPU信息</button>
+
+                            <div id="gpu-info" style="display: none; background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                                <div class="mb-3">
+                                    <label for="gpu-select" class="form-label">选择GPU:</label>
+                                    <select class="form-select" id="gpu-select"></select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="gpu-memory" class="form-label">GPU显存限制 (MB):</label>
+                                    <input type="number" class="form-control" id="gpu-memory" value="4096" min="1024" step="1024">
+                                    <div id="memory-info" class="mt-2 small"></div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <button type="button" class="btn btn-sm btn-secondary" id="validate-memory">验证显存设置</button>
+                                    <div id="validation-result" class="mt-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="memory" class="form-label">内存 (MB)</label>
+                            <input type="number" class="form-control" id="memory" value="8192" min="1024" step="1024">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </form>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- 轮询管理器，用于管理API轮询 -->
+    <script src="js/polling_manager.js"></script>
+    <script src="js/main.js"></script>
+
+    <!-- 引入模态框 -->
+    <div id="modals-container"></div>
+    <script>
+        // 加载模态框
+        fetch('/static/modals.html')
+            .then(response => response.text())
+            .then(html => {
+                document.getElementById('modals-container').innerHTML = html;
+            })
+            .catch(error => {
+                console.error('Error loading modals.html:', error);
+            });
+    </script>
+</body>
+</html>
