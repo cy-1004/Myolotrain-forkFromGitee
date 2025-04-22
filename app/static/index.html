@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/alert-styles.css">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -28,6 +29,12 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-page="detection">模型测试</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="opencv">图像处理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="video">视频处理</a>
                     </li>
                 </ul>
             </div>
@@ -206,6 +213,820 @@
                 <div id="result-container"></div>
             </div>
         </div>
+    </template>
+
+    <!-- OpenCV 图像处理页面 -->
+    <template id="opencv-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>OpenCV 图像处理工具</h2>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs" id="opencv-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="preprocess-tab" data-bs-toggle="tab" data-bs-target="#preprocess" type="button" role="tab" aria-controls="preprocess" aria-selected="true">图像预处理</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="analyze-tab" data-bs-toggle="tab" data-bs-target="#analyze" type="button" role="tab" aria-controls="analyze" aria-selected="false">图像分析</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="augment-tab" data-bs-toggle="tab" data-bs-target="#augment" type="button" role="tab" aria-controls="augment" aria-selected="false">数据增强</button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content" id="opencv-tabs-content">
+                    <!-- 图像预处理 -->
+                    <div class="tab-pane fade show active" id="preprocess" role="tabpanel" aria-labelledby="preprocess-tab">
+                        <h5 class="card-title">图像预处理</h5>
+                        <p class="card-text">上传图像并应用各种预处理操作。</p>
+
+                        <form id="preprocess-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="image-upload" class="form-label">选择图像</label>
+                                <input class="form-control" type="file" id="image-upload" name="image" accept="image/*">
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">预处理操作</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="resize-check">
+                                    <label class="form-check-label" for="resize-check">调整大小</label>
+                                </div>
+                                <div class="row mb-3" id="resize-options" style="display: none;">
+                                    <div class="col-md-6">
+                                        <label for="resize-width" class="form-label">宽度</label>
+                                        <input type="number" class="form-control" id="resize-width" value="640">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="resize-height" class="form-label">高度</label>
+                                        <input type="number" class="form-control" id="resize-height" value="480">
+                                    </div>
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="denoise-check">
+                                    <label class="form-check-label" for="denoise-check">去噪</label>
+                                </div>
+                                <div class="mb-3" id="denoise-options" style="display: none;">
+                                    <label for="denoise-strength" class="form-label">强度: <span id="denoise-strength-value">5</span></label>
+                                    <input type="range" class="form-range" id="denoise-strength" min="1" max="10" value="5">
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="brightness-contrast-check">
+                                    <label class="form-check-label" for="brightness-contrast-check">亮度和对比度</label>
+                                </div>
+                                <div class="mb-3" id="brightness-contrast-options" style="display: none;">
+                                    <label for="brightness" class="form-label">亮度: <span id="brightness-value">0</span></label>
+                                    <input type="range" class="form-range" id="brightness" min="-100" max="100" value="0">
+
+                                    <label for="contrast" class="form-label">对比度: <span id="contrast-value">1.0</span></label>
+                                    <input type="range" class="form-range" id="contrast" min="0" max="30" value="10" step="1">
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="sharpen-check">
+                                    <label class="form-check-label" for="sharpen-check">锐化</label>
+                                </div>
+                                <div class="mb-3" id="sharpen-options" style="display: none;">
+                                    <label for="sharpen-amount" class="form-label">强度: <span id="sharpen-amount-value">1.0</span></label>
+                                    <input type="range" class="form-range" id="sharpen-amount" min="0" max="50" value="10" step="1">
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="process-image-btn">处理图像</button>
+                        </form>
+
+                        <div class="mt-4" id="preprocess-result" style="display: none;">
+                            <h5>处理结果</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <h6>原始图像</h6>
+                                    <img id="original-image" class="img-fluid" src="" alt="原始图像">
+                                </div>
+                                <div class="col-md-6">
+                                    <h6>处理后图像</h6>
+                                    <img id="processed-image" class="img-fluid" src="" alt="处理后图像">
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <a id="download-processed" href="#" class="btn btn-success" download>下载处理后图像</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 图像分析 -->
+                    <div class="tab-pane fade" id="analyze" role="tabpanel" aria-labelledby="analyze-tab">
+                        <h5 class="card-title">图像分析</h5>
+                        <p class="card-text">上传图像进行质量分析。</p>
+
+                        <form id="analyze-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="analyze-image-upload" class="form-label">选择图像</label>
+                                <input class="form-control" type="file" id="analyze-image-upload" name="image" accept="image/*">
+                            </div>
+
+                            <button type="submit" class="btn btn-primary">分析图像</button>
+                        </form>
+
+                        <div class="mt-4" id="analyze-result" style="display: none;">
+                            <h5>分析结果</h5>
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <img id="analyzed-image" class="img-fluid" src="" alt="分析图像">
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-body">
+                                            <h6 class="card-title">图像质量报告</h6>
+                                            <div id="blur-result">
+                                                <p><strong>模糊检测:</strong> <span id="blur-status"></span></p>
+                                                <p>清晰度得分: <span id="blur-score"></span></p>
+                                            </div>
+                                            <div id="exposure-result">
+                                                <p><strong>曝光检测:</strong></p>
+                                                <p>过度曝光: <span id="overexposed-status"></span></p>
+                                                <p>曝光不足: <span id="underexposed-status"></span></p>
+                                            </div>
+                                            <div id="recommendations">
+                                                <h6>建议:</h6>
+                                                <ul id="recommendation-list"></ul>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 数据增强 -->
+                    <div class="tab-pane fade" id="augment" role="tabpanel" aria-labelledby="augment-tab">
+                        <h5 class="card-title">数据增强</h5>
+                        <p class="card-text">选择数据集目录进行增强。</p>
+
+                        <form id="augment-form">
+                            <div class="mb-3">
+                                <label for="dataset-path" class="form-label">数据集路径</label>
+                                <select class="form-select" id="dataset-path" name="dataset_path">
+                                    <option value="">选择数据集...</option>
+                                    <!-- 数据集选项将通过 JavaScript 动态加载 -->
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="multiplier" class="form-label">扩增倍数</label>
+                                <input type="number" class="form-control" id="multiplier" name="multiplier" value="2" min="1" max="10">
+                                <div class="form-text">原始数据集将扩增为原来的几倍</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">增强选项</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="flip-check" checked>
+                                    <label class="form-check-label" for="flip-check">翻转 (水平和垂直)</label>
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="rotate-check" checked>
+                                    <label class="form-check-label" for="rotate-check">旋转</label>
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="noise-check">
+                                    <label class="form-check-label" for="noise-check">添加噪声</label>
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="brightness-contrast-aug-check" checked>
+                                    <label class="form-check-label" for="brightness-contrast-aug-check">亮度和对比度变化</label>
+                                </div>
+
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="perspective-check">
+                                    <label class="form-check-label" for="perspective-check">透视变换</label>
+                                </div>
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="augment-btn">开始增强</button>
+                        </form>
+
+                        <div class="mt-4" id="augment-result" style="display: none;">
+                            <div class="alert alert-info">
+                                <h5>增强任务已启动</h5>
+                                <p>任务 ID: <span id="augmentation-id"></span></p>
+                                <p>输出目录: <span id="output-dir"></span></p>
+                                <div class="progress mt-2">
+                                    <div id="augment-progress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <div id="augment-status" class="mt-3">
+                                <p>状态: <span id="augment-status-text">进行中...</span></p>
+                            </div>
+
+                            <div id="augment-stats" class="mt-3" style="display: none;">
+                                <h6>增强统计</h6>
+                                <ul>
+                                    <li>原始图像数量: <span id="original-images-count"></span></li>
+                                    <li>增强图像数量: <span id="augmented-images-count"></span></li>
+                                    <li>总图像数量: <span id="total-images-count"></span></li>
+                                </ul>
+                                <h6>应用的增强</h6>
+                                <ul id="applied-augmentations"></ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- OpenCV加载覆盖层已完全移除 -->
+    </template>
+
+    <!-- 视频处理页面 -->
+    <template id="video-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>视频处理工具</h2>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header">
+                <ul class="nav nav-tabs card-header-tabs" id="video-tabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="extract-frames-tab" data-bs-toggle="tab" data-bs-target="#extract-frames" type="button" role="tab" aria-controls="extract-frames" aria-selected="true">提取帧</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="detect-scenes-tab" data-bs-toggle="tab" data-bs-target="#detect-scenes" type="button" role="tab" aria-controls="detect-scenes" aria-selected="false">场景检测</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="detect-motion-tab" data-bs-toggle="tab" data-bs-target="#detect-motion" type="button" role="tab" aria-controls="detect-motion" aria-selected="false">运动检测</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="real-time-detection-tab" data-bs-toggle="tab" data-bs-target="#real-time-detection" type="button" role="tab" aria-controls="real-time-detection" aria-selected="false">实时检测</button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content" id="video-tabs-content">
+                    <!-- 提取帧 -->
+                    <div class="tab-pane fade show active" id="extract-frames" role="tabpanel" aria-labelledby="extract-frames-tab">
+                        <h5 class="card-title">从视频中提取帧</h5>
+                        <p class="card-text">上传视频并按照指定间隔提取帧。</p>
+
+                        <form id="extract-frames-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="video-upload" class="form-label">选择视频</label>
+                                <input class="form-control" type="file" id="video-upload" name="video" accept="video/*">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="interval" class="form-label">提取间隔 (秒)</label>
+                                <input type="number" class="form-control" id="interval" name="interval" value="1.0" min="0.1" step="0.1">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="max-frames" class="form-label">最大帧数 (可选)</label>
+                                <input type="number" class="form-control" id="max-frames" name="max_frames" min="1">
+                            </div>
+
+                            <div class="mb-3">
+                                <div class="form-check">
+                                    <input class="form-check-input" type="checkbox" id="resize-frames-check">
+                                    <label class="form-check-label" for="resize-frames-check">调整帧大小</label>
+                                </div>
+                                <div class="row mt-2" id="resize-frames-options" style="display: none;">
+                                    <div class="col-md-6">
+                                        <label for="resize-width" class="form-label">宽度</label>
+                                        <input type="number" class="form-control" id="resize-width" name="resize_width" value="640">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <label for="resize-height" class="form-label">高度</label>
+                                        <input type="number" class="form-control" id="resize-height" name="resize_height" value="480">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="start-time" class="form-label">开始时间 (秒)</label>
+                                <input type="number" class="form-control" id="start-time" name="start_time" value="0.0" min="0" step="0.1">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="end-time" class="form-label">结束时间 (秒, 可选)</label>
+                                <input type="number" class="form-control" id="end-time" name="end_time" min="0" step="0.1">
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="extract-frames-btn">提取帧</button>
+                        </form>
+
+                        <div class="mt-4" id="extract-frames-result" style="display: none;">
+                            <h5>提取结果</h5>
+                            <div class="alert alert-info">
+                                <p>共提取了 <span id="extracted-frames-count">0</span> 帧</p>
+                                <p>提取ID: <span id="extraction-id"></span></p>
+                            </div>
+
+                            <div class="row" id="frames-gallery">
+                                <!-- 帧图像将在这里显示 -->
+                            </div>
+
+                            <div class="mt-3">
+                                <button class="btn btn-success" id="download-all-frames">下载所有帧</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 场景检测 -->
+                    <div class="tab-pane fade" id="detect-scenes" role="tabpanel" aria-labelledby="detect-scenes-tab">
+                        <h5 class="card-title">视频场景检测</h5>
+                        <p class="card-text">上传视频进行场景变化检测。</p>
+
+                        <form id="detect-scenes-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="scenes-video-upload" class="form-label">选择视频</label>
+                                <input class="form-control" type="file" id="scenes-video-upload" name="video" accept="video/*">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="scene-threshold" class="form-label">场景变化阈值: <span id="scene-threshold-value">30.0</span></label>
+                                <input type="range" class="form-range" id="scene-threshold" name="threshold" min="5" max="100" step="1" value="30">
+                                <div class="form-text">值越小越敏感，会检测到更多场景变化</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="min-scene-length" class="form-label">最小场景长度 (帧数)</label>
+                                <input type="number" class="form-control" id="min-scene-length" name="min_scene_length" value="15" min="1">
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="detect-scenes-btn">检测场景</button>
+                        </form>
+
+                        <div class="mt-4" id="detect-scenes-result" style="display: none;">
+                            <h5>检测结果</h5>
+                            <div class="alert alert-info">
+                                <p>共检测到 <span id="scene-count">0</span> 个场景</p>
+                                <p>任务ID: <span id="scene-task-id"></span></p>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>场景编号</th>
+                                            <th>开始时间</th>
+                                            <th>结束时间</th>
+                                            <th>持续时间</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="scenes-table-body">
+                                        <!-- 场景列表将在这里显示 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 运动检测 -->
+                    <div class="tab-pane fade" id="detect-motion" role="tabpanel" aria-labelledby="detect-motion-tab">
+                        <h5 class="card-title">视频运动检测</h5>
+                        <p class="card-text">上传视频进行运动检测。</p>
+
+                        <form id="detect-motion-form" enctype="multipart/form-data">
+                            <div class="mb-3">
+                                <label for="motion-video-upload" class="form-label">选择视频</label>
+                                <input class="form-control" type="file" id="motion-video-upload" name="video" accept="video/*">
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="motion-sensitivity" class="form-label">运动检测灵敏度: <span id="motion-sensitivity-value">20.0</span></label>
+                                <input type="range" class="form-range" id="motion-sensitivity" name="sensitivity" min="5" max="100" step="1" value="20">
+                                <div class="form-text">值越小越敏感，会检测到更多运动</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="blur-size" class="form-label">高斯模糊核大小</label>
+                                <select class="form-select" id="blur-size" name="blur_size">
+                                    <option value="3">3x3</option>
+                                    <option value="5">5x5</option>
+                                    <option value="7">7x7</option>
+                                    <option value="9">9x9</option>
+                                    <option value="11">11x11</option>
+                                    <option value="13">13x13</option>
+                                    <option value="15">15x15</option>
+                                    <option value="17">17x17</option>
+                                    <option value="19">19x19</option>
+                                    <option value="21" selected>21x21</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label for="min-area" class="form-label">最小运动区域面积 (像素)</label>
+                                <input type="number" class="form-control" id="min-area" name="min_area" value="500" min="1">
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="detect-motion-btn">检测运动</button>
+                        </form>
+
+                        <div class="mt-4" id="detect-motion-result" style="display: none;">
+                            <h5>检测结果</h5>
+                            <div class="alert alert-info">
+                                <p>共检测到 <span id="motion-frame-count">0</span> 帧有运动</p>
+                                <p>任务ID: <span id="motion-task-id"></span></p>
+                            </div>
+
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>帧编号</th>
+                                            <th>时间戳</th>
+                                            <th>运动区域数</th>
+                                            <th>操作</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="motion-table-body">
+                                        <!-- 运动帧列表将在这里显示 -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 实时检测 -->
+                    <div class="tab-pane fade" id="real-time-detection" role="tabpanel" aria-labelledby="real-time-detection-tab">
+                        <h5 class="card-title">实时目标检测</h5>
+                        <p class="card-text">使用模型对视频或摄像头进行实时目标检测。</p>
+
+                        <form id="real-time-detection-form">
+                            <div class="mb-3">
+                                <label for="rt-model-select" class="form-label">选择模型</label>
+                                <select class="form-select" id="rt-model-select" required>
+                                    <option value="">请选择模型</option>
+                                    <!-- 模型选项将通过JavaScript动态加载 -->
+                                </select>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label">视频源</label>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="video-source" id="source-webcam" value="webcam" checked>
+                                    <label class="form-check-label" for="source-webcam">
+                                        摄像头
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="video-source" id="source-file" value="file">
+                                    <label class="form-check-label" for="source-file">
+                                        视频文件
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="mb-3" id="webcam-options">
+                                <label for="webcam-select" class="form-label">选择摄像头</label>
+                                <select class="form-select" id="webcam-select">
+                                    <option value="">加载中...</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3" id="video-file-options" style="display: none;">
+                                <label for="rt-video-upload" class="form-label">选择视频文件</label>
+                                <input class="form-control" type="file" id="rt-video-upload" accept="video/*">
+                            </div>
+
+                            <div class="row mb-3">
+                                <div class="col">
+                                    <label for="rt-conf-threshold" class="form-label">置信度阈值: <span id="rt-conf-value">0.25</span></label>
+                                    <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.25" id="rt-conf-threshold">
+                                </div>
+                                <div class="col">
+                                    <label for="rt-iou-threshold" class="form-label">IoU阈值: <span id="rt-iou-value">0.45</span></label>
+                                    <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.45" id="rt-iou-threshold">
+                                </div>
+                            </div>
+
+                            <!-- 目标物体监控设置 -->
+                            <div class="card mb-3">
+                                <div class="card-header bg-warning text-white">
+                                    <h5 class="card-title mb-0">目标物体监控</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="target-objects" class="form-label">输入监控目标（如：car,person）</label>
+                                        <div class="input-group">
+                                            <input type="text" class="form-control" id="target-objects" placeholder="输入目标类别，多个用逗号分隔">
+                                            <button class="btn btn-outline-primary" type="button" id="add-target-btn">添加</button>
+                                        </div>
+                                        <div class="form-text">输入您想要监控的目标物体类别，当检测到这些物体时系统将发出警报</div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">当前监控目标</label>
+                                        <div id="target-list" class="d-flex flex-wrap gap-2">
+                                            <span class="badge bg-secondary">暂无监控目标</span>
+                                        </div>
+                                    </div>
+
+                                    <!-- 报警区域设置 -->
+                                    <div class="mb-3">
+                                        <label class="form-label">报警区域设置</label>
+                                        <div class="d-flex align-items-center mb-2">
+                                            <div class="form-check me-3">
+                                                <input class="form-check-input" type="checkbox" id="enable-alert-zone" value="1">
+                                                <label class="form-check-label" for="enable-alert-zone">启用报警区域</label>
+                                            </div>
+                                            <button type="button" class="btn btn-sm btn-outline-primary me-2" id="draw-zone-btn">绘制区域</button>
+                                            <button type="button" class="btn btn-sm btn-outline-danger me-2" id="clear-zone-btn">清除区域</button>
+                                        </div>
+                                        <div class="form-text">启用后，只有在指定区域内检测到目标物体时才会触发报警</div>
+                                    </div>
+
+                                    <!-- 轨迹记录和预测设置 -->
+                                    <div class="mb-3">
+                                        <label class="form-label">轨迹记录和预测</label>
+                                        <div class="d-flex align-items-center mb-2">
+                                            <div class="form-check me-3">
+                                                <input class="form-check-input" type="checkbox" id="enable-trajectory" value="1">
+                                                <label class="form-check-label" for="enable-trajectory">启用轨迹记录和预测</label>
+                                            </div>
+                                        </div>
+
+                                        <div id="trajectory-settings" class="mb-3" style="display: none;">
+                                            <div class="row g-2 mb-2">
+                                                <div class="col-md-6">
+                                                    <label for="trajectory-length" class="form-label">轨迹长度</label>
+                                                    <input type="range" class="form-range" id="trajectory-length" min="5" max="50" value="20">
+                                                    <div class="text-muted small">记录点数: <span id="trajectory-length-value">20</span></div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <label for="prediction-steps" class="form-label">预测步数</label>
+                                                    <input type="range" class="form-range" id="prediction-steps" min="1" max="10" value="3">
+                                                    <div class="text-muted small">预测点数: <span id="prediction-steps-value">3</span></div>
+                                                </div>
+                                            </div>
+                                            <div class="row g-2">
+                                                <div class="col-md-6">
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="show-trajectory-line" checked>
+                                                        <label class="form-check-label" for="show-trajectory-line">显示轨迹线</label>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="checkbox" id="show-prediction-line" checked>
+                                                        <label class="form-check-label" for="show-prediction-line">显示预测线</label>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <div class="form-text">启用后，系统将记录目标物体的运动轨迹并预测未来位置</div>
+                                    </div>
+
+                                    <div class="mb-3">
+                                        <label class="form-label">报警设置</label>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="visual-alert-check" checked>
+                                            <label class="form-check-label" for="visual-alert-check">视觉报警</label>
+                                        </div>
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" id="sound-alert-check" checked>
+                                            <label class="form-check-label" for="sound-alert-check">声音报警</label>
+                                        </div>
+                                        <div class="mb-2">
+                                            <label for="alert-threshold" class="form-label">报警置信度阈值: <span id="alert-threshold-value">0.5</span></label>
+                                            <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.5" id="alert-threshold">
+                                        </div>
+                                        <div class="mb-2">
+                                            <label for="alert-cooldown" class="form-label">报警冷却时间: <span id="alert-cooldown-value">3</span>秒</label>
+                                            <input type="range" class="form-range" min="1" max="10" step="1" value="3" id="alert-cooldown">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <button type="button" class="btn btn-primary" id="start-detection-btn">开始检测</button>
+                            <button type="button" class="btn btn-danger" id="stop-detection-btn" style="display: none;">停止检测</button>
+                        </form>
+
+                        <div class="mt-4" id="real-time-result">
+                            <!-- 报警声音元素 -->
+                            <audio id="alert-sound" preload="auto" style="display: none;">
+                                <source src="/static/sounds/alert.mp3" type="audio/mpeg">
+                                您的浏览器不支持音频元素。
+                            </audio>
+                            <!-- 状态信息显示区域 - 置于顶部显著位置 -->
+                            <div class="alert alert-info d-flex justify-content-between align-items-center mb-3">
+                                <div>
+                                    <strong>FPS:</strong> <span id="fps-counter" class="badge bg-primary">0</span>
+                                </div>
+                                <div>
+                                    <strong>检测到的目标:</strong> <span id="objects-counter" class="badge bg-success">0</span>
+                                </div>
+                                <div id="detection-status">
+                                    <span class="badge bg-warning">就绪</span>
+                                </div>
+                            </div>
+
+                            <!-- 报警信息区域 -->
+                            <div id="alert-container" class="alert alert-danger mb-3" style="display: none;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                        <strong>警报!</strong> <span id="alert-message">检测到目标物体</span>
+                                    </div>
+                                    <button type="button" class="btn-close" id="close-alert-btn" aria-label="Close"></button>
+                                </div>
+                            </div>
+
+                            <!-- 两栏布局 -->
+                            <div class="row">
+                                <!-- 原始视频窗口 -->
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-primary text-white">
+                                            <h5 class="card-title mb-0">原始视频</h5>
+                                        </div>
+                                        <div class="card-body p-0">
+                                            <div id="video-container" class="position-relative">
+                                                <video id="video-element" width="640" height="480" style="max-width: 100%;"></video>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 检测结果窗口 -->
+                                <div class="col-md-6">
+                                    <div class="card">
+                                        <div class="card-header bg-success text-white">
+                                            <h5 class="card-title mb-0">检测结果</h5>
+                                        </div>
+                                        <div class="card-body p-0">
+                                            <div id="detection-container" class="position-relative">
+                                                <canvas id="detection-canvas" width="640" height="480" style="display: block; max-width: 100%;"></canvas>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 检测对象列表 -->
+                            <div class="card mt-3">
+                                <div class="card-header bg-info text-white">
+                                    <h5 class="card-title mb-0">检测对象列表</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="table-responsive">
+                                        <table class="table table-striped table-hover">
+                                            <thead>
+                                                <tr>
+                                                    <th>类别</th>
+                                                    <th>置信度</th>
+                                                    <th>位置</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody id="detection-results-table">
+                                                <tr>
+                                                    <td colspan="3" class="text-center">暂无检测结果</td>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 报警历史记录和统计分析 -->
+                            <div class="card mt-3">
+                                <div class="card-header bg-warning text-white">
+                                    <ul class="nav nav-tabs card-header-tabs" id="alert-tabs" role="tablist">
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link active text-dark" id="alert-history-tab" data-bs-toggle="tab" data-bs-target="#alert-history" type="button" role="tab" aria-controls="alert-history" aria-selected="true">报警历史</button>
+                                        </li>
+                                        <li class="nav-item" role="presentation">
+                                            <button class="nav-link text-dark" id="alert-stats-tab" data-bs-toggle="tab" data-bs-target="#alert-stats" type="button" role="tab" aria-controls="alert-stats" aria-selected="false">统计分析</button>
+                                        </li>
+                                    </ul>
+                                </div>
+                                <div class="card-body">
+                                    <div class="tab-content" id="alert-tabs-content">
+                                        <!-- 报警历史标签页 -->
+                                        <div class="tab-pane fade show active" id="alert-history" role="tabpanel" aria-labelledby="alert-history-tab">
+                                            <div class="d-flex justify-content-end mb-2">
+                                                <button type="button" class="btn btn-sm btn-outline-warning" id="clear-alerts-btn">清空历史</button>
+                                                <button type="button" class="btn btn-sm btn-outline-primary ms-2" id="export-alerts-btn">导出数据</button>
+                                            </div>
+                                            <div class="table-responsive">
+                                                <table class="table table-striped table-hover">
+                                                    <thead>
+                                                        <tr>
+                                                            <th>时间</th>
+                                                            <th>目标类别</th>
+                                                            <th>置信度</th>
+                                                        </tr>
+                                                    </thead>
+                                                    <tbody id="alert-history-table">
+                                                        <tr>
+                                                            <td colspan="3" class="text-center">暂无报警记录</td>
+                                                        </tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+
+                                        <!-- 统计分析标签页 -->
+                                        <div class="tab-pane fade" id="alert-stats" role="tabpanel" aria-labelledby="alert-stats-tab">
+                                            <div class="row mb-3">
+                                                <div class="col-md-6">
+                                                    <div class="card">
+                                                        <div class="card-header bg-info text-white">
+                                                            <h6 class="card-title mb-0">目标类别分布</h6>
+                                                        </div>
+                                                        <div class="card-body">
+                                                            <canvas id="object-distribution-chart" width="300" height="300"></canvas>
+                                                            <div id="no-distribution-data" class="text-center py-5">暂无数据</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <div class="col-md-6">
+                                                    <div class="card">
+                                                        <div class="card-header bg-info text-white">
+                                                            <h6 class="card-title mb-0">报警频率统计</h6>
+                                                        </div>
+                                                        <div class="card-body">
+                                                            <div class="mb-3">
+                                                                <label for="time-range" class="form-label">时间范围</label>
+                                                                <select class="form-select" id="time-range">
+                                                                    <option value="hour">过去1小时</option>
+                                                                    <option value="today" selected>今天</option>
+                                                                    <option value="week">本周</option>
+                                                                    <option value="all">全部</option>
+                                                                </select>
+                                                            </div>
+                                                            <canvas id="alert-frequency-chart" width="300" height="200"></canvas>
+                                                            <div id="no-frequency-data" class="text-center py-5">暂无数据</div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="row">
+                                                <div class="col-12">
+                                                    <div class="card">
+                                                        <div class="card-header bg-info text-white">
+                                                            <h6 class="card-title mb-0">报警统计数据</h6>
+                                                        </div>
+                                                        <div class="card-body">
+                                                            <div class="row">
+                                                                <div class="col-md-3 mb-3">
+                                                                    <div class="card bg-primary text-white">
+                                                                        <div class="card-body">
+                                                                            <h5 class="card-title">总报警次数</h5>
+                                                                            <p class="card-text fs-2" id="total-alerts-count">0</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-md-3 mb-3">
+                                                                    <div class="card bg-success text-white">
+                                                                        <div class="card-body">
+                                                                            <h5 class="card-title">今日报警次数</h5>
+                                                                            <p class="card-text fs-2" id="today-alerts-count">0</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-md-3 mb-3">
+                                                                    <div class="card bg-warning text-dark">
+                                                                        <div class="card-body">
+                                                                            <h5 class="card-title">目标类别数</h5>
+                                                                            <p class="card-text fs-2" id="unique-targets-count">0</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                                <div class="col-md-3 mb-3">
+                                                                    <div class="card bg-info text-white">
+                                                                        <div class="card-body">
+                                                                            <h5 class="card-title">平均置信度</h5>
+                                                                            <p class="card-text fs-2" id="avg-confidence">0%</p>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- 视频处理加载覆盖层已完全移除 -->
     </template>
 
     <!-- 添加数据集模态框内容 -->
@@ -636,8 +1457,18 @@
     </template>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Chart.js 图表库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
     <!-- 轮询管理器，用于管理API轮询 -->
     <script src="js/polling_manager.js"></script>
+    <!-- 报警声音生成器 -->
+    <script src="js/alert-sound.js"></script>
+    <!-- 报警区域设置 -->
+    <script src="js/alert-zone.js"></script>
+    <!-- 报警统计分析 -->
+    <script src="js/alert-stats.js"></script>
+    <!-- 轨迹记录和预测 -->
+    <script src="js/trajectory.js"></script>
     <script src="js/main.js"></script>
 
     <!-- 引入模态框 -->

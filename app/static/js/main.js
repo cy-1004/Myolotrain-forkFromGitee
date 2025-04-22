@@ -101,7 +101,589 @@ function loadPage(page) {
             loadDetectionForm();
             bindDetectionEvents();
             break;
+        case 'opencv':
+            loadOpenCVPage();
+            bindOpenCVEvents();
+            break;
+        case 'video':
+            loadVideoPage();
+            bindVideoEvents();
+            break;
     }
+}
+
+// ==================== OpenCV 工具 ====================
+
+// 加载 OpenCV 页面
+function loadOpenCVPage() {
+    console.log('Loading OpenCV page...');
+
+    // 加载覆盖层已完全移除
+
+    // 确保所有结果区域也是隐藏的
+    const resultAreas = [
+        'preprocess-result',
+        'analyze-result',
+        'augment-result'
+    ];
+
+    resultAreas.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.style.display = 'none';
+        }
+    });
+
+    // 加载数据集列表（用于数据增强功能）
+    fetch(`${API_URL}/datasets`)
+        .then(response => response.json())
+        .then(data => {
+            console.log('Loaded datasets for OpenCV:', data.length);
+            console.log('Dataset data:', data); // 输出数据集数据以进行调试
+
+            const datasetSelect = document.getElementById('dataset-path');
+            if (datasetSelect) {
+                // 清空现有选项（除了第一个默认选项）
+                while (datasetSelect.options.length > 1) {
+                    datasetSelect.remove(1);
+                }
+
+                // 添加新选项
+                data.forEach(dataset => {
+                    const option = document.createElement('option');
+                    // 确保数据集路径存在
+                    if (dataset.path) {
+                        option.value = dataset.path;
+                        option.textContent = dataset.name;
+                        datasetSelect.appendChild(option);
+                        console.log(`Added dataset option: ${dataset.name} with path: ${dataset.path}`);
+                    } else {
+                        console.warn(`Dataset ${dataset.name} has no path property`);
+                    }
+                });
+
+                // 如果没有数据集，显示提示
+                if (datasetSelect.options.length <= 1) {
+                    const option = document.createElement('option');
+                    option.value = "";
+                    option.textContent = "没有可用的数据集";
+                    option.disabled = true;
+                    datasetSelect.appendChild(option);
+                }
+            } else {
+                console.error('dataset-path select element not found');
+            }
+        })
+        .catch(error => {
+            console.error('加载数据集失败:', error);
+
+            // 在出错时添加错误选项
+            const datasetSelect = document.getElementById('dataset-path');
+            if (datasetSelect) {
+                const option = document.createElement('option');
+                option.value = "";
+                option.textContent = "加载数据集失败";
+                option.disabled = true;
+                datasetSelect.appendChild(option);
+            }
+        });
+}
+
+// 绑定 OpenCV 页面事件
+function bindOpenCVEvents() {
+    console.log('Binding OpenCV events...');
+
+    // 确保加载覆盖层是隐藏的
+    const loadingOverlay = document.getElementById('opencv-loading-overlay');
+    if (loadingOverlay) {
+        loadingOverlay.style.display = 'none';
+    }
+
+    // 使用setTimeout确保DOM元素已经加载
+    setTimeout(() => {
+        console.log('Delayed binding of OpenCV events...');
+        bindOpenCVEventHandlers();
+    }, 500);
+}
+
+// 实际绑定事件处理程序
+function bindOpenCVEventHandlers() {
+
+    // 图像预处理相关脚本
+    // 显示/隐藏选项
+    const resizeCheck = document.getElementById('resize-check');
+    const resizeOptions = document.getElementById('resize-options');
+    if (resizeCheck && resizeOptions) {
+        resizeCheck.addEventListener('change', function() {
+            resizeOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    const denoiseCheck = document.getElementById('denoise-check');
+    const denoiseOptions = document.getElementById('denoise-options');
+    if (denoiseCheck && denoiseOptions) {
+        denoiseCheck.addEventListener('change', function() {
+            denoiseOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    const brightnessContrastCheck = document.getElementById('brightness-contrast-check');
+    const brightnessContrastOptions = document.getElementById('brightness-contrast-options');
+    if (brightnessContrastCheck && brightnessContrastOptions) {
+        brightnessContrastCheck.addEventListener('change', function() {
+            brightnessContrastOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    const sharpenCheck = document.getElementById('sharpen-check');
+    const sharpenOptions = document.getElementById('sharpen-options');
+    if (sharpenCheck && sharpenOptions) {
+        sharpenCheck.addEventListener('change', function() {
+            sharpenOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    // 更新滑块值显示
+    const denoiseStrength = document.getElementById('denoise-strength');
+    if (denoiseStrength) {
+        denoiseStrength.addEventListener('input', function() {
+            document.getElementById('denoise-strength-value').textContent = this.value;
+        });
+    }
+
+    const brightness = document.getElementById('brightness');
+    if (brightness) {
+        brightness.addEventListener('input', function() {
+            document.getElementById('brightness-value').textContent = this.value;
+        });
+    }
+
+    const contrast = document.getElementById('contrast');
+    if (contrast) {
+        contrast.addEventListener('input', function() {
+            document.getElementById('contrast-value').textContent = (this.value / 10).toFixed(1);
+        });
+    }
+
+    const sharpenAmount = document.getElementById('sharpen-amount');
+    if (sharpenAmount) {
+        sharpenAmount.addEventListener('input', function() {
+            document.getElementById('sharpen-amount-value').textContent = (this.value / 10).toFixed(1);
+        });
+    }
+
+    // 绑定表单提交事件
+    // 1. 预处理表单
+    const preprocessForm = document.getElementById('preprocess-form');
+    if (preprocessForm) {
+        preprocessForm.addEventListener('submit', function(event) {
+            // 阻止表单的默认提交行为
+            event.preventDefault();
+            console.log('Process image button clicked');
+
+            const imageFile = document.getElementById('image-upload').files[0];
+            if (!imageFile) {
+                alert('请选择图像文件');
+                return;
+            }
+
+            // 构建操作列表
+            const operations = [];
+
+            if (document.getElementById('resize-check').checked) {
+                operations.push({
+                    name: 'resize_image',
+                    params: {
+                        width: parseInt(document.getElementById('resize-width').value),
+                        height: parseInt(document.getElementById('resize-height').value)
+                    }
+                });
+            }
+
+            if (document.getElementById('denoise-check').checked) {
+                operations.push({
+                    name: 'denoise_image',
+                    params: {
+                        strength: parseInt(document.getElementById('denoise-strength').value)
+                    }
+                });
+            }
+
+            if (document.getElementById('brightness-contrast-check').checked) {
+                operations.push({
+                    name: 'adjust_brightness_contrast',
+                    params: {
+                        brightness: parseInt(document.getElementById('brightness').value),
+                        contrast: parseFloat(document.getElementById('contrast').value) / 10
+                    }
+                });
+            }
+
+            if (document.getElementById('sharpen-check').checked) {
+                operations.push({
+                    name: 'sharpen_image',
+                    params: {
+                        amount: parseFloat(document.getElementById('sharpen-amount').value) / 10
+                    }
+                });
+            }
+
+            if (operations.length === 0) {
+                alert('请至少选择一个预处理操作');
+                return;
+            }
+
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('image', imageFile);
+            formData.append('operations', JSON.stringify(operations));
+
+            // 显示原始图像
+            const originalImage = document.getElementById('original-image');
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                originalImage.src = e.target.result;
+            };
+            reader.readAsDataURL(imageFile);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/preprocess`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '处理图像失败'); });
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // 显示处理后的图像
+                const processedImage = document.getElementById('processed-image');
+                const downloadLink = document.getElementById('download-processed');
+
+                const url = URL.createObjectURL(blob);
+                processedImage.src = url;
+                downloadLink.href = url;
+                downloadLink.download = 'processed_' + imageFile.name;
+
+                // 显示结果区域
+                document.getElementById('preprocess-result').style.display = 'block';
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 2. 图像分割表单
+    const segmentationMethod = document.getElementById('segmentation-method');
+    if (segmentationMethod) {
+        segmentationMethod.addEventListener('change', function() {
+            const numSegmentsContainer = document.getElementById('num-segments-container');
+            numSegmentsContainer.style.display = this.value === 'kmeans' ? 'block' : 'none';
+        });
+    }
+
+    const segmentationForm = document.getElementById('segmentation-form');
+    if (segmentationForm) {
+        segmentationForm.addEventListener('submit', function(event) {
+            // 阻止表单的默认提交行为
+            event.preventDefault();
+            console.log('Segment image button clicked');
+
+            const imageFile = document.getElementById('segmentation-image-upload').files[0];
+            if (!imageFile) {
+                alert('请选择图像文件');
+                return;
+            }
+
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('image', imageFile);
+            formData.append('method', document.getElementById('segmentation-method').value);
+            formData.append('num_segments', document.getElementById('num-segments').value);
+
+            // 显示原始图像
+            const originalImage = document.getElementById('original-segmentation-image');
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                originalImage.src = e.target.result;
+            };
+            reader.readAsDataURL(imageFile);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/segment-image`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '图像分割失败'); });
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // 显示分割后的图像
+                const segmentedImage = document.getElementById('segmented-image');
+                const downloadLink = document.getElementById('download-segmented');
+
+                const url = URL.createObjectURL(blob);
+                segmentedImage.src = url;
+                downloadLink.href = url;
+                downloadLink.download = 'segmented_' + imageFile.name;
+
+                // 显示结果区域
+                document.getElementById('segmentation-result').style.display = 'block';
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 3. 特征提取表单
+    const extractFeaturesForm = document.getElementById('extract-features-form');
+    if (extractFeaturesForm) {
+        extractFeaturesForm.addEventListener('submit', function(event) {
+            // 阻止表单的默认提交行为
+            event.preventDefault();
+            console.log('Extract features button clicked');
+
+            const imageFile = document.getElementById('features-image-upload').files[0];
+            if (!imageFile) {
+                alert('请选择图像文件');
+                return;
+            }
+
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('image', imageFile);
+            formData.append('method', document.getElementById('feature-method').value);
+            formData.append('max_features', document.getElementById('max-features').value);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/extract-features`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '特征提取失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示特征提取结果
+                if (data) {
+                    document.getElementById('features-image').src = data.result_image || '';
+                    document.getElementById('feature-count').textContent = data.feature_count || '0';
+                    document.getElementById('feature-method-used').textContent = data.method || '';
+                } else {
+                    console.error('特征提取响应数据格式错误:', data);
+                }
+
+                // 显示结果区域
+                document.getElementById('extract-features-result').style.display = 'block';
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 4. 特征匹配表单
+    const matchFeaturesForm = document.getElementById('match-features-form');
+    if (matchFeaturesForm) {
+        matchFeaturesForm.addEventListener('submit', function(event) {
+            // 阻止表单的默认提交行为
+            event.preventDefault();
+            console.log('Match features button clicked');
+
+            const image1File = document.getElementById('match-image1-upload').files[0];
+            const image2File = document.getElementById('match-image2-upload').files[0];
+            if (!image1File || !image2File) {
+                alert('请选择两张图像文件');
+                return;
+            }
+
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('image1', image1File);
+            formData.append('image2', image2File);
+            formData.append('method', document.getElementById('match-feature-method').value);
+            formData.append('max_features', document.getElementById('match-max-features').value);
+            formData.append('match_method', document.getElementById('match-method').value);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/match-features`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '特征匹配失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示特征匹配结果
+                if (data) {
+                    document.getElementById('matches-image').src = data.result_image || '';
+                    document.getElementById('match-count').textContent = data.match_count || '0';
+                    document.getElementById('feature-count1').textContent = data.feature_count1 || '0';
+                    document.getElementById('feature-count2').textContent = data.feature_count2 || '0';
+                    document.getElementById('match-feature-method-used').textContent = data.method || '';
+                    document.getElementById('match-method-used').textContent = data.match_method || '';
+                } else {
+                    console.error('特征匹配响应数据格式错误:', data);
+                }
+
+                // 显示结果区域
+                document.getElementById('match-features-result').style.display = 'block';
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 5. 数据增强表单
+    const augmentForm = document.getElementById('augment-form');
+    if (augmentForm) {
+        augmentForm.addEventListener('submit', function(event) {
+            // 阻止表单的默认提交行为
+            event.preventDefault();
+            console.log('Augment button clicked');
+
+            const datasetPath = document.getElementById('dataset-path').value;
+            if (!datasetPath) {
+                alert('请选择数据集');
+                return;
+            }
+
+            // 构建增强选项
+            const augmentationOptions = {
+                flip: document.getElementById('flip-check').checked,
+                rotate: document.getElementById('rotate-check').checked ? {
+                    angles: [90, 180, 270]
+                } : false,
+                noise: document.getElementById('noise-check').checked ? {
+                    types: ['gaussian'],
+                    amount: 0.05
+                } : false,
+                brightness_contrast: document.getElementById('brightness-contrast-aug-check').checked ? {
+                    brightness: [-20, 20],
+                    contrast: [0.8, 1.2]
+                } : false,
+                perspective: document.getElementById('perspective-check').checked,
+                perspective_strength: 0.2
+            };
+
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('dataset_path', datasetPath);
+            formData.append('augmentation_options', JSON.stringify(augmentationOptions));
+            formData.append('multiplier', document.getElementById('multiplier').value);
+
+            // 加载提示已禁用
+            // document.getElementById('opencv-loading-overlay').style.display = 'block';
+            // document.getElementById('opencv-loading-text').textContent = '正在准备数据增强...';
+            // document.getElementById('opencv-loading-details').textContent = '请稍候，正在准备数据集并启动增强任务';
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/augment-dataset`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '启动数据增强任务失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示任务信息
+                if (data) {
+                    document.getElementById('augmentation-id').textContent = data.augmentation_id || '';
+                    document.getElementById('output-dir').textContent = data.output_dir || '';
+                } else {
+                    console.error('数据增强响应数据格式错误:', data);
+                    document.getElementById('augmentation-id').textContent = '未知';
+                    document.getElementById('output-dir').textContent = '未知';
+                }
+
+                // 显示结果区域
+                document.getElementById('augment-result').style.display = 'block';
+                document.getElementById('augment-stats').style.display = 'none';
+
+                // 加载提示已禁用
+                // document.getElementById('opencv-loading-overlay').style.display = 'none';
+
+                // 开始轮询任务状态
+                const augmentationId = data.augmentation_id;
+                const statusInterval = setInterval(() => {
+                    fetch(`${API_URL}/opencv/augmentation-status/${augmentationId}`)
+                    .then(response => response.json())
+                    .then(statusData => {
+                        if (statusData) {
+                            document.getElementById('augment-status-text').textContent = statusData.status || '未知';
+
+                            if (statusData.status === 'completed' && statusData.stats) {
+                                clearInterval(statusInterval);
+                                document.getElementById('augment-progress').style.width = '100%';
+
+                                // 显示统计信息
+                                document.getElementById('original-images-count').textContent = statusData.stats.original_images || '0';
+                                document.getElementById('augmented-images-count').textContent = statusData.stats.augmented_images || '0';
+                                document.getElementById('total-images-count').textContent = statusData.stats.total_images || '0';
+
+                                // 显示应用的增强
+                                const appliedAugmentations = document.getElementById('applied-augmentations');
+                                appliedAugmentations.innerHTML = '';
+
+                                if (statusData.stats.augmentations_applied) {
+                                    for (const [key, value] of Object.entries(statusData.stats.augmentations_applied)) {
+                                        const li = document.createElement('li');
+                                        li.textContent = `${key}: ${value} 张图像`;
+                                        appliedAugmentations.appendChild(li);
+                                    }
+                                }
+
+                                document.getElementById('augment-stats').style.display = 'block';
+                            } else if (statusData.status === 'failed') {
+                                clearInterval(statusInterval);
+                                document.getElementById('augment-progress').style.width = '100%';
+                                document.getElementById('augment-progress').classList.remove('bg-info');
+                                document.getElementById('augment-progress').classList.add('bg-danger');
+                                document.getElementById('augment-status-text').textContent = '失败: ' + statusData.error;
+                            } else {
+                                // 更新进度条
+                                document.getElementById('augment-progress').style.width = '50%';
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('获取任务状态失败:', error);
+                    });
+                }, 2000);
+            })
+            .catch(error => {
+                // 加载提示已禁用
+                // document.getElementById('opencv-loading-overlay').style.display = 'none';
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    console.log('OpenCV events bound successfully');
+
+    // 添加调试信息
+    console.log('Process image button:', document.getElementById('process-image-btn'));
+    console.log('Segment image button:', document.getElementById('segment-image-btn'));
+    console.log('Extract features button:', document.getElementById('extract-features-btn'));
+    console.log('Match features button:', document.getElementById('match-features-btn'));
+    console.log('Augment button:', document.getElementById('augment-btn'));
 }
 
 // ==================== 数据集管理 ====================
@@ -3318,3 +3900,1624 @@ function selectCurrentDirectory() {
 }
 
 // 已删除外部数据集相关功能
+
+// ==================== 视频处理工具 ====================
+
+// 加载视频处理页面
+function loadVideoPage() {
+    console.log('Loading Video Processing page...');
+
+    // 加载覆盖层已完全移除
+
+    // 确保所有结果区域也是隐藏的
+    const resultAreas = [
+        'extract-frames-result',
+        'detect-scenes-result',
+        'detect-motion-result'
+    ];
+
+    resultAreas.forEach(id => {
+        const element = document.getElementById(id);
+        if (element) {
+            element.style.display = 'none';
+        }
+    });
+
+    // 加载模型列表（用于实时检测功能）
+    fetch(`${API_URL}/models`)
+        .then(response => response.json())
+        .then(models => {
+            console.log('Loaded models for video detection:', models.length);
+
+            const modelSelect = document.getElementById('rt-model-select');
+            if (modelSelect) {
+                // 清空现有选项（除了第一个默认选项）
+                while (modelSelect.options.length > 1) {
+                    modelSelect.remove(1);
+                }
+
+                // 添加检测模型选项
+                models.forEach(model => {
+                    if (model.task === 'detect') {
+                        const option = document.createElement('option');
+                        option.value = model.id;
+                        option.textContent = `${model.name} (${model.type})`;
+                        modelSelect.appendChild(option);
+                    }
+                });
+
+                // 如果没有检测模型，显示提示
+                if (modelSelect.options.length <= 1) {
+                    const option = document.createElement('option');
+                    option.value = "";
+                    option.textContent = "没有可用的检测模型";
+                    option.disabled = true;
+                    modelSelect.appendChild(option);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('加载模型失败:', error);
+
+            // 在出错时添加错误选项
+            const modelSelect = document.getElementById('rt-model-select');
+            if (modelSelect) {
+                const option = document.createElement('option');
+                option.value = "";
+                option.textContent = "加载模型失败";
+                option.disabled = true;
+                modelSelect.appendChild(option);
+            }
+        });
+}
+
+// 绑定视频处理页面事件
+function bindVideoEvents() {
+    console.log('Binding Video Processing events...');
+
+    // 加载覆盖层已完全移除
+
+    // 使用setTimeout确保DOM元素已经加载
+    setTimeout(() => {
+        console.log('Delayed binding of Video Processing events...');
+        bindVideoEventHandlers();
+    }, 500);
+}
+
+// 实际绑定视频处理事件处理程序
+function bindVideoEventHandlers() {
+    // 提取帧相关事件
+    const resizeFramesCheck = document.getElementById('resize-frames-check');
+    const resizeFramesOptions = document.getElementById('resize-frames-options');
+    if (resizeFramesCheck && resizeFramesOptions) {
+        resizeFramesCheck.addEventListener('change', function() {
+            resizeFramesOptions.style.display = this.checked ? 'block' : 'none';
+        });
+    }
+
+    // 提取帧表单提交
+    const extractFramesForm = document.getElementById('extract-frames-form');
+    if (extractFramesForm) {
+        extractFramesForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const videoFile = document.getElementById('video-upload').files[0];
+            if (!videoFile) {
+                alert('请选择视频文件');
+                return;
+            }
+
+            // 加载覆盖层已禁用
+            // document.getElementById('video-loading-overlay').style.display = 'flex';
+            // document.getElementById('video-loading-text').textContent = '正在提取视频帧...';
+
+            // 创建表单数据
+            const formData = new FormData();
+
+            // 手动添加表单字段，处理可选字段
+            formData.append('video', document.getElementById('video-upload').files[0]);
+            formData.append('interval', document.getElementById('interval').value);
+
+            // 只有当max_frames有值时才添加
+            const maxFrames = document.getElementById('max-frames').value;
+            if (maxFrames.trim() !== '') {
+                formData.append('max_frames', maxFrames);
+            }
+
+            // 如果选择了调整帧大小，添加相关参数
+            if (document.getElementById('resize-frames-check').checked) {
+                formData.append('resize_width', document.getElementById('resize-width').value);
+                formData.append('resize_height', document.getElementById('resize-height').value);
+            }
+
+            // 添加开始时间
+            formData.append('start_time', document.getElementById('start-time').value);
+
+            // 只有当end_time有值时才添加
+            const endTime = document.getElementById('end-time').value;
+            if (endTime.trim() !== '') {
+                formData.append('end_time', endTime);
+            }
+
+            // 发送请求
+            fetch(`${API_URL}/video/extract-frames`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '提取帧失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 加载覆盖层已禁用
+                // document.getElementById('video-loading-overlay').style.display = 'none';
+
+                // 显示提取结果
+                if (data && data.extraction_id) {
+                    document.getElementById('extraction-id').textContent = data.extraction_id;
+
+                    // 显示结果区域
+                    document.getElementById('extract-frames-result').style.display = 'block';
+
+                    // 显示提取结果
+                    if (data.result) {
+                        document.getElementById('extracted-frames-count').textContent = data.result.extracted_frames || 0;
+
+                        // 显示帧图像
+                        const framesGallery = document.getElementById('frames-gallery');
+                        framesGallery.innerHTML = '';
+
+                        // 检查帧数据是否存在
+                        const frames = data.result.frames || [];
+
+                        if (frames.length === 0) {
+                            framesGallery.innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">未提取到帧</div></div>';
+                        } else {
+                            // 只显示前20帧，避免页面过长
+                            const framesToShow = frames.slice(0, 20);
+                            framesToShow.forEach(frame => {
+                                const col = document.createElement('div');
+                                col.className = 'col-md-3 mb-3';
+
+                                const card = document.createElement('div');
+                                card.className = 'card';
+
+                                const img = document.createElement('img');
+                                img.className = 'card-img-top';
+                                img.src = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
+                                img.alt = `Frame ${frame}`;
+
+                                const cardBody = document.createElement('div');
+                                cardBody.className = 'card-body';
+
+                                const cardText = document.createElement('p');
+                                cardText.className = 'card-text';
+                                cardText.textContent = `帧 ${frame}`;
+
+                                const downloadBtn = document.createElement('a');
+                                downloadBtn.className = 'btn btn-sm btn-primary';
+                                downloadBtn.href = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
+                                downloadBtn.download = frame;
+                                downloadBtn.textContent = '下载';
+
+                                cardBody.appendChild(cardText);
+                                cardBody.appendChild(downloadBtn);
+                                card.appendChild(img);
+                                card.appendChild(cardBody);
+                                col.appendChild(card);
+                                framesGallery.appendChild(col);
+                            });
+
+                            // 如果有更多帧，显示提示
+                            if (frames.length > 20) {
+                                const moreFrames = document.createElement('div');
+                                moreFrames.className = 'col-12 text-center mt-3';
+                                moreFrames.innerHTML = `<div class="alert alert-info">还有 ${frames.length - 20} 帧未显示</div>`;
+                                framesGallery.appendChild(moreFrames);
+                            }
+
+                            // 绑定下载所有帧按钮事件
+                            const downloadAllBtn = document.getElementById('download-all-frames');
+                            if (downloadAllBtn) {
+                                downloadAllBtn.onclick = function() {
+                                    window.open(`${API_URL}/video/download-frames/${data.extraction_id}`, '_blank');
+                                };
+                            }
+                        }
+                    } else {
+                        document.getElementById('extracted-frames-count').textContent = '处理中...';
+                        document.getElementById('frames-gallery').innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">正在处理中，请稍候...</div></div>';
+                    }
+                } else {
+                    console.error('提取帧响应数据格式错误:', data);
+                }
+            })
+            .catch(error => {
+                // 加载覆盖层已禁用
+                // document.getElementById('video-loading-overlay').style.display = 'none';
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 场景检测相关事件
+    const sceneThreshold = document.getElementById('scene-threshold');
+    const sceneThresholdValue = document.getElementById('scene-threshold-value');
+    if (sceneThreshold && sceneThresholdValue) {
+        sceneThreshold.addEventListener('input', function() {
+            sceneThresholdValue.textContent = this.value;
+        });
+    }
+
+    // 场景检测表单提交
+    const detectScenesForm = document.getElementById('detect-scenes-form');
+    if (detectScenesForm) {
+        detectScenesForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const videoFile = document.getElementById('scenes-video-upload').files[0];
+            if (!videoFile) {
+                alert('请选择视频文件');
+                return;
+            }
+
+            // 加载覆盖层已禁用
+            // document.getElementById('video-loading-overlay').style.display = 'flex';
+            // document.getElementById('video-loading-text').textContent = '正在检测视频场景...';
+
+            // 创建表单数据
+            const formData = new FormData(this);
+
+            // 发送请求
+            fetch(`${API_URL}/video/detect-scenes`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '检测场景失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 加载覆盖层已禁用
+                // document.getElementById('video-loading-overlay').style.display = 'none';
+
+                // 显示任务信息
+                if (data && data.task_id) {
+                    document.getElementById('scene-task-id').textContent = data.task_id;
+
+                    // 显示结果区域
+                    document.getElementById('detect-scenes-result').style.display = 'block';
+                    document.getElementById('scene-count').textContent = '处理中...';
+
+                    // 清空场景列表
+                    const scenesTableBody = document.getElementById('scenes-table-body');
+                    scenesTableBody.innerHTML = '<tr><td colspan="5" class="text-center">正在处理中，请稍候...</td></tr>';
+
+                    // 轮询任务状态
+                    const taskId = data.task_id;
+                    const statusInterval = setInterval(() => {
+                        fetch(`${API_URL}/video/scene-detection-status/${taskId}`)
+                        .then(response => response.json())
+                        .then(statusData => {
+                            if (statusData.status === 'completed' && statusData.info && statusData.info.result) {
+                                clearInterval(statusInterval);
+
+                                // 显示检测结果
+                                const result = statusData.info.result;
+                                document.getElementById('scene-count').textContent = result.scene_count || 0;
+
+                                // 显示场景列表
+                                const scenesTableBody = document.getElementById('scenes-table-body');
+                                scenesTableBody.innerHTML = '';
+
+                                // 检查场景数据是否存在
+                                const scenes = result.scenes || [];
+
+                                if (scenes.length === 0) {
+                                    scenesTableBody.innerHTML = '<tr><td colspan="5" class="text-center">未检测到场景</td></tr>';
+                                } else {
+                                    scenes.forEach((scene, index) => {
+                                        const row = document.createElement('tr');
+
+                                        const indexCell = document.createElement('td');
+                                        indexCell.textContent = index + 1;
+
+                                        const startTimeCell = document.createElement('td');
+                                        startTimeCell.textContent = scene.start_time.toFixed(2) + ' 秒';
+
+                                        const endTimeCell = document.createElement('td');
+                                        endTimeCell.textContent = scene.end_time.toFixed(2) + ' 秒';
+
+                                        const durationCell = document.createElement('td');
+                                        durationCell.textContent = scene.duration.toFixed(2) + ' 秒';
+
+                                        const actionsCell = document.createElement('td');
+                                        const extractBtn = document.createElement('button');
+                                        extractBtn.className = 'btn btn-sm btn-primary';
+                                        extractBtn.textContent = '提取关键帧';
+                                        extractBtn.onclick = function() {
+                                            // 这里可以实现提取场景关键帧的功能
+                                            alert('此功能尚未实现');
+                                        };
+                                        actionsCell.appendChild(extractBtn);
+
+                                        row.appendChild(indexCell);
+                                        row.appendChild(startTimeCell);
+                                        row.appendChild(endTimeCell);
+                                        row.appendChild(durationCell);
+                                        row.appendChild(actionsCell);
+
+                                        scenesTableBody.appendChild(row);
+                                    });
+                                }
+                            } else if (statusData.status === 'failed') {
+                                clearInterval(statusInterval);
+                                document.getElementById('scene-count').textContent = '0';
+                                scenesTableBody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">检测失败: ${statusData.error || '未知错误'}</td></tr>`;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('获取任务状态失败:', error);
+                        });
+                    }, 2000);
+                } else {
+                    console.error('检测场景响应数据格式错误:', data);
+                }
+            })
+            .catch(error => {
+                // 加载覆盖层已禁用
+                // document.getElementById('video-loading-overlay').style.display = 'none';
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 运动检测相关事件
+    const motionSensitivity = document.getElementById('motion-sensitivity');
+    const motionSensitivityValue = document.getElementById('motion-sensitivity-value');
+    if (motionSensitivity && motionSensitivityValue) {
+        motionSensitivity.addEventListener('input', function() {
+            motionSensitivityValue.textContent = this.value;
+        });
+    }
+
+    // 运动检测表单提交
+    const detectMotionForm = document.getElementById('detect-motion-form');
+    if (detectMotionForm) {
+        detectMotionForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+
+            const videoFile = document.getElementById('motion-video-upload').files[0];
+            if (!videoFile) {
+                alert('请选择视频文件');
+                return;
+            }
+
+            // 加载覆盖层已禁用
+            // document.getElementById('video-loading-overlay').style.display = 'flex';
+            // document.getElementById('video-loading-text').textContent = '正在检测视频运动...';
+
+            // 创建表单数据
+            const formData = new FormData(this);
+
+            // 发送请求
+            fetch(`${API_URL}/video/detect-motion`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '检测运动失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 加载覆盖层已禁用
+                // document.getElementById('video-loading-overlay').style.display = 'none';
+
+                // 显示任务信息
+                if (data && data.task_id) {
+                    document.getElementById('motion-task-id').textContent = data.task_id;
+
+                    // 显示结果区域
+                    document.getElementById('detect-motion-result').style.display = 'block';
+                    document.getElementById('motion-frame-count').textContent = '处理中...';
+
+                    // 清空运动帧列表
+                    const motionTableBody = document.getElementById('motion-table-body');
+                    motionTableBody.innerHTML = '<tr><td colspan="4" class="text-center">正在处理中，请稍候...</td></tr>';
+
+                    // 轮询任务状态
+                    const taskId = data.task_id;
+                    const statusInterval = setInterval(() => {
+                        fetch(`${API_URL}/video/motion-detection-status/${taskId}`)
+                        .then(response => response.json())
+                        .then(statusData => {
+                            if (statusData.status === 'completed' && statusData.info && statusData.info.result) {
+                                clearInterval(statusInterval);
+
+                                // 显示检测结果
+                                const result = statusData.info.result;
+                                document.getElementById('motion-frame-count').textContent = result.motion_frame_count || 0;
+
+                                // 显示运动帧列表
+                                const motionTableBody = document.getElementById('motion-table-body');
+                                motionTableBody.innerHTML = '';
+
+                                // 检查运动帧数据是否存在
+                                const motionFrames = result.motion_frames || [];
+
+                                if (motionFrames.length === 0) {
+                                    motionTableBody.innerHTML = '<tr><td colspan="4" class="text-center">未检测到运动</td></tr>';
+                                } else {
+                                    // 只显示前50帧，避免页面过长
+                                    const framesToShow = motionFrames.slice(0, 50);
+                                    framesToShow.forEach(frame => {
+                                        const row = document.createElement('tr');
+
+                                        const frameIndexCell = document.createElement('td');
+                                        frameIndexCell.textContent = frame.frame_index;
+
+                                        const timestampCell = document.createElement('td');
+                                        timestampCell.textContent = frame.timestamp.toFixed(2) + ' 秒';
+
+                                        const motionCountCell = document.createElement('td');
+                                        motionCountCell.textContent = frame.motion_regions.length;
+
+                                        const actionsCell = document.createElement('td');
+                                        const viewBtn = document.createElement('button');
+                                        viewBtn.className = 'btn btn-sm btn-primary';
+                                        viewBtn.textContent = '查看详情';
+                                        viewBtn.onclick = function() {
+                                            // 这里可以实现查看运动详情的功能
+                                            alert('此功能尚未实现');
+                                        };
+                                        actionsCell.appendChild(viewBtn);
+
+                                        row.appendChild(frameIndexCell);
+                                        row.appendChild(timestampCell);
+                                        row.appendChild(motionCountCell);
+                                        row.appendChild(actionsCell);
+
+                                        motionTableBody.appendChild(row);
+                                    });
+
+                                    // 如果有更多帧，显示提示
+                                    if (motionFrames.length > 50) {
+                                        const row = document.createElement('tr');
+                                        const cell = document.createElement('td');
+                                        cell.colSpan = 4;
+                                        cell.className = 'text-center';
+                                        cell.innerHTML = `<div class="alert alert-info m-0">还有 ${motionFrames.length - 50} 帧未显示</div>`;
+                                        row.appendChild(cell);
+                                        motionTableBody.appendChild(row);
+                                    }
+                                }
+                            } else if (statusData.status === 'failed') {
+                                clearInterval(statusInterval);
+                                document.getElementById('motion-frame-count').textContent = '0';
+                                motionTableBody.innerHTML = `<tr><td colspan="4" class="text-center text-danger">检测失败: ${statusData.error || '未知错误'}</td></tr>`;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('获取任务状态失败:', error);
+                        });
+                    }, 2000);
+                } else {
+                    console.error('检测运动响应数据格式错误:', data);
+                }
+            })
+            .catch(error => {
+                // 加载覆盖层已禁用
+                // document.getElementById('video-loading-overlay').style.display = 'none';
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 视频源选择事件
+    const sourceWebcam = document.getElementById('source-webcam');
+    const sourceFile = document.getElementById('source-file');
+    const webcamOptions = document.getElementById('webcam-options');
+    const videoFileOptions = document.getElementById('video-file-options');
+
+    if (sourceWebcam && sourceFile && webcamOptions && videoFileOptions) {
+        sourceWebcam.addEventListener('change', function() {
+            if (this.checked) {
+                webcamOptions.style.display = 'block';
+                videoFileOptions.style.display = 'none';
+            }
+        });
+
+        sourceFile.addEventListener('change', function() {
+            if (this.checked) {
+                webcamOptions.style.display = 'none';
+                videoFileOptions.style.display = 'block';
+            }
+        });
+    }
+
+    // 实时检测阈值滑块事件
+    const rtConfThreshold = document.getElementById('rt-conf-threshold');
+    const rtConfValue = document.getElementById('rt-conf-value');
+    if (rtConfThreshold && rtConfValue) {
+        rtConfThreshold.addEventListener('input', function() {
+            rtConfValue.textContent = this.value;
+        });
+    }
+
+    const rtIouThreshold = document.getElementById('rt-iou-threshold');
+    const rtIouValue = document.getElementById('rt-iou-value');
+    if (rtIouThreshold && rtIouValue) {
+        rtIouThreshold.addEventListener('input', function() {
+            rtIouValue.textContent = this.value;
+        });
+    }
+
+    // 实时检测功能
+    const startDetectionBtn = document.getElementById('start-detection-btn');
+    const stopDetectionBtn = document.getElementById('stop-detection-btn');
+    const rtModelSelect = document.getElementById('rt-model-select');
+    const videoElement = document.getElementById('video-element');
+    const detectionCanvas = document.getElementById('detection-canvas');
+    const fpsCounter = document.getElementById('fps-counter');
+    const objectsCounter = document.getElementById('objects-counter');
+
+    if (startDetectionBtn && stopDetectionBtn && rtModelSelect) {
+        // 加载模型列表
+        fetch(`${API_URL}/models?type=detection`)
+            .then(response => response.json())
+            .then(models => {
+                rtModelSelect.innerHTML = '<option value="">\u8bf7\u9009\u62e9\u6a21\u578b</option>';
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.id;
+                    option.textContent = model.name;
+                    rtModelSelect.appendChild(option);
+                });
+            })
+            .catch(error => {
+                console.error('加载模型列表失败:', error);
+                rtModelSelect.innerHTML = '<option value="">\u52a0\u8f7d\u6a21\u578b\u5931\u8d25</option>';
+            });
+
+        // 加载摄像头列表
+        const webcamSelect = document.getElementById('webcam-select');
+        if (webcamSelect) {
+            // 检查浏览器是否支持 mediaDevices API
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                console.error('浏览器不支持 mediaDevices API');
+                webcamSelect.innerHTML = '<option value="">浏览器不支持摄像头访问</option>';
+
+                // 添加一个默认选项，即使获取失败也可以尝试使用默认摄像头
+                const defaultOption = document.createElement('option');
+                defaultOption.value = 'default';
+                defaultOption.textContent = '使用默认摄像头';
+                webcamSelect.appendChild(defaultOption);
+                return;
+            }
+
+            // 首先请求摄像头权限，这样可以获取摄像头的完整标签
+            navigator.mediaDevices.getUserMedia({ video: true })
+                .then(stream => {
+                    // 关闭流，我们只是为了获取摄像头标签
+                    stream.getTracks().forEach(track => track.stop());
+
+                    // 现在获取摄像头列表
+                    return navigator.mediaDevices.enumerateDevices();
+                })
+                .then(devices => {
+                    const videoDevices = devices.filter(device => device.kind === 'videoinput');
+                    webcamSelect.innerHTML = '';
+
+                    if (videoDevices.length === 0) {
+                        const option = document.createElement('option');
+                        option.value = '';
+                        option.textContent = '未检测到摄像头';
+                        webcamSelect.appendChild(option);
+                    } else {
+                        // 添加一个默认选项
+                        const defaultOption = document.createElement('option');
+                        defaultOption.value = '';
+                        defaultOption.textContent = '选择摄像头';
+                        webcamSelect.appendChild(defaultOption);
+
+                        // 添加所有检测到的摄像头
+                        videoDevices.forEach((device, index) => {
+                            const option = document.createElement('option');
+                            option.value = device.deviceId;
+                            option.textContent = device.label || `摄像头 ${index + 1}`;
+                            webcamSelect.appendChild(option);
+                            console.log(`检测到摄像头: ${option.textContent} (ID: ${device.deviceId})`);
+                        });
+
+                        // 如果只有一个摄像头，自动选中它
+                        if (videoDevices.length === 1) {
+                            webcamSelect.value = videoDevices[0].deviceId;
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('获取摄像头列表失败:', error);
+                    webcamSelect.innerHTML = '<option value="">\u83b7\u53d6\u6444\u50cf\u5934\u5931\u8d25</option>';
+
+                    // 添加一个默认选项，即使获取失败也可以尝试使用默认摄像头
+                    const defaultOption = document.createElement('option');
+                    defaultOption.value = 'default';
+                    defaultOption.textContent = '使用默认摄像头';
+                    webcamSelect.appendChild(defaultOption);
+                });
+        }
+
+        // 实时检测相关变量
+        let isDetecting = false;
+        let stream = null;
+        let animationFrameId = null;
+        let lastFrameTime = 0;
+        let fps = 0;
+        let detectedObjects = 0;
+
+        // 目标物体监控相关变量
+        let targetObjects = [];
+        let lastAlertTime = 0;
+        let alertCooldown = 3000; // 默认3秒冷却时间
+        let alertThreshold = 0.5; // 默认报警置信度阈值
+        let visualAlertEnabled = true;
+        let soundAlertEnabled = true;
+        let isAlertActive = false;
+
+        // 轨迹记录和预测相关变量
+        let trajectoryEnabled = false;
+
+        // 监听报警设置变化
+        document.getElementById('alert-threshold').addEventListener('input', function() {
+            alertThreshold = parseFloat(this.value);
+            document.getElementById('alert-threshold-value').textContent = alertThreshold.toFixed(2);
+        });
+
+        document.getElementById('alert-cooldown').addEventListener('input', function() {
+            alertCooldown = parseInt(this.value) * 1000; // 转换为毫秒
+            document.getElementById('alert-cooldown-value').textContent = this.value;
+        });
+
+        document.getElementById('visual-alert-check').addEventListener('change', function() {
+            visualAlertEnabled = this.checked;
+        });
+
+        document.getElementById('sound-alert-check').addEventListener('change', function() {
+            soundAlertEnabled = this.checked;
+        });
+
+        // 监听轨迹设置变化
+        const enableTrajectory = document.getElementById('enable-trajectory');
+        const trajectorySettings = document.getElementById('trajectory-settings');
+
+        if (enableTrajectory && trajectorySettings) {
+            enableTrajectory.addEventListener('change', function() {
+                trajectoryEnabled = this.checked;
+                trajectorySettings.style.display = this.checked ? 'block' : 'none';
+
+                // 更新轨迹设置
+                if (window.trajectory) {
+                    window.trajectory.updateTrajectorySettings({ enabled: trajectoryEnabled });
+
+                    // 如果禁用，清空所有轨迹
+                    if (!trajectoryEnabled) {
+                        window.trajectory.clearAllTrajectories();
+                    }
+                }
+            });
+        }
+
+        // 轨迹长度滑块
+        const trajectoryLength = document.getElementById('trajectory-length');
+        const trajectoryLengthValue = document.getElementById('trajectory-length-value');
+
+        if (trajectoryLength && trajectoryLengthValue) {
+            trajectoryLength.addEventListener('input', function() {
+                const maxLength = parseInt(this.value);
+                trajectoryLengthValue.textContent = maxLength;
+
+                if (window.trajectory) {
+                    window.trajectory.updateTrajectorySettings({ maxLength: maxLength });
+                }
+            });
+        }
+
+        // 预测步数滑块
+        const predictionSteps = document.getElementById('prediction-steps');
+        const predictionStepsValue = document.getElementById('prediction-steps-value');
+
+        if (predictionSteps && predictionStepsValue) {
+            predictionSteps.addEventListener('input', function() {
+                const steps = parseInt(this.value);
+                predictionStepsValue.textContent = steps;
+
+                if (window.trajectory) {
+                    window.trajectory.updateTrajectorySettings({ predictionSteps: steps });
+                }
+            });
+        }
+
+        // 显示轨迹线复选框
+        const showTrajectoryLine = document.getElementById('show-trajectory-line');
+        if (showTrajectoryLine) {
+            showTrajectoryLine.addEventListener('change', function() {
+                if (window.trajectory) {
+                    window.trajectory.updateTrajectorySettings({ showTrajectoryLine: this.checked });
+                }
+            });
+        }
+
+        // 显示预测线复选框
+        const showPredictionLine = document.getElementById('show-prediction-line');
+        if (showPredictionLine) {
+            showPredictionLine.addEventListener('change', function() {
+                if (window.trajectory) {
+                    window.trajectory.updateTrajectorySettings({ showPredictionLine: this.checked });
+                }
+            });
+        }
+
+        // 添加目标物体按钮事件
+        document.getElementById('add-target-btn').addEventListener('click', function() {
+            addTargetObject();
+        });
+
+        // 目标输入框回车键事件
+        document.getElementById('target-objects').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                addTargetObject();
+            }
+        });
+
+        // 关闭报警按钮事件
+        document.getElementById('close-alert-btn').addEventListener('click', function() {
+            hideAlert();
+        });
+
+        // 清空报警历史按钮事件
+        document.getElementById('clear-alerts-btn').addEventListener('click', function() {
+            clearAlertHistory();
+        });
+
+        // 添加目标物体函数
+        function addTargetObject() {
+            const input = document.getElementById('target-objects');
+            const value = input.value.trim();
+
+            if (!value) return;
+
+            // 分割输入，允许多个目标用逗号分隔
+            const newTargets = value.split(',').map(t => t.trim().toLowerCase()).filter(t => t);
+
+            // 添加新目标，去除重复
+            newTargets.forEach(target => {
+                if (!targetObjects.includes(target)) {
+                    targetObjects.push(target);
+                }
+            });
+
+            // 更新目标列表显示
+            updateTargetList();
+
+            // 清空输入框
+            input.value = '';
+        }
+
+        // 更新目标列表显示
+        function updateTargetList() {
+            const targetList = document.getElementById('target-list');
+            targetList.innerHTML = '';
+
+            if (targetObjects.length === 0) {
+                targetList.innerHTML = '<span class="badge bg-secondary">暂无监控目标</span>';
+                return;
+            }
+
+            targetObjects.forEach(target => {
+                const badge = document.createElement('span');
+                badge.className = 'badge bg-primary me-2 mb-2';
+                badge.innerHTML = `${target} <button type="button" class="btn-close btn-close-white" aria-label="Close" data-target="${target}"></button>`;
+                targetList.appendChild(badge);
+
+                // 添加删除按钮事件
+                const closeBtn = badge.querySelector('.btn-close');
+                closeBtn.addEventListener('click', function() {
+                    const targetToRemove = this.getAttribute('data-target');
+                    targetObjects = targetObjects.filter(t => t !== targetToRemove);
+                    updateTargetList();
+                });
+            });
+        }
+
+        // 检查目标物体函数
+        function checkTargetObjects(detections) {
+            if (targetObjects.length === 0) return;
+
+            // 检查是否在冷却时间内
+            const now = Date.now();
+            if (now - lastAlertTime < alertCooldown) return;
+
+            // 检查报警区域启用状态
+            const zoneCheckbox = document.getElementById('enable-alert-zone');
+            const zoneEnabled = zoneCheckbox ? zoneCheckbox.checked : false;
+
+            console.log('检查目标物体: 报警区域启用状态:', zoneEnabled);
+
+            // 查找符合目标物体的检测结果
+            const matchedDetections = detections.filter(detection => {
+                // 获取类别名称
+                let className = '';
+                if (detection.class_name) {
+                    className = detection.class_name.toLowerCase();
+                } else if (detection.class) {
+                    className = detection.class.toLowerCase();
+                }
+
+                // 检查置信度是否超过阈值
+                const confidence = detection.confidence || 0;
+
+                // 检查是否匹配目标物体和置信度
+                const isTargetObject = targetObjects.includes(className) && confidence >= alertThreshold;
+
+                // 如果不是目标物体，直接返回false
+                if (!isTargetObject) return false;
+
+                // 检查是否在报警区域内
+                let inAlertZone = true; // 默认为true
+
+                // 只有启用报警区域时才检查
+                if (zoneEnabled && window.alertZone) {
+                    inAlertZone = window.alertZone.isInAlertZone(detection);
+                    console.log(`检查目标物体: ${className} 是否在报警区域内: ${inAlertZone}`);
+                }
+
+                return isTargetObject && inAlertZone;
+            });
+
+            // 如果有匹配的目标物体，触发报警
+            if (matchedDetections.length > 0) {
+                // 获取置信度最高的检测结果
+                const topMatch = matchedDetections.reduce((prev, current) => {
+                    return (prev.confidence > current.confidence) ? prev : current;
+                });
+
+                // 获取类别名称
+                let className = '';
+                if (topMatch.class_name) {
+                    className = topMatch.class_name.toLowerCase();
+                } else if (topMatch.class) {
+                    className = topMatch.class.toLowerCase();
+                }
+
+                console.log(`触发报警: 检测到目标物体 ${className}, 置信度 ${(topMatch.confidence * 100).toFixed(1)}%`);
+
+                // 触发报警
+                triggerAlert(topMatch);
+
+                // 更新最后报警时间
+                lastAlertTime = now;
+            }
+        }
+
+        // 触发报警函数
+        function triggerAlert(detection) {
+            // 获取类别名称
+            let className = '';
+            if (detection.class_name) {
+                className = detection.class_name;
+            } else if (detection.class) {
+                className = detection.class;
+            }
+
+            // 获取置信度
+            const confidence = detection.confidence || 0;
+
+            // 视觉报警
+            if (visualAlertEnabled) {
+                const alertContainer = document.getElementById('alert-container');
+                const alertMessage = document.getElementById('alert-message');
+
+                alertMessage.textContent = `检测到 ${className} (置信度: ${(confidence * 100).toFixed(1)}%)`;
+                alertContainer.style.display = 'block';
+
+                // 添加闪烁效果
+                if (!isAlertActive) {
+                    isAlertActive = true;
+                    alertContainer.classList.add('alert-flash');
+                }
+            }
+
+            // 声音报警
+            if (soundAlertEnabled && window.alertSoundGenerator) {
+                window.alertSoundGenerator.play();
+            }
+
+            // 添加到报警历史
+            addAlertToHistory(className, confidence);
+        }
+
+        // 隐藏报警函数
+        function hideAlert() {
+            const alertContainer = document.getElementById('alert-container');
+            alertContainer.style.display = 'none';
+            alertContainer.classList.remove('alert-flash');
+            isAlertActive = false;
+        }
+
+        // 添加报警到历史记录
+        function addAlertToHistory(className, confidence) {
+            const alertHistoryTable = document.getElementById('alert-history-table');
+
+            // 如果是第一条记录，清空“暂无报警记录”
+            if (alertHistoryTable.querySelector('td.text-center')) {
+                alertHistoryTable.innerHTML = '';
+            }
+
+            // 创建新行
+            const row = document.createElement('tr');
+
+            // 时间单元格
+            const now = new Date();
+            const timeCell = document.createElement('td');
+            timeCell.textContent = now.toLocaleTimeString();
+
+            // 类别单元格
+            const classCell = document.createElement('td');
+            classCell.textContent = className;
+
+            // 置信度单元格
+            const confidenceCell = document.createElement('td');
+            confidenceCell.textContent = `${(confidence * 100).toFixed(1)}%`;
+
+            // 添加到行
+            row.appendChild(timeCell);
+            row.appendChild(classCell);
+            row.appendChild(confidenceCell);
+
+            // 添加到表格顶部
+            alertHistoryTable.insertBefore(row, alertHistoryTable.firstChild);
+
+            // 限制历史记录数量，保留最新的50条
+            const rows = alertHistoryTable.querySelectorAll('tr');
+            if (rows.length > 50) {
+                alertHistoryTable.removeChild(rows[rows.length - 1]);
+            }
+
+            // 添加到统计分析系统
+            if (window.alertStats) {
+                const alertRecord = {
+                    time: now,
+                    category: className,
+                    confidence: confidence
+                };
+                window.alertStats.addAlertRecord(alertRecord);
+            }
+        }
+
+        // 清空报警历史
+        function clearAlertHistory() {
+            const alertHistoryTable = document.getElementById('alert-history-table');
+            alertHistoryTable.innerHTML = '<tr><td colspan="3" class="text-center">暂无报警记录</td></tr>';
+
+            // 清空统计数据
+            if (window.alertStats) {
+                window.alertStats.clearAlertRecords();
+            }
+        }
+
+        // 清除区域按钮事件
+        const clearZoneBtn = document.getElementById('clear-zone-btn');
+        if (clearZoneBtn) {
+            clearZoneBtn.addEventListener('click', function() {
+                console.log('main.js: 清除区域按钮被点击');
+                if (window.alertZone && window.alertZone.clearAlertZone) {
+                    window.alertZone.clearAlertZone();
+                } else {
+                    console.error('main.js: alertZone或clearAlertZone函数不存在');
+                    alert('清除区域失败: 功能不可用');
+                }
+            });
+        }
+
+        // 开始检测按钮事件
+        startDetectionBtn.addEventListener('click', function() {
+            const modelId = rtModelSelect.value;
+            if (!modelId) {
+                alert('请选择模型');
+                return;
+            }
+
+            // 检查是否已经在检测中
+            if (isDetecting) return;
+
+            // 获取视频源
+            const videoSource = document.querySelector('input[name="video-source"]:checked').value;
+
+            if (videoSource === 'webcam') {
+                let webcamId = webcamSelect.value;
+
+                // 如果没有选择摄像头，但有可用的摄像头
+                if (!webcamId) {
+                    // 检查是否有默认选项
+                    const defaultOption = Array.from(webcamSelect.options).find(option => option.value === 'default');
+                    if (defaultOption) {
+                        webcamId = 'default';
+                        console.log('使用默认摄像头选项');
+                    } else {
+                        // 如果有非空选项，选择第一个
+                        const nonEmptyOptions = Array.from(webcamSelect.options).filter(option => option.value);
+                        if (nonEmptyOptions.length > 0) {
+                            webcamId = nonEmptyOptions[0].value;
+                            console.log('自动选择第一个摄像头:', webcamId);
+                        } else {
+                            alert('请选择摄像头');
+                            return;
+                        }
+                    }
+                }
+
+                // 打开摄像头
+                console.log('尝试打开摄像头:', webcamId);
+
+                // 准备摄像头配置
+                let videoConstraints;
+
+                if (webcamId === 'default') {
+                    // 使用默认摄像头
+                    videoConstraints = { facingMode: 'user' };
+                    console.log('使用默认摄像头配置');
+                } else {
+                    // 使用指定摄像头
+                    videoConstraints = { deviceId: { exact: webcamId } };
+                    console.log('使用指定摄像头配置:', webcamId);
+                }
+
+                // 检查浏览器是否支持 mediaDevices API
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    const errorMessage = '浏览器不支持摄像头访问。请使用现代浏览器（如Chrome、Firefox、Edge）或通过HTTPS访问。';
+                    console.error(errorMessage);
+                    alert(errorMessage);
+
+                    // 更新状态
+                    document.getElementById('detection-status').innerHTML =
+                        `<span class="badge bg-danger">浏览器不支持摄像头</span>`;
+                    return;
+                }
+
+                navigator.mediaDevices.getUserMedia({
+                    video: videoConstraints,
+                    audio: false
+                })
+                .then(mediaStream => {
+                    stream = mediaStream;
+                    videoElement.srcObject = stream;
+                    videoElement.style.display = 'block';
+                    videoElement.play();
+
+                    // 更新状态
+                    document.getElementById('detection-status').innerHTML =
+                        `<span class="badge bg-info">摄像头已就绪</span>`;
+
+                    // 设置画布大小
+                    videoElement.onloadedmetadata = function() {
+                        detectionCanvas.width = videoElement.videoWidth;
+                        detectionCanvas.height = videoElement.videoHeight;
+
+                        // 初始化报警区域
+                        if (window.alertZone) {
+                            window.alertZone.resizeAlertZone(detectionCanvas.width, detectionCanvas.height);
+                            window.alertZone.drawAlertZone();
+                        }
+
+                        // 初始化轨迹设置
+                        if (window.trajectory) {
+                            // 获取当前设置
+                            const settings = window.trajectory.getSettings();
+
+                            // 更新UI元素
+                            const enableTrajectory = document.getElementById('enable-trajectory');
+                            if (enableTrajectory) {
+                                enableTrajectory.checked = settings.enabled;
+                                trajectoryEnabled = settings.enabled;
+
+                                // 显示/隐藏设置面板
+                                const trajectorySettings = document.getElementById('trajectory-settings');
+                                if (trajectorySettings) {
+                                    trajectorySettings.style.display = settings.enabled ? 'block' : 'none';
+                                }
+                            }
+
+                            // 更新轨迹长度滑块
+                            const trajectoryLength = document.getElementById('trajectory-length');
+                            const trajectoryLengthValue = document.getElementById('trajectory-length-value');
+                            if (trajectoryLength && trajectoryLengthValue) {
+                                trajectoryLength.value = settings.maxLength;
+                                trajectoryLengthValue.textContent = settings.maxLength;
+                            }
+
+                            // 更新预测步数滑块
+                            const predictionSteps = document.getElementById('prediction-steps');
+                            const predictionStepsValue = document.getElementById('prediction-steps-value');
+                            if (predictionSteps && predictionStepsValue) {
+                                predictionSteps.value = settings.predictionSteps;
+                                predictionStepsValue.textContent = settings.predictionSteps;
+                            }
+
+                            // 更新显示轨迹线复选框
+                            const showTrajectoryLine = document.getElementById('show-trajectory-line');
+                            if (showTrajectoryLine) {
+                                showTrajectoryLine.checked = settings.showTrajectoryLine;
+                            }
+
+                            // 更新显示预测线复选框
+                            const showPredictionLine = document.getElementById('show-prediction-line');
+                            if (showPredictionLine) {
+                                showPredictionLine.checked = settings.showPredictionLine;
+                            }
+                        }
+
+                        startRealTimeDetection(modelId);
+                    };
+                })
+                .catch(error => {
+                    console.error('打开摄像头失败:', error);
+
+                    // 显示更详细的错误信息
+                    let errorMessage = error.message;
+
+                    // 处理常见错误
+                    if (errorMessage.includes('Permission denied') || errorMessage.includes('NotAllowedError')) {
+                        errorMessage = '摄像头访问权限被拒绝。请在浏览器设置中允许摄像头访问权限。';
+                    } else if (errorMessage.includes('NotFoundError') || errorMessage.includes('OverconstrainedError')) {
+                        errorMessage = '找不到指定的摄像头设备。请尝试选择其他摄像头或使用默认摄像头。';
+                    } else if (errorMessage.includes('NotReadableError')) {
+                        errorMessage = '摄像头已被其他应用程序占用。请关闭可能正在使用摄像头的其他应用程序。';
+                    }
+
+                    // 显示错误信息
+                    alert('打开摄像头失败: ' + errorMessage);
+
+                    // 更新状态
+                    document.getElementById('detection-status').innerHTML =
+                        `<span class="badge bg-danger">摄像头错误: ${errorMessage}</span>`;
+
+                    // 尝试使用默认摄像头
+                    if (webcamId !== 'default' && confirm('是否尝试使用默认摄像头？')) {
+                        // 再次检查浏览器是否支持 mediaDevices API
+                        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                            const errorMessage = '浏览器不支持摄像头访问。请使用现代浏览器（如Chrome、Firefox、Edge）或通过HTTPS访问。';
+                            console.error(errorMessage);
+                            alert(errorMessage);
+                            return;
+                        }
+
+                        navigator.mediaDevices.getUserMedia({
+                            video: { facingMode: 'user' },
+                            audio: false
+                        })
+                        .then(mediaStream => {
+                            stream = mediaStream;
+                            videoElement.srcObject = stream;
+                            videoElement.style.display = 'block';
+                            videoElement.play();
+
+                            // 更新状态
+                            document.getElementById('detection-status').innerHTML =
+                                `<span class="badge bg-info">默认摄像头已就绪</span>`;
+
+                            // 设置画布大小
+                            videoElement.onloadedmetadata = function() {
+                                detectionCanvas.width = videoElement.videoWidth;
+                                detectionCanvas.height = videoElement.videoHeight;
+
+                                // 初始化报警区域
+                                if (window.alertZone) {
+                                    window.alertZone.resizeAlertZone(detectionCanvas.width, detectionCanvas.height);
+                                    window.alertZone.drawAlertZone();
+                                }
+
+                                startRealTimeDetection(modelId);
+                            };
+                        })
+                        .catch(fallbackError => {
+                            console.error('使用默认摄像头也失败:', fallbackError);
+                            alert('使用默认摄像头也失败: ' + fallbackError.message);
+                        });
+                    }
+                });
+            } else {
+                const videoFile = document.getElementById('rt-video-upload').files[0];
+                if (!videoFile) {
+                    alert('请选择视频文件');
+                    return;
+                }
+
+                // 创建URL对象
+                const videoURL = URL.createObjectURL(videoFile);
+                videoElement.src = videoURL;
+                videoElement.style.display = 'block';
+                videoElement.loop = true;
+                videoElement.play();
+
+                // 更新状态
+                document.getElementById('detection-status').innerHTML =
+                    `<span class="badge bg-info">视频已就绪</span>`;
+
+                // 设置画布大小
+                videoElement.onloadedmetadata = function() {
+                    detectionCanvas.width = videoElement.videoWidth;
+                    detectionCanvas.height = videoElement.videoHeight;
+
+                    console.log('视频文件元数据加载完成，画布大小:', detectionCanvas.width, detectionCanvas.height);
+
+                    // 初始化报警区域
+                    if (window.alertZone) {
+                        console.log('初始化报警区域');
+                        window.alertZone.resizeAlertZone(detectionCanvas.width, detectionCanvas.height);
+                    }
+
+                    startRealTimeDetection(modelId);
+                };
+            }
+        });
+
+        // 停止检测按钮事件
+        stopDetectionBtn.addEventListener('click', function() {
+            stopRealTimeDetection();
+        });
+
+        // 更新检测对象列表
+        function updateDetectionTable(detections) {
+            const tableBody = document.getElementById('detection-results-table');
+
+            // 清空表格
+            tableBody.innerHTML = '';
+
+            if (detections.length === 0) {
+                const row = document.createElement('tr');
+                const cell = document.createElement('td');
+                cell.colSpan = 3;
+                cell.className = 'text-center';
+                cell.textContent = '暂无检测结果';
+                row.appendChild(cell);
+                tableBody.appendChild(row);
+                return;
+            }
+
+            // 添加检测对象
+            detections.forEach(detection => {
+                const row = document.createElement('tr');
+
+                // 检查检测框格式
+                let x, y, width, height, className, confidence;
+
+                if (Array.isArray(detection.bbox)) {
+                    // 如果是数组格式 [x1, y1, x2, y2]
+                    const [x1, y1, x2, y2] = detection.bbox;
+                    x = x1;
+                    y = y1;
+                    width = x2 - x1;
+                    height = y2 - y1;
+                } else if (detection.bbox && typeof detection.bbox === 'object') {
+                    // 如果是对象格式 {x, y, width, height}
+                    x = detection.bbox.x;
+                    y = detection.bbox.y;
+                    width = detection.bbox.width;
+                    height = detection.bbox.height;
+                } else {
+                    console.error('检测框格式错误:', detection);
+                    return;
+                }
+
+                // 获取类别名称
+                if (detection.class_name) {
+                    className = detection.class_name;
+                } else if (detection.class) {
+                    className = detection.class;
+                } else {
+                    className = 'Unknown';
+                }
+
+                // 获取置信度
+                confidence = detection.confidence;
+
+                // 类别单元格
+                const classCell = document.createElement('td');
+                classCell.textContent = className;
+
+                // 置信度单元格
+                const confidenceCell = document.createElement('td');
+                confidenceCell.textContent = `${(confidence * 100).toFixed(1)}%`;
+
+                // 位置单元格
+                const positionCell = document.createElement('td');
+                positionCell.textContent = `X: ${Math.round(x)}, Y: ${Math.round(y)}, W: ${Math.round(width)}, H: ${Math.round(height)}`;
+
+                // 添加到行
+                row.appendChild(classCell);
+                row.appendChild(confidenceCell);
+                row.appendChild(positionCell);
+
+                // 添加到表格
+                tableBody.appendChild(row);
+            });
+        }
+
+        // 开始实时检测
+        function startRealTimeDetection(modelId) {
+            isDetecting = true;
+            startDetectionBtn.style.display = 'none';
+            stopDetectionBtn.style.display = 'inline-block';
+
+            // 更新检测状态
+            document.getElementById('detection-status').innerHTML =
+                `<span class="badge bg-warning">准备中...</span>`;
+
+            // 获取阈值
+            const confThreshold = parseFloat(document.getElementById('rt-conf-threshold').value);
+            const iouThreshold = parseFloat(document.getElementById('rt-iou-threshold').value);
+
+            // 定义检测函数
+            function detectFrame(timestamp) {
+                if (!isDetecting) return;
+
+                // 计算FPS
+                if (lastFrameTime) {
+                    fps = 1000 / (timestamp - lastFrameTime);
+                    fpsCounter.textContent = fps.toFixed(1);
+                }
+                lastFrameTime = timestamp;
+
+                // 绘制当前帧
+                const ctx = detectionCanvas.getContext('2d');
+                ctx.drawImage(videoElement, 0, 0, detectionCanvas.width, detectionCanvas.height);
+
+                // 获取当前帧数据
+                ctx.canvas.toBlob(function(blob) {
+                    // 创建一个有正确扩展名的文件
+                    const fileName = `frame_${Date.now()}.jpg`;
+                    const imageFile = new File([blob], fileName, { type: 'image/jpeg' });
+
+                    const formData = new FormData();
+                    formData.append('file', imageFile);
+                    formData.append('model_id', modelId);
+                    formData.append('conf_thres', confThreshold);
+                    formData.append('iou_thres', iouThreshold);
+
+                    // 发送检测请求
+                    console.log('发送检测请求，文件名：', fileName);
+
+                    fetch(`${API_URL}/detection/`, {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        console.log('检测响应状态：', response.status);
+                        if (!response.ok) {
+                            return response.text().then(text => {
+                                try {
+                                    // 尝试解析JSON
+                                    const json = JSON.parse(text);
+                                    throw new Error(json.detail || '检测失败');
+                                } catch (e) {
+                                    // 如果不是JSON，直接返回文本
+                                    throw new Error(text || '检测失败');
+                                }
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Detection API response:', data);
+
+                        // 检查是否有检测结果
+                        if (data && data.id) {
+                            // 获取检测结果
+                            fetch(`${API_URL}/detection/${data.id}/result`)
+                                .then(response => response.json())
+                                .then(resultData => {
+                                    console.log('Detection result:', resultData);
+
+                                    if (resultData.status === 'completed' && resultData.results && resultData.results.length > 0) {
+                                        // 获取第一个结果的检测内容
+                                        const detections = resultData.results[0].detections || [];
+
+                                        // 更新检测到的目标数量
+                                        detectedObjects = detections.length;
+                                        objectsCounter.textContent = detectedObjects;
+
+                                        // 处理轨迹记录和预测
+                                        if (trajectoryEnabled && window.trajectory) {
+                                            // 跟踪目标
+                                            const trackedObjects = window.trajectory.trackObjects(detections);
+
+                                            // 更新轨迹
+                                            window.trajectory.updateTrajectories(trackedObjects);
+
+                                            // 绘制检测框
+                                            drawDetections(ctx, trackedObjects);
+
+                                            // 绘制轨迹
+                                            window.trajectory.drawTrajectories(ctx);
+
+                                            // 更新检测对象列表
+                                            updateDetectionTable(trackedObjects);
+
+                                            // 检查目标物体并触发报警
+                                            checkTargetObjects(trackedObjects);
+                                        } else {
+                                            // 绘制检测框
+                                            drawDetections(ctx, detections);
+
+                                            // 更新检测对象列表
+                                            updateDetectionTable(detections);
+
+                                            // 检查目标物体并触发报警
+                                            checkTargetObjects(detections);
+                                        }
+
+                                        // 更新检测状态
+                                        document.getElementById('detection-status').innerHTML =
+                                            `<span class="badge bg-success">正在检测</span>`;
+                                    } else if (resultData.status === 'pending' || resultData.status === 'running') {
+                                        // 更新检测状态
+                                        document.getElementById('detection-status').innerHTML =
+                                            `<span class="badge bg-warning">处理中...</span>`;
+                                    } else {
+                                        // 更新检测状态
+                                        document.getElementById('detection-status').innerHTML =
+                                            `<span class="badge bg-danger">检测失败</span>`;
+                                    }
+                                })
+                                .catch(error => {
+                                    console.error('获取检测结果失败:', error);
+                                    document.getElementById('detection-status').innerHTML =
+                                        `<span class="badge bg-danger">获取结果失败</span>`;
+                                });
+                        } else {
+                            // 更新检测状态
+                            document.getElementById('detection-status').innerHTML =
+                                `<span class="badge bg-danger">检测失败</span>`;
+                        }
+
+                        // 继续检测下一帧
+                        if (isDetecting) {
+                            animationFrameId = requestAnimationFrame(detectFrame);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('检测失败:', error);
+
+                        // 显示错误信息
+                        document.getElementById('detection-status').innerHTML =
+                            `<span class="badge bg-danger">错误: ${error.message}</span>`;
+
+                        // 清空检测对象列表
+                        const tableBody = document.getElementById('detection-results-table');
+                        tableBody.innerHTML = '<tr><td colspan="3" class="text-center text-danger">检测失败: ' + error.message + '</td></tr>';
+
+                        // 继续检测下一帧
+                        if (isDetecting) {
+                            animationFrameId = requestAnimationFrame(detectFrame);
+                        }
+                    });
+                }, 'image/jpeg');
+            }
+
+            // 绘制检测框
+            function drawDetections(ctx, detections) {
+                // 清除上一帧的检测框
+                ctx.drawImage(videoElement, 0, 0, detectionCanvas.width, detectionCanvas.height);
+
+                // 绘制新的检测框
+                detections.forEach(detection => {
+                    // 检查检测框格式
+                    let x, y, width, height, className, confidence;
+
+                    if (Array.isArray(detection.bbox)) {
+                        // 如果是数组格式 [x1, y1, x2, y2]
+                        const [x1, y1, x2, y2] = detection.bbox;
+                        x = x1;
+                        y = y1;
+                        width = x2 - x1;
+                        height = y2 - y1;
+                    } else if (detection.bbox && typeof detection.bbox === 'object') {
+                        // 如果是对象格式 {x, y, width, height}
+                        x = detection.bbox.x;
+                        y = detection.bbox.y;
+                        width = detection.bbox.width;
+                        height = detection.bbox.height;
+                    } else {
+                        console.error('检测框格式错误:', detection);
+                        return;
+                    }
+
+                    // 获取类别名称
+                    if (detection.class_name) {
+                        className = detection.class_name;
+                    } else if (detection.class) {
+                        className = detection.class;
+                    } else {
+                        className = 'Unknown';
+                    }
+
+                    // 获取置信度
+                    confidence = detection.confidence;
+
+                    // 创建标签
+                    const label = `${className} ${(confidence * 100).toFixed(1)}%`;
+
+                    // 随机生成颜色
+                    const hue = (className.length * 5) % 360;
+                    ctx.strokeStyle = `hsl(${hue}, 100%, 50%)`;
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, width, height);
+
+                    // 绘制标签背景
+                    ctx.fillStyle = `hsl(${hue}, 100%, 50%)`;
+                    const textWidth = ctx.measureText(label).width;
+                    ctx.fillRect(x, y - 20, textWidth + 10, 20);
+
+                    // 绘制标签文字
+                    ctx.fillStyle = 'white';
+                    ctx.font = '14px Arial';
+                    ctx.fillText(label, x + 5, y - 5);
+                });
+            }
+
+            // 开始检测
+            animationFrameId = requestAnimationFrame(detectFrame);
+        }
+
+        // 停止实时检测
+        function stopRealTimeDetection() {
+            isDetecting = false;
+
+            // 更新检测状态
+            document.getElementById('detection-status').innerHTML =
+                `<span class="badge bg-secondary">已停止</span>`;
+
+            // 取消动画帧
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+
+            // 关闭摄像头
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+                stream = null;
+            }
+
+            // 重置视频元素
+            videoElement.srcObject = null;
+            videoElement.src = '';
+            videoElement.pause();
+
+            // 重置按钮状态
+            startDetectionBtn.style.display = 'inline-block';
+            stopDetectionBtn.style.display = 'none';
+
+            // 清除画布
+            const ctx = detectionCanvas.getContext('2d');
+            ctx.clearRect(0, 0, detectionCanvas.width, detectionCanvas.height);
+
+            // 重置计数器
+            fpsCounter.textContent = '0';
+            objectsCounter.textContent = '0';
+
+            // 清空检测对象列表
+            const tableBody = document.getElementById('detection-results-table');
+            tableBody.innerHTML = '<tr><td colspan="3" class="text-center">暂无检测结果</td></tr>';
+        }
+    }
+
+    console.log('Video Processing events bound successfully');
+}
