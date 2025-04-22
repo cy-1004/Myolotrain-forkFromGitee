@@ -202,3 +202,5 @@ async def root():
     except Exception as e:
         logger.error(f"Error loading index.html: {e}")
         return HTMLResponse(content="<h1>Error loading page</h1><p>Please check server logs.</p>", status_code=500)
+
+

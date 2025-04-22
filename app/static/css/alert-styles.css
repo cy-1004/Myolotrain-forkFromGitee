@@ -1,0 +1,67 @@
+/* 报警样式 */
+.alert-flash {
+    animation: flash 1s infinite;
+}
+
+@keyframes flash {
+    0% {
+        background-color: #f8d7da;
+    }
+    50% {
+        background-color: #dc3545;
+        color: white;
+    }
+    100% {
+        background-color: #f8d7da;
+    }
+}
+
+/* 目标物体标签样式 */
+.badge .btn-close {
+    font-size: 0.5em;
+    margin-left: 5px;
+    padding: 0.25em;
+}
+
+/* 报警历史表格样式 */
+#alert-history-table tr:first-child {
+    font-weight: bold;
+    background-color: #fff3cd;
+}
+
+/* 报警区域样式 */
+#video-container, .position-relative {
+    position: relative !important;
+}
+
+#video-element, #detection-canvas {
+    width: 100%;
+    height: auto;
+}
+
+/* 绘制画布样式 */
+canvas.position-absolute {
+    position: absolute !important;
+    top: 0;
+    left: 0;
+    pointer-events: auto;
+    cursor: crosshair;
+    z-index: 10;
+}
+
+/* 统计图表样式 */
+#object-distribution-chart, #alert-frequency-chart {
+    max-height: 300px;
+}
+
+#no-distribution-data, #no-frequency-data {
+    display: none;
+    color: #6c757d;
+    font-style: italic;
+}
+
+/* 统计卡片样式 */
+.card-text.fs-2 {
+    font-weight: bold;
+    text-align: center;
+}

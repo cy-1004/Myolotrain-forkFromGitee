@@ -1,0 +1,563 @@
+{% extends "base.html" %}
+
+{% block title %}OpenCV 图像处理{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">OpenCV 图像处理工具</h1>
+    
+    <div class="row">
+        <div class="col-md-12 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <ul class="nav nav-tabs card-header-tabs" id="opencv-tabs" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" id="preprocess-tab" data-bs-toggle="tab" data-bs-target="#preprocess" type="button" role="tab" aria-controls="preprocess" aria-selected="true">图像预处理</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="analyze-tab" data-bs-toggle="tab" data-bs-target="#analyze" type="button" role="tab" aria-controls="analyze" aria-selected="false">图像分析</button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" id="augment-tab" data-bs-toggle="tab" data-bs-target="#augment" type="button" role="tab" aria-controls="augment" aria-selected="false">数据增强</button>
+                        </li>
+                    </ul>
+                </div>
+                <div class="card-body">
+                    <div class="tab-content" id="opencv-tabs-content">
+                        <!-- 图像预处理 -->
+                        <div class="tab-pane fade show active" id="preprocess" role="tabpanel" aria-labelledby="preprocess-tab">
+                            <h5 class="card-title">图像预处理</h5>
+                            <p class="card-text">上传图像并应用各种预处理操作。</p>
+                            
+                            <form id="preprocess-form" enctype="multipart/form-data">
+                                <div class="mb-3">
+                                    <label for="image-upload" class="form-label">选择图像</label>
+                                    <input class="form-control" type="file" id="image-upload" name="image" accept="image/*">
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">预处理操作</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="resize-check">
+                                        <label class="form-check-label" for="resize-check">调整大小</label>
+                                    </div>
+                                    <div class="row mb-3" id="resize-options" style="display: none;">
+                                        <div class="col-md-6">
+                                            <label for="resize-width" class="form-label">宽度</label>
+                                            <input type="number" class="form-control" id="resize-width" value="640">
+                                        </div>
+                                        <div class="col-md-6">
+                                            <label for="resize-height" class="form-label">高度</label>
+                                            <input type="number" class="form-control" id="resize-height" value="480">
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="denoise-check">
+                                        <label class="form-check-label" for="denoise-check">去噪</label>
+                                    </div>
+                                    <div class="mb-3" id="denoise-options" style="display: none;">
+                                        <label for="denoise-strength" class="form-label">强度: <span id="denoise-strength-value">5</span></label>
+                                        <input type="range" class="form-range" id="denoise-strength" min="1" max="10" value="5">
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="brightness-contrast-check">
+                                        <label class="form-check-label" for="brightness-contrast-check">亮度和对比度</label>
+                                    </div>
+                                    <div class="mb-3" id="brightness-contrast-options" style="display: none;">
+                                        <label for="brightness" class="form-label">亮度: <span id="brightness-value">0</span></label>
+                                        <input type="range" class="form-range" id="brightness" min="-100" max="100" value="0">
+                                        
+                                        <label for="contrast" class="form-label">对比度: <span id="contrast-value">1.0</span></label>
+                                        <input type="range" class="form-range" id="contrast" min="0" max="30" value="10" step="1">
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="sharpen-check">
+                                        <label class="form-check-label" for="sharpen-check">锐化</label>
+                                    </div>
+                                    <div class="mb-3" id="sharpen-options" style="display: none;">
+                                        <label for="sharpen-amount" class="form-label">强度: <span id="sharpen-amount-value">1.0</span></label>
+                                        <input type="range" class="form-range" id="sharpen-amount" min="0" max="50" value="10" step="1">
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary">处理图像</button>
+                            </form>
+                            
+                            <div class="mt-4" id="preprocess-result" style="display: none;">
+                                <h5>处理结果</h5>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <h6>原始图像</h6>
+                                        <img id="original-image" class="img-fluid" src="" alt="原始图像">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <h6>处理后图像</h6>
+                                        <img id="processed-image" class="img-fluid" src="" alt="处理后图像">
+                                    </div>
+                                </div>
+                                <div class="mt-3">
+                                    <a id="download-processed" href="#" class="btn btn-success" download>下载处理后图像</a>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 图像分析 -->
+                        <div class="tab-pane fade" id="analyze" role="tabpanel" aria-labelledby="analyze-tab">
+                            <h5 class="card-title">图像分析</h5>
+                            <p class="card-text">上传图像进行质量分析。</p>
+                            
+                            <form id="analyze-form" enctype="multipart/form-data">
+                                <div class="mb-3">
+                                    <label for="analyze-image-upload" class="form-label">选择图像</label>
+                                    <input class="form-control" type="file" id="analyze-image-upload" name="image" accept="image/*">
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary">分析图像</button>
+                            </form>
+                            
+                            <div class="mt-4" id="analyze-result" style="display: none;">
+                                <h5>分析结果</h5>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <img id="analyzed-image" class="img-fluid" src="" alt="分析图像">
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card">
+                                            <div class="card-body">
+                                                <h6 class="card-title">图像质量报告</h6>
+                                                <div id="blur-result">
+                                                    <p><strong>模糊检测:</strong> <span id="blur-status"></span></p>
+                                                    <p>清晰度得分: <span id="blur-score"></span></p>
+                                                </div>
+                                                <div id="exposure-result">
+                                                    <p><strong>曝光检测:</strong></p>
+                                                    <p>过度曝光: <span id="overexposed-status"></span></p>
+                                                    <p>曝光不足: <span id="underexposed-status"></span></p>
+                                                </div>
+                                                <div id="recommendations">
+                                                    <h6>建议:</h6>
+                                                    <ul id="recommendation-list"></ul>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 数据增强 -->
+                        <div class="tab-pane fade" id="augment" role="tabpanel" aria-labelledby="augment-tab">
+                            <h5 class="card-title">数据增强</h5>
+                            <p class="card-text">选择数据集目录进行增强。</p>
+                            
+                            <form id="augment-form">
+                                <div class="mb-3">
+                                    <label for="dataset-path" class="form-label">数据集路径</label>
+                                    <select class="form-select" id="dataset-path" name="dataset_path">
+                                        <option value="">选择数据集...</option>
+                                        <!-- 数据集选项将通过 JavaScript 动态加载 -->
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="multiplier" class="form-label">扩增倍数</label>
+                                    <input type="number" class="form-control" id="multiplier" name="multiplier" value="2" min="1" max="10">
+                                    <div class="form-text">原始数据集将扩增为原来的几倍</div>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label class="form-label">增强选项</label>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="flip-check" checked>
+                                        <label class="form-check-label" for="flip-check">翻转 (水平和垂直)</label>
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="rotate-check" checked>
+                                        <label class="form-check-label" for="rotate-check">旋转</label>
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="noise-check">
+                                        <label class="form-check-label" for="noise-check">添加噪声</label>
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="brightness-contrast-aug-check" checked>
+                                        <label class="form-check-label" for="brightness-contrast-aug-check">亮度和对比度变化</label>
+                                    </div>
+                                    
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="perspective-check">
+                                        <label class="form-check-label" for="perspective-check">透视变换</label>
+                                    </div>
+                                </div>
+                                
+                                <button type="submit" class="btn btn-primary">开始增强</button>
+                            </form>
+                            
+                            <div class="mt-4" id="augment-result" style="display: none;">
+                                <div class="alert alert-info">
+                                    <h5>增强任务已启动</h5>
+                                    <p>任务 ID: <span id="augmentation-id"></span></p>
+                                    <p>输出目录: <span id="output-dir"></span></p>
+                                    <div class="progress mt-2">
+                                        <div id="augment-progress" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%"></div>
+                                    </div>
+                                </div>
+                                
+                                <div id="augment-status" class="mt-3">
+                                    <p>状态: <span id="augment-status-text">进行中...</span></p>
+                                </div>
+                                
+                                <div id="augment-stats" class="mt-3" style="display: none;">
+                                    <h6>增强统计</h6>
+                                    <ul>
+                                        <li>原始图像数量: <span id="original-images-count"></span></li>
+                                        <li>增强图像数量: <span id="augmented-images-count"></span></li>
+                                        <li>总图像数量: <span id="total-images-count"></span></li>
+                                    </ul>
+                                    <h6>应用的增强</h6>
+                                    <ul id="applied-augmentations"></ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // 图像预处理相关脚本
+    document.addEventListener('DOMContentLoaded', function() {
+        // 显示/隐藏选项
+        document.getElementById('resize-check').addEventListener('change', function() {
+            document.getElementById('resize-options').style.display = this.checked ? 'block' : 'none';
+        });
+        
+        document.getElementById('denoise-check').addEventListener('change', function() {
+            document.getElementById('denoise-options').style.display = this.checked ? 'block' : 'none';
+        });
+        
+        document.getElementById('brightness-contrast-check').addEventListener('change', function() {
+            document.getElementById('brightness-contrast-options').style.display = this.checked ? 'block' : 'none';
+        });
+        
+        document.getElementById('sharpen-check').addEventListener('change', function() {
+            document.getElementById('sharpen-options').style.display = this.checked ? 'block' : 'none';
+        });
+        
+        // 更新滑块值显示
+        document.getElementById('denoise-strength').addEventListener('input', function() {
+            document.getElementById('denoise-strength-value').textContent = this.value;
+        });
+        
+        document.getElementById('brightness').addEventListener('input', function() {
+            document.getElementById('brightness-value').textContent = this.value;
+        });
+        
+        document.getElementById('contrast').addEventListener('input', function() {
+            document.getElementById('contrast-value').textContent = (this.value / 10).toFixed(1);
+        });
+        
+        document.getElementById('sharpen-amount').addEventListener('input', function() {
+            document.getElementById('sharpen-amount-value').textContent = (this.value / 10).toFixed(1);
+        });
+        
+        // 预处理表单提交
+        document.getElementById('preprocess-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const imageFile = document.getElementById('image-upload').files[0];
+            if (!imageFile) {
+                alert('请选择图像文件');
+                return;
+            }
+            
+            // 构建操作列表
+            const operations = [];
+            
+            if (document.getElementById('resize-check').checked) {
+                operations.push({
+                    name: 'resize_image',
+                    params: {
+                        width: parseInt(document.getElementById('resize-width').value),
+                        height: parseInt(document.getElementById('resize-height').value)
+                    }
+                });
+            }
+            
+            if (document.getElementById('denoise-check').checked) {
+                operations.push({
+                    name: 'denoise_image',
+                    params: {
+                        strength: parseInt(document.getElementById('denoise-strength').value)
+                    }
+                });
+            }
+            
+            if (document.getElementById('brightness-contrast-check').checked) {
+                operations.push({
+                    name: 'adjust_brightness_contrast',
+                    params: {
+                        brightness: parseInt(document.getElementById('brightness').value),
+                        contrast: parseFloat(document.getElementById('contrast').value) / 10
+                    }
+                });
+            }
+            
+            if (document.getElementById('sharpen-check').checked) {
+                operations.push({
+                    name: 'sharpen_image',
+                    params: {
+                        amount: parseFloat(document.getElementById('sharpen-amount').value) / 10
+                    }
+                });
+            }
+            
+            if (operations.length === 0) {
+                alert('请至少选择一个预处理操作');
+                return;
+            }
+            
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('image', imageFile);
+            formData.append('operations', JSON.stringify(operations));
+            
+            // 显示原始图像
+            const originalImage = document.getElementById('original-image');
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                originalImage.src = e.target.result;
+            };
+            reader.readAsDataURL(imageFile);
+            
+            // 发送请求
+            fetch('/api/opencv/preprocess', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '处理图像失败'); });
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // 显示处理后的图像
+                const processedImage = document.getElementById('processed-image');
+                const downloadLink = document.getElementById('download-processed');
+                
+                const url = URL.createObjectURL(blob);
+                processedImage.src = url;
+                downloadLink.href = url;
+                downloadLink.download = 'processed_' + imageFile.name;
+                
+                // 显示结果区域
+                document.getElementById('preprocess-result').style.display = 'block';
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+        
+        // 图像分析表单提交
+        document.getElementById('analyze-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const imageFile = document.getElementById('analyze-image-upload').files[0];
+            if (!imageFile) {
+                alert('请选择图像文件');
+                return;
+            }
+            
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('image', imageFile);
+            
+            // 显示分析图像
+            const analyzedImage = document.getElementById('analyzed-image');
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                analyzedImage.src = e.target.result;
+            };
+            reader.readAsDataURL(imageFile);
+            
+            // 发送请求
+            fetch('/api/opencv/analyze-image', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '分析图像失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示分析结果
+                document.getElementById('blur-status').textContent = data.blur.is_blurry ? '模糊' : '清晰';
+                document.getElementById('blur-score').textContent = data.blur.score.toFixed(2);
+                
+                document.getElementById('overexposed-status').textContent = data.exposure.is_overexposed ? 
+                    `是 (${(data.exposure.overexposed_ratio * 100).toFixed(2)}%)` : 
+                    `否 (${(data.exposure.overexposed_ratio * 100).toFixed(2)}%)`;
+                
+                document.getElementById('underexposed-status').textContent = data.exposure.is_underexposed ? 
+                    `是 (${(data.exposure.underexposed_ratio * 100).toFixed(2)}%)` : 
+                    `否 (${(data.exposure.underexposed_ratio * 100).toFixed(2)}%)`;
+                
+                // 显示建议
+                const recommendationList = document.getElementById('recommendation-list');
+                recommendationList.innerHTML = '';
+                
+                data.recommendations.forEach(recommendation => {
+                    if (recommendation) {
+                        const li = document.createElement('li');
+                        li.textContent = recommendation;
+                        recommendationList.appendChild(li);
+                    }
+                });
+                
+                if (recommendationList.children.length === 0) {
+                    const li = document.createElement('li');
+                    li.textContent = '图像质量良好，无需改进';
+                    recommendationList.appendChild(li);
+                }
+                
+                // 显示结果区域
+                document.getElementById('analyze-result').style.display = 'block';
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+        
+        // 加载数据集列表
+        fetch('/api/datasets')
+        .then(response => response.json())
+        .then(data => {
+            const datasetSelect = document.getElementById('dataset-path');
+            
+            data.forEach(dataset => {
+                const option = document.createElement('option');
+                option.value = dataset.path;
+                option.textContent = dataset.name;
+                datasetSelect.appendChild(option);
+            });
+        })
+        .catch(error => {
+            console.error('加载数据集失败:', error);
+        });
+        
+        // 数据增强表单提交
+        document.getElementById('augment-form').addEventListener('submit', function(e) {
+            e.preventDefault();
+            
+            const datasetPath = document.getElementById('dataset-path').value;
+            if (!datasetPath) {
+                alert('请选择数据集');
+                return;
+            }
+            
+            // 构建增强选项
+            const augmentationOptions = {
+                flip: document.getElementById('flip-check').checked,
+                rotate: document.getElementById('rotate-check').checked ? {
+                    angles: [90, 180, 270]
+                } : false,
+                noise: document.getElementById('noise-check').checked ? {
+                    types: ['gaussian'],
+                    amount: 0.05
+                } : false,
+                brightness_contrast: document.getElementById('brightness-contrast-aug-check').checked ? {
+                    brightness: [-20, 20],
+                    contrast: [0.8, 1.2]
+                } : false,
+                perspective: document.getElementById('perspective-check').checked,
+                perspective_strength: 0.2
+            };
+            
+            // 创建表单数据
+            const formData = new FormData();
+            formData.append('dataset_path', datasetPath);
+            formData.append('augmentation_options', JSON.stringify(augmentationOptions));
+            formData.append('multiplier', document.getElementById('multiplier').value);
+            
+            // 发送请求
+            fetch('/api/opencv/augment-dataset', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '启动数据增强任务失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示任务信息
+                document.getElementById('augmentation-id').textContent = data.augmentation_id;
+                document.getElementById('output-dir').textContent = data.output_dir;
+                
+                // 显示结果区域
+                document.getElementById('augment-result').style.display = 'block';
+                document.getElementById('augment-stats').style.display = 'none';
+                
+                // 开始轮询任务状态
+                const augmentationId = data.augmentation_id;
+                const statusInterval = setInterval(() => {
+                    fetch(`/api/opencv/augmentation-status/${augmentationId}`)
+                    .then(response => response.json())
+                    .then(statusData => {
+                        document.getElementById('augment-status-text').textContent = statusData.status;
+                        
+                        if (statusData.status === 'completed') {
+                            clearInterval(statusInterval);
+                            document.getElementById('augment-progress').style.width = '100%';
+                            
+                            // 显示统计信息
+                            document.getElementById('original-images-count').textContent = statusData.stats.original_images;
+                            document.getElementById('augmented-images-count').textContent = statusData.stats.augmented_images;
+                            document.getElementById('total-images-count').textContent = statusData.stats.total_images;
+                            
+                            // 显示应用的增强
+                            const appliedAugmentations = document.getElementById('applied-augmentations');
+                            appliedAugmentations.innerHTML = '';
+                            
+                            for (const [key, value] of Object.entries(statusData.stats.augmentations_applied)) {
+                                const li = document.createElement('li');
+                                li.textContent = `${key}: ${value} 张图像`;
+                                appliedAugmentations.appendChild(li);
+                            }
+                            
+                            document.getElementById('augment-stats').style.display = 'block';
+                        } else if (statusData.status === 'failed') {
+                            clearInterval(statusInterval);
+                            document.getElementById('augment-progress').style.width = '100%';
+                            document.getElementById('augment-progress').classList.remove('bg-info');
+                            document.getElementById('augment-progress').classList.add('bg-danger');
+                            document.getElementById('augment-status-text').textContent = '失败: ' + statusData.error;
+                        } else {
+                            // 更新进度条
+                            document.getElementById('augment-progress').style.width = '50%';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('获取任务状态失败:', error);
+                    });
+                }, 2000);
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    });
+</script>
+{% endblock %}

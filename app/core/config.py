@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     DATASETS_DIR: Path = STATIC_DIR / "datasets"
     MODELS_DIR: Path = STATIC_DIR / "models"
     RESULTS_DIR: Path = STATIC_DIR / "results"
+    TEMP_DIR: Path = STATIC_DIR / "temp"
 
     # TensorBoard
     TENSORBOARD_LOGS_DIR: Path = BASE_DIR / "logs" / "tensorboard"
@@ -71,6 +72,7 @@ for directory in [
     settings.MODELS_DIR,
     settings.RESULTS_DIR,
     settings.TENSORBOARD_LOGS_DIR,
+    settings.TEMP_DIR,
 ]:
     os.makedirs(directory, exist_ok=True)
 
