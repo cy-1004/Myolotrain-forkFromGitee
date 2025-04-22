@@ -3,7 +3,13 @@
 [![Gitee stars](https://gitee.com/rock_kim/Myolotrain/badge/star.svg?theme=dark)](https://gitee.com/YOUR_USERNAME/myolotrain)
 [![Gitee forks](https://gitee.com/rock_kim/Myolotrain/badge/fork.svg?theme=dark)](https://gitee.com/YOUR_USERNAME/myolotrain)
 
-Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机视觉任务提供了直观的图形界面。该平台集成了数据集管理、模型管理、训练管理和目标检测功能，支持windows、linux、docker等多种部署方式，使用户能够轻松地训练和部署 YOLOv8 模型，支持CPU和GPU，使用tensorboard实时查看训练进度，具备数据集自动分割功能。
+Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机视觉任务提供了直观的图形界面。该平台集成了数据集管理、模型管理、训练管理和目标检测功能，支持windows、linux、docker等多种部署方式，使用户能够轻松地训练和部署 YOLOv8 模型，支持CPU和GPU，使用tensorboard实时查看训练进度，具备数据集自动分割、数据集增强、实时检测、动态轨迹和预测等。
+
+### 更新日志：
+ **- 20250422 扩展OpenCV功能，增加了图片处理、视频处理两大功能，解决了部分BUG：**
+> - 增加图片处理和视频处理功能，具备了数据集增强、实时检测、实时检测报警（可绘制报警区域）、动态轨迹追踪和预测功能，
+> - 解决了datasets_import目录在导入时被重复迁移的bug，训练时将直接使用此目录
+> - 解决了训练脚本占位符异常问题
 
 
 ### 注意事项 :exclamation:  :exclamation:  :exclamation: ：
@@ -125,6 +131,32 @@ ZIP导入功能
 ![模型验证](%E4%BB%8B%E7%BB%8Dimages/4%E9%AA%8C%E8%AF%81%E5%8A%9F%E8%83%BD.png)
 
 ![验证结果](%E4%BB%8B%E7%BB%8Dimages/%E9%AA%8C%E8%AF%81%E6%95%88%E6%9E%9C.png)
+
+#### 1.2.5 图像处理功能
+- **图像预处理**：可以调整大小、去噪、亮度和对比度、锐化
+- **图像分析**：上传图像进行质量分析
+- **数据增强** ：可倍数扩展数据集图片，具备水平和垂直翻转、旋转、添加噪声、亮度和对比度变化、透视变换功能
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E5%9B%BE%E5%83%8F%E5%A4%84%E7%90%86.png)
+
+#### 1.2.6 视频处理功能
+- **提取帧**：上传视频并按照指定间隔提取帧。
+- **场景检测**：上传视频进行场景变化检测。
+- **运动检测**：上传视频进行运动检测。
+- **实时检测**：使用模型对视频或摄像头进行实时目标检测。具备报警区域绘制、报警项目自定义、运动轨迹追踪、运动轨迹预测等功能。
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E6%91%84%E5%83%8F%E5%A4%B4%E6%88%96%E8%A7%86%E9%A2%91.png)
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E5%A4%9A%E7%9B%AE%E6%A0%87%E6%8A%A5%E8%AD%A6.png)
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E6%8A%A5%E8%AD%A6.png)
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E6%8A%A5%E8%AD%A6%E5%8E%86%E5%8F%B2.png)
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E8%BD%A8%E8%BF%B9%E5%92%8C%E9%A2%84%E6%B5%8B2.png)
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E8%BD%A8%E8%BF%B9%E5%92%8C%E9%A2%84%E6%B5%8B.png)
+
 
 ## 2 目录结构
 
