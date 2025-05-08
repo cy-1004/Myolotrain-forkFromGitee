@@ -4,6 +4,8 @@ OpenCV 服务模块 - 提供图像处理和计算机视觉功能
 import os
 import cv2
 import numpy as np
+import math
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 import logging
@@ -400,6 +402,222 @@ class OpenCVService:
 
     # ==================== 数据集增强功能 ====================
 
+    @staticmethod
+    def load_yolo_labels(label_path: str) -> List[List[float]]:
+        """
+        加载YOLO格式的标签文件
+
+        Args:
+            label_path: 标签文件路径
+
+        Returns:
+            List[List[float]]: 标签列表，每个标签是 [class_id, x_center, y_center, width, height]
+        """
+        if not os.path.exists(label_path):
+            return []
+
+        try:
+            labels = []
+            with open(label_path, 'r') as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) == 5:  # 确保格式正确
+                        # 转换为浮点数
+                        label = [float(p) for p in parts]
+                        labels.append(label)
+            return labels
+        except Exception as e:
+            logger.error(f"加载标签文件失败: {str(e)}")
+            return []
+
+    @staticmethod
+    def save_yolo_labels(label_path: str, labels: List[List[float]]) -> bool:
+        """
+        保存YOLO格式的标签文件
+
+        Args:
+            label_path: 标签文件路径
+            labels: 标签列表，每个标签是 [class_id, x_center, y_center, width, height]
+
+        Returns:
+            bool: 是否保存成功
+        """
+        try:
+            os.makedirs(os.path.dirname(label_path), exist_ok=True)
+            with open(label_path, 'w') as f:
+                for label in labels:
+                    # 确保class_id是整数
+                    class_id = int(label[0])
+                    # 确保坐标在0-1范围内
+                    x = max(0, min(1, label[1]))
+                    y = max(0, min(1, label[2]))
+                    w = max(0, min(1, label[3]))
+                    h = max(0, min(1, label[4]))
+                    f.write(f"{class_id} {x:.6f} {y:.6f} {w:.6f} {h:.6f}\n")
+            return True
+        except Exception as e:
+            logger.error(f"保存标签文件失败: {str(e)}")
+            return False
+
+    @staticmethod
+    def transform_labels_flip_horizontal(labels: List[List[float]]) -> List[List[float]]:
+        """
+        水平翻转标签坐标
+
+        Args:
+            labels: 原始标签列表
+
+        Returns:
+            List[List[float]]: 变换后的标签列表
+        """
+        transformed = []
+        for label in labels:
+            # 复制标签
+            new_label = label.copy()
+            # 水平翻转：x = 1 - x
+            new_label[1] = 1.0 - label[1]
+            transformed.append(new_label)
+        return transformed
+
+    @staticmethod
+    def transform_labels_flip_vertical(labels: List[List[float]]) -> List[List[float]]:
+        """
+        垂直翻转标签坐标
+
+        Args:
+            labels: 原始标签列表
+
+        Returns:
+            List[List[float]]: 变换后的标签列表
+        """
+        transformed = []
+        for label in labels:
+            # 复制标签
+            new_label = label.copy()
+            # 垂直翻转：y = 1 - y
+            new_label[2] = 1.0 - label[2]
+            transformed.append(new_label)
+        return transformed
+
+    @staticmethod
+    def transform_labels_rotate(labels: List[List[float]], angle: float, img_width: int, img_height: int) -> List[List[float]]:
+        """
+        旋转标签坐标
+
+        Args:
+            labels: 原始标签列表
+            angle: 旋转角度（度）
+            img_width: 图像宽度
+            img_height: 图像高度
+
+        Returns:
+            List[List[float]]: 变换后的标签列表
+        """
+        # 对于90度的倍数旋转，我们可以直接计算
+        transformed = []
+
+        # 将角度转换为弧度
+        angle_rad = math.radians(angle)
+
+        # 计算旋转中心（归一化坐标）
+        cx, cy = 0.5, 0.5
+
+        for label in labels:
+            # 复制标签
+            new_label = label.copy()
+
+            # 获取归一化坐标
+            x, y = label[1], label[2]
+            w, h = label[3], label[4]
+
+            # 特殊情况处理：90度的倍数
+            if angle == 90:
+                # 90度旋转：(x,y) -> (1-y,x)
+                new_x = 1.0 - y
+                new_y = x
+                # 宽高互换
+                new_w = h
+                new_h = w
+            elif angle == 180:
+                # 180度旋转：(x,y) -> (1-x,1-y)
+                new_x = 1.0 - x
+                new_y = 1.0 - y
+                new_w = w
+                new_h = h
+            elif angle == 270:
+                # 270度旋转：(x,y) -> (y,1-x)
+                new_x = y
+                new_y = 1.0 - x
+                # 宽高互换
+                new_w = h
+                new_h = w
+            else:
+                # 一般角度旋转（不常用，可能会导致标注框变形）
+                # 将归一化坐标转换为像素坐标
+                px = x * img_width
+                py = y * img_height
+
+                # 计算相对于中心的偏移
+                dx = px - img_width / 2
+                dy = py - img_height / 2
+
+                # 应用旋转
+                new_dx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad)
+                new_dy = dx * math.sin(angle_rad) + dy * math.cos(angle_rad)
+
+                # 计算新的像素坐标
+                new_px = new_dx + img_width / 2
+                new_py = new_dy + img_height / 2
+
+                # 转换回归一化坐标
+                new_x = new_px / img_width
+                new_y = new_py / img_height
+
+                # 对于非90度的倍数旋转，宽高计算比较复杂，这里简化处理
+                new_w = w
+                new_h = h
+
+            # 更新标签
+            new_label[1] = max(0, min(1, new_x))
+            new_label[2] = max(0, min(1, new_y))
+            new_label[3] = max(0, min(1, new_w))
+            new_label[4] = max(0, min(1, new_h))
+
+            transformed.append(new_label)
+
+        return transformed
+
+    @staticmethod
+    def transform_labels_perspective(labels: List[List[float]], strength: float) -> List[List[float]]:
+        """
+        透视变换标签坐标
+
+        Args:
+            labels: 原始标签列表
+            strength: 变换强度
+
+        Returns:
+            List[List[float]]: 变换后的标签列表
+        """
+        # 透视变换对标注框的影响比较复杂，这里做一个简化处理
+        # 对于小幅度的透视变换，我们可以近似保持中心点不变，但缩小标注框的大小
+        transformed = []
+
+        # 缩放因子，随着强度增加而减小
+        scale_factor = 1.0 - strength * 0.5
+
+        for label in labels:
+            # 复制标签
+            new_label = label.copy()
+
+            # 保持中心点不变，缩小宽高
+            new_label[3] = label[3] * scale_factor
+            new_label[4] = label[4] * scale_factor
+
+            transformed.append(new_label)
+
+        return transformed
+
     @classmethod
     def augment_dataset(
         cls,
@@ -409,7 +627,7 @@ class OpenCVService:
         multiplier: int = 2
     ) -> Dict[str, Any]:
         """
-        增强数据集
+        增强数据集，并自动处理标注文件
 
         Args:
             dataset_dir: 数据集目录
@@ -441,7 +659,8 @@ class OpenCVService:
             "original_images": len(image_paths),
             "augmented_images": 0,
             "total_images": 0,
-            "augmentations_applied": {}
+            "augmentations_applied": {},
+            "labels_processed": 0
         }
 
         # 处理每个图像
@@ -449,6 +668,15 @@ class OpenCVService:
             try:
                 # 读取图像
                 img = cls.read_image(image_path)
+                img_height, img_width = img.shape[:2]
+
+                # 查找对应的标签文件
+                # 假设标签文件与图像文件在相同的相对路径下，但在labels目录而不是images目录
+                label_path = image_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+
+                # 加载标签
+                labels = cls.load_yolo_labels(label_path)
+                has_labels = len(labels) > 0
 
                 # 保存原始图像
                 rel_path = os.path.relpath(image_path, dataset_dir)
@@ -456,6 +684,12 @@ class OpenCVService:
                 os.makedirs(os.path.dirname(output_path), exist_ok=True)
                 cls.save_image(img, output_path)
                 stats["total_images"] += 1
+
+                # 如果有标签，保存原始标签
+                if has_labels:
+                    output_label_path = output_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                    cls.save_yolo_labels(output_label_path, labels)
+                    stats["labels_processed"] += 1
 
                 # 应用增强
                 augmented_count = 0
@@ -468,6 +702,14 @@ class OpenCVService:
                         f"flip_h_{os.path.basename(output_path)}"
                     )
                     cls.save_image(flipped, flip_path)
+
+                    # 处理标签
+                    if has_labels:
+                        flip_label_path = flip_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                        flipped_labels = cls.transform_labels_flip_horizontal(labels)
+                        cls.save_yolo_labels(flip_label_path, flipped_labels)
+                        stats["labels_processed"] += 1
+
                     augmented_count += 1
                     stats["augmentations_applied"]["flip_h"] = stats["augmentations_applied"].get("flip_h", 0) + 1
 
@@ -479,6 +721,14 @@ class OpenCVService:
                         f"flip_v_{os.path.basename(output_path)}"
                     )
                     cls.save_image(flipped, flip_path)
+
+                    # 处理标签
+                    if has_labels:
+                        flip_label_path = flip_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                        flipped_labels = cls.transform_labels_flip_vertical(labels)
+                        cls.save_yolo_labels(flip_label_path, flipped_labels)
+                        stats["labels_processed"] += 1
+
                     augmented_count += 1
                     stats["augmentations_applied"]["flip_v"] = stats["augmentations_applied"].get("flip_v", 0) + 1
 
@@ -494,6 +744,14 @@ class OpenCVService:
                             f"rotate_{angle}_{os.path.basename(output_path)}"
                         )
                         cls.save_image(rotated, rotate_path)
+
+                        # 处理标签
+                        if has_labels:
+                            rotate_label_path = rotate_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                            rotated_labels = cls.transform_labels_rotate(labels, angle, img_width, img_height)
+                            cls.save_yolo_labels(rotate_label_path, rotated_labels)
+                            stats["labels_processed"] += 1
+
                         augmented_count += 1
                         stats["augmentations_applied"][f"rotate_{angle}"] = stats["augmentations_applied"].get(f"rotate_{angle}", 0) + 1
 
@@ -510,6 +768,13 @@ class OpenCVService:
                             f"noise_{noise_type}_{os.path.basename(output_path)}"
                         )
                         cls.save_image(noisy, noise_path)
+
+                        # 处理标签 (噪声不影响标注框位置)
+                        if has_labels:
+                            noise_label_path = noise_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                            cls.save_yolo_labels(noise_label_path, labels)
+                            stats["labels_processed"] += 1
+
                         augmented_count += 1
                         stats["augmentations_applied"][f"noise_{noise_type}"] = stats["augmentations_applied"].get(f"noise_{noise_type}", 0) + 1
 
@@ -535,6 +800,13 @@ class OpenCVService:
                             f"adjust_{i}_{os.path.basename(output_path)}"
                         )
                         cls.save_image(adjusted, adjust_path)
+
+                        # 处理标签 (亮度和对比度不影响标注框位置)
+                        if has_labels:
+                            adjust_label_path = adjust_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                            cls.save_yolo_labels(adjust_label_path, labels)
+                            stats["labels_processed"] += 1
+
                         augmented_count += 1
                         stats["augmentations_applied"][f"brightness_contrast_{i}"] = stats["augmentations_applied"].get(f"brightness_contrast_{i}", 0) + 1
 
@@ -547,6 +819,14 @@ class OpenCVService:
                         f"perspective_{os.path.basename(output_path)}"
                     )
                     cls.save_image(perspective, perspective_path)
+
+                    # 处理标签
+                    if has_labels:
+                        perspective_label_path = perspective_path.replace('images', 'labels').rsplit('.', 1)[0] + '.txt'
+                        perspective_labels = cls.transform_labels_perspective(labels, strength)
+                        cls.save_yolo_labels(perspective_label_path, perspective_labels)
+                        stats["labels_processed"] += 1
+
                     augmented_count += 1
                     stats["augmentations_applied"]["perspective"] = stats["augmentations_applied"].get("perspective", 0) + 1
 
