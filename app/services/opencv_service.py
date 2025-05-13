@@ -4,8 +4,6 @@ OpenCV 服务模块 - 提供图像处理和计算机视觉功能
 import os
 import cv2
 import numpy as np
-import math
-import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 import logging
@@ -988,6 +986,200 @@ class OpenCVService:
                     grid[y_start:y_end, x_start:x_end] = images[idx]
 
         return grid
+
+    # ==================== 高级数据增强功能 ====================
+
+    @staticmethod
+    def apply_cutmix(img1: np.ndarray, img2: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+        """
+        应用CutMix数据增强
+
+        Args:
+            img1: 第一张图像
+            img2: 第二张图像
+            alpha: 混合参数，控制裁剪区域大小
+
+        Returns:
+            np.ndarray: 增强后的图像
+        """
+        # 确保两张图像大小一致
+        h, w = img1.shape[:2]
+        img2 = cv2.resize(img2, (w, h))
+
+        # 生成随机裁剪区域
+        lam = np.random.beta(alpha, alpha)
+
+        # 计算裁剪区域大小
+        cut_w = int(w * np.sqrt(1 - lam))
+        cut_h = int(h * np.sqrt(1 - lam))
+
+        # 随机选择裁剪区域中心点
+        cx = np.random.randint(w)
+        cy = np.random.randint(h)
+
+        # 计算裁剪区域边界
+        x1 = max(0, cx - cut_w // 2)
+        y1 = max(0, cy - cut_h // 2)
+        x2 = min(w, cx + cut_w // 2)
+        y2 = min(h, cy + cut_h // 2)
+
+        # 创建结果图像
+        result = img1.copy()
+
+        # 将img2的区域粘贴到img1上
+        result[y1:y2, x1:x2] = img2[y1:y2, x1:x2]
+
+        return result
+
+    @staticmethod
+    def apply_mixup(img1: np.ndarray, img2: np.ndarray, alpha: float = 0.5) -> np.ndarray:
+        """
+        应用MixUp数据增强
+
+        Args:
+            img1: 第一张图像
+            img2: 第二张图像
+            alpha: 混合参数，控制混合权重
+
+        Returns:
+            np.ndarray: 增强后的图像
+        """
+        # 确保两张图像大小一致
+        h, w = img1.shape[:2]
+        img2 = cv2.resize(img2, (w, h))
+
+        # 生成混合权重
+        lam = np.random.beta(alpha, alpha)
+
+        # 混合图像
+        result = cv2.addWeighted(img1, lam, img2, 1 - lam, 0)
+
+        return result
+
+    @staticmethod
+    def apply_mosaic(images: List[np.ndarray]) -> np.ndarray:
+        """
+        应用Mosaic数据增强
+
+        Args:
+            images: 四张图像的列表
+
+        Returns:
+            np.ndarray: 增强后的图像
+        """
+        if len(images) != 4:
+            raise ValueError("Mosaic需要四张图像")
+
+        # 确定输出图像大小
+        output_size = 640
+
+        # 创建空白画布
+        mosaic_img = np.zeros((output_size, output_size, 3), dtype=np.uint8)
+
+        # 计算中心点
+        cx = output_size // 2
+        cy = output_size // 2
+
+        # 调整图像大小并放置到画布上
+        # 左上
+        img1 = cv2.resize(images[0], (cx, cy))
+        mosaic_img[:cy, :cx] = img1
+
+        # 右上
+        img2 = cv2.resize(images[1], (cx, cy))
+        mosaic_img[:cy, cx:] = img2
+
+        # 左下
+        img3 = cv2.resize(images[2], (cx, cy))
+        mosaic_img[cy:, :cx] = img3
+
+        # 右下
+        img4 = cv2.resize(images[3], (cx, cy))
+        mosaic_img[cy:, cx:] = img4
+
+        return mosaic_img
+
+    @staticmethod
+    def apply_weather_effect(img: np.ndarray, weather_type: str, intensity: float = 0.5) -> np.ndarray:
+        """
+        应用天气效果
+
+        Args:
+            img: 输入图像
+            weather_type: 天气类型 (rain, snow, fog)
+            intensity: 效果强度 (0.0-1.0)
+
+        Returns:
+            np.ndarray: 增强后的图像
+        """
+        h, w = img.shape[:2]
+        result = img.copy()
+
+        # 限制强度范围
+        intensity = max(0.1, min(1.0, intensity))
+
+        if weather_type == "rain":
+            # 模拟雨滴
+            rain_drops = np.zeros((h, w, 3), dtype=np.uint8)
+
+            # 雨滴数量与强度成正比
+            num_drops = int(intensity * 1000)
+
+            # 随机生成雨滴
+            for _ in range(num_drops):
+                x = np.random.randint(0, w)
+                y = np.random.randint(0, h)
+                length = np.random.randint(5, 15)
+                angle = np.random.uniform(0.7, 0.9) * np.pi  # 雨滴角度
+
+                # 绘制雨滴
+                x2 = int(x + length * np.cos(angle))
+                y2 = int(y + length * np.sin(angle))
+
+                # 确保雨滴在图像范围内
+                if 0 <= x2 < w and 0 <= y2 < h:
+                    cv2.line(rain_drops, (x, y), (x2, y2), (200, 200, 255), 1)
+
+            # 添加雨滴到原图
+            result = cv2.addWeighted(result, 1.0, rain_drops, intensity, 0)
+
+            # 降低亮度和对比度
+            result = cv2.addWeighted(result, 0.8, np.zeros_like(result), 0, 0)
+
+        elif weather_type == "snow":
+            # 模拟雪花
+            snow_layer = np.zeros((h, w, 3), dtype=np.uint8)
+
+            # 雪花数量与强度成正比
+            num_flakes = int(intensity * 1000)
+
+            # 随机生成雪花
+            for _ in range(num_flakes):
+                x = np.random.randint(0, w)
+                y = np.random.randint(0, h)
+                size = np.random.randint(1, 4)
+
+                # 绘制雪花
+                cv2.circle(snow_layer, (x, y), size, (255, 255, 255), -1)
+
+            # 添加雪花到原图
+            result = cv2.addWeighted(result, 1.0, snow_layer, intensity, 0)
+
+            # 增加亮度
+            brightness = int(intensity * 30)
+            result = cv2.addWeighted(result, 1.0, np.zeros_like(result), 0, brightness)
+
+        elif weather_type == "fog":
+            # 创建雾效果
+            fog = np.ones((h, w, 3), dtype=np.uint8) * 255
+
+            # 添加雾到原图
+            result = cv2.addWeighted(result, 1 - intensity * 0.7, fog, intensity * 0.7, 0)
+
+        else:
+            raise ValueError(f"不支持的天气类型: {weather_type}")
+
+        return result
 
     # ==================== 视频处理功能 ====================
 

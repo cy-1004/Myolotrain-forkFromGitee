@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>YOLO训练平台</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
-    <link rel="stylesheet" href="css/style.css">
-    <link rel="stylesheet" href="css/alert-styles.css">
+    <!-- 使用本地Bootstrap资源 -->
+    <link rel="stylesheet" href="static/libs/bootstrap.min.css">
+    <link rel="stylesheet" href="static/libs/bootstrap-icons.css">
+    <link rel="stylesheet" href="static/css/style.css">
+    <link rel="stylesheet" href="static/css/alert-styles.css">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -35,6 +36,9 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-page="video">视频处理</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="tracking">目标追踪</a>
                     </li>
                 </ul>
             </div>
@@ -412,6 +416,255 @@
 
                             <button type="submit" class="btn btn-primary" id="augment-btn">开始增强</button>
                         </form>
+
+                        <!-- 高级数据增强部分 -->
+                        <div class="mt-4">
+                            <h5>高级数据增强</h5>
+                            <ul class="nav nav-tabs" id="advancedAugTabs" role="tablist">
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link active" id="cutmix-tab" data-bs-toggle="tab" data-bs-target="#cutmix" type="button" role="tab" aria-controls="cutmix" aria-selected="true">CutMix</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="mixup-tab" data-bs-toggle="tab" data-bs-target="#mixup" type="button" role="tab" aria-controls="mixup" aria-selected="false">MixUp</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="mosaic-tab" data-bs-toggle="tab" data-bs-target="#mosaic" type="button" role="tab" aria-controls="mosaic" aria-selected="false">Mosaic</button>
+                                </li>
+                                <li class="nav-item" role="presentation">
+                                    <button class="nav-link" id="weather-tab" data-bs-toggle="tab" data-bs-target="#weather" type="button" role="tab" aria-controls="weather" aria-selected="false">天气模拟</button>
+                                </li>
+                            </ul>
+                            <div class="tab-content" id="advancedAugTabContent">
+                                <!-- CutMix -->
+                                <div class="tab-pane fade show active" id="cutmix" role="tabpanel" aria-labelledby="cutmix-tab">
+                                    <div class="card mt-3">
+                                        <div class="card-body">
+                                            <p class="card-text">CutMix将两张图像的一部分混合在一起，创建新的训练样本。</p>
+                                            <form id="cutmix-form" enctype="multipart/form-data">
+                                                <input type="hidden" name="augmentation_type" value="cutmix">
+                                                <div class="row mb-3">
+                                                    <div class="col-md-6">
+                                                        <label for="cutmix-image1" class="form-label">图像 1</label>
+                                                        <input class="form-control" type="file" id="cutmix-image1" name="image1" accept="image/*" required>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <label for="cutmix-image2" class="form-label">图像 2</label>
+                                                        <input class="form-control" type="file" id="cutmix-image2" name="image2" accept="image/*" required>
+                                                    </div>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="cutmix-alpha" class="form-label">Alpha 参数: <span id="cutmix-alpha-value">0.5</span></label>
+                                                    <input type="range" class="form-range" id="cutmix-alpha" name="cutmix_alpha" min="0.1" max="0.9" step="0.1" value="0.5">
+                                                    <div class="form-text">控制混合区域的大小</div>
+                                                </div>
+                                                <button type="submit" class="btn btn-primary">应用 CutMix</button>
+                                            </form>
+                                            <div class="mt-3" id="cutmix-result" style="display: none;">
+                                                <h6>结果</h6>
+                                                <div class="row">
+                                                    <div class="col-md-4">
+                                                        <div class="card">
+                                                            <div class="card-header">图像 1</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="cutmix-original1" class="img-fluid" alt="原始图像 1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <div class="card">
+                                                            <div class="card-header">图像 2</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="cutmix-original2" class="img-fluid" alt="原始图像 2">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <div class="card">
+                                                            <div class="card-header">CutMix 结果</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="cutmix-output" class="img-fluid" alt="CutMix 结果">
+                                                            </div>
+                                                            <div class="card-footer">
+                                                                <a id="download-cutmix" class="btn btn-sm btn-success" download>下载结果</a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- MixUp -->
+                                <div class="tab-pane fade" id="mixup" role="tabpanel" aria-labelledby="mixup-tab">
+                                    <div class="card mt-3">
+                                        <div class="card-body">
+                                            <p class="card-text">MixUp将两张图像按权重混合，创建新的训练样本。</p>
+                                            <form id="mixup-form" enctype="multipart/form-data">
+                                                <input type="hidden" name="augmentation_type" value="mixup">
+                                                <div class="row mb-3">
+                                                    <div class="col-md-6">
+                                                        <label for="mixup-image1" class="form-label">图像 1</label>
+                                                        <input class="form-control" type="file" id="mixup-image1" name="image1" accept="image/*" required>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <label for="mixup-image2" class="form-label">图像 2</label>
+                                                        <input class="form-control" type="file" id="mixup-image2" name="image2" accept="image/*" required>
+                                                    </div>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="mixup-alpha" class="form-label">Alpha 参数: <span id="mixup-alpha-value">0.5</span></label>
+                                                    <input type="range" class="form-range" id="mixup-alpha" name="mixup_alpha" min="0.1" max="0.9" step="0.1" value="0.5">
+                                                    <div class="form-text">控制混合权重的分布</div>
+                                                </div>
+                                                <button type="submit" class="btn btn-primary">应用 MixUp</button>
+                                            </form>
+                                            <div class="mt-3" id="mixup-result" style="display: none;">
+                                                <h6>结果</h6>
+                                                <div class="row">
+                                                    <div class="col-md-4">
+                                                        <div class="card">
+                                                            <div class="card-header">图像 1</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="mixup-original1" class="img-fluid" alt="原始图像 1">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <div class="card">
+                                                            <div class="card-header">图像 2</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="mixup-original2" class="img-fluid" alt="原始图像 2">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-4">
+                                                        <div class="card">
+                                                            <div class="card-header">MixUp 结果</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="mixup-output" class="img-fluid" alt="MixUp 结果">
+                                                            </div>
+                                                            <div class="card-footer">
+                                                                <a id="download-mixup" class="btn btn-sm btn-success" download>下载结果</a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- Mosaic -->
+                                <div class="tab-pane fade" id="mosaic" role="tabpanel" aria-labelledby="mosaic-tab">
+                                    <div class="card mt-3">
+                                        <div class="card-body">
+                                            <p class="card-text">Mosaic将四张图像拼接成一张，创建新的训练样本。</p>
+                                            <form id="mosaic-form" enctype="multipart/form-data">
+                                                <input type="hidden" name="augmentation_type" value="mosaic">
+                                                <div class="row mb-3">
+                                                    <div class="col-md-6">
+                                                        <label for="mosaic-image1" class="form-label">图像 1 (左上)</label>
+                                                        <input class="form-control" type="file" id="mosaic-image1" name="image1" accept="image/*" required>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <label for="mosaic-image2" class="form-label">图像 2 (右上)</label>
+                                                        <input class="form-control" type="file" id="mosaic-image2" name="image2" accept="image/*" required>
+                                                    </div>
+                                                </div>
+                                                <div class="row mb-3">
+                                                    <div class="col-md-6">
+                                                        <label for="mosaic-image3" class="form-label">图像 3 (左下)</label>
+                                                        <input class="form-control" type="file" id="mosaic-image3" name="image3" accept="image/*" required>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <label for="mosaic-image4" class="form-label">图像 4 (右下)</label>
+                                                        <input class="form-control" type="file" id="mosaic-image4" name="image4" accept="image/*" required>
+                                                    </div>
+                                                </div>
+                                                <button type="submit" class="btn btn-primary">应用 Mosaic</button>
+                                            </form>
+                                            <div class="mt-3" id="mosaic-result" style="display: none;">
+                                                <h6>结果</h6>
+                                                <div class="row">
+                                                    <div class="col-md-8 mx-auto">
+                                                        <div class="card">
+                                                            <div class="card-header">Mosaic 结果</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="mosaic-output" class="img-fluid" alt="Mosaic 结果">
+                                                            </div>
+                                                            <div class="card-footer">
+                                                                <a id="download-mosaic" class="btn btn-sm btn-success" download>下载结果</a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- 天气模拟 -->
+                                <div class="tab-pane fade" id="weather" role="tabpanel" aria-labelledby="weather-tab">
+                                    <div class="card mt-3">
+                                        <div class="card-body">
+                                            <p class="card-text">模拟不同天气条件，增强模型在各种环境下的鲁棒性。</p>
+                                            <form id="weather-form" enctype="multipart/form-data">
+                                                <input type="hidden" name="augmentation_type" value="weather">
+                                                <div class="mb-3">
+                                                    <label for="weather-image" class="form-label">选择图像</label>
+                                                    <input class="form-control" type="file" id="weather-image" name="image1" accept="image/*" required>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label class="form-label">天气类型</label>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="radio" name="weather_type" id="weather-rain" value="rain" checked>
+                                                        <label class="form-check-label" for="weather-rain">雨</label>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="radio" name="weather_type" id="weather-snow" value="snow">
+                                                        <label class="form-check-label" for="weather-snow">雪</label>
+                                                    </div>
+                                                    <div class="form-check">
+                                                        <input class="form-check-input" type="radio" name="weather_type" id="weather-fog" value="fog">
+                                                        <label class="form-check-label" for="weather-fog">雾</label>
+                                                    </div>
+                                                </div>
+                                                <div class="mb-3">
+                                                    <label for="weather-intensity" class="form-label">强度: <span id="weather-intensity-value">0.5</span></label>
+                                                    <input type="range" class="form-range" id="weather-intensity" name="weather_intensity" min="0.1" max="1.0" step="0.1" value="0.5">
+                                                </div>
+                                                <button type="submit" class="btn btn-primary">应用天气效果</button>
+                                            </form>
+                                            <div class="mt-3" id="weather-result" style="display: none;">
+                                                <h6>结果</h6>
+                                                <div class="row">
+                                                    <div class="col-md-6">
+                                                        <div class="card">
+                                                            <div class="card-header">原始图像</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="weather-original" class="img-fluid" alt="原始图像">
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div class="col-md-6">
+                                                        <div class="card">
+                                                            <div class="card-header">天气效果</div>
+                                                            <div class="card-body p-0">
+                                                                <img id="weather-output" class="img-fluid" alt="天气效果">
+                                                            </div>
+                                                            <div class="card-footer">
+                                                                <a id="download-weather" class="btn btn-sm btn-success" download>下载结果</a>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
 
                         <div class="mt-4" id="augment-result" style="display: none;">
                             <div class="alert alert-info">
@@ -1416,6 +1669,7 @@
                             <select class="form-select" id="device-type">
                                 <option value="cpu">CPU</option>
                                 <option value="gpu">GPU</option>
+                                <option value="ascend">华为昇腾</option>
                             </select>
                         </div>
 
@@ -1446,6 +1700,28 @@
                             </div>
                         </div>
 
+                        <div class="mb-3 ascend-option" style="display: none;">
+                            <button type="button" class="btn btn-info mb-3" id="get-ascend-info">获取昇腾信息</button>
+
+                            <div id="ascend-info" style="display: none; background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
+                                <div class="mb-3">
+                                    <label for="ascend-select" class="form-label">选择昇腾NPU:</label>
+                                    <select class="form-select" id="ascend-select"></select>
+                                </div>
+
+                                <div class="mb-3">
+                                    <label for="ascend-memory" class="form-label">NPU内存限制 (MB):</label>
+                                    <input type="number" class="form-control" id="ascend-memory" value="8192" min="1024" step="1024">
+                                    <div id="ascend-memory-info" class="mt-2 small"></div>
+                                </div>
+
+                                <div class="mb-3">
+                                    <button type="button" class="btn btn-sm btn-secondary" id="validate-ascend-memory">验证内存设置</button>
+                                    <div id="ascend-validation-result" class="mt-2"></div>
+                                </div>
+                            </div>
+                        </div>
+
                         <div class="mb-3">
                             <label for="memory" class="form-label">内存 (MB)</label>
                             <input type="number" class="form-control" id="memory" value="8192" min="1024" step="1024">
@@ -1456,20 +1732,135 @@
         </form>
     </template>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- 目标追踪页面 -->
+    <template id="tracking-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>目标追踪</h2>
+                <p class="lead">基于Transformer的目标追踪功能</p>
+            </div>
+        </div>
+
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5>摄像头目标追踪</h5>
+            </div>
+            <div class="card-body">
+                <div>
+                    <!-- 摄像头追踪 -->
+                    <div id="camera-tracking" role="tabpanel">
+                        <h5 class="card-title">摄像头追踪</h5>
+                        <p class="card-text">使用摄像头进行实时目标追踪。</p>
+
+                        <div class="mb-3">
+                            <label for="camera-select" class="form-label">选择摄像头</label>
+                            <select class="form-select" id="camera-select">
+                                <option value="">加载中...</option>
+                            </select>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="camera-tracking-model-select" class="form-label">选择检测模型</label>
+                            <select class="form-select" id="camera-tracking-model-select">
+                                <option value="default">使用默认模型 (YOLOv8n)</option>
+                                <!-- 模型选项将通过JavaScript动态加载 -->
+                            </select>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <label for="camera-conf-threshold" class="form-label">置信度阈值: <span id="camera-conf-value">0.25</span></label>
+                                <input type="range" class="form-range" id="camera-conf-threshold" min="0.1" max="1.0" step="0.05" value="0.25">
+                            </div>
+                            <div class="col-md-6">
+                                <label for="camera-iou-threshold" class="form-label">IoU阈值: <span id="camera-iou-value">0.45</span></label>
+                                <input type="range" class="form-range" id="camera-iou-threshold" min="0.1" max="1.0" step="0.05" value="0.45">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <div class="alert alert-info">
+                                <i class="bi bi-info-circle"></i> 启动检测后，右侧将显示所有识别到的目标。点击目标旁的"追踪"按钮可以单独追踪该目标。
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <button id="start-camera-tracking" class="btn btn-primary">开始追踪</button>
+                            <button id="stop-camera-tracking" class="btn btn-danger" style="display: none;">停止追踪</button>
+                        </div>
+
+                        <div class="mt-4" id="camera-tracking-container" style="display: none;">
+                            <div class="row">
+                                <div class="col-md-8">
+                                    <div class="card">
+                                        <div class="card-header">
+                                            <span id="camera-tracking-status">准备就绪</span>
+                                        </div>
+                                        <div class="card-body p-0">
+                                            <div id="video-container" style="position: relative; width: 100%; height: auto; overflow: hidden; border: 2px solid green;">
+                                                <!-- 视频元素 -->
+                                                <video id="camera-video" autoplay muted style="width: 100%; z-index: 1; display: block;"></video>
+
+                                                <!-- 注意：画布元素现在由JavaScript动态创建和添加 -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="card mb-3">
+                                        <div class="card-header">检测到的目标</div>
+                                        <div class="card-body">
+                                            <div class="alert alert-warning" id="no-objects-detected" style="display: block;">
+                                                尚未检测到任何目标。
+                                            </div>
+                                            <div id="detected-objects-list" class="list-group">
+                                                <!-- 检测到的目标将通过JavaScript动态加载 -->
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="card">
+                                        <div class="card-header">当前追踪的目标</div>
+                                        <div class="card-body">
+                                            <div class="alert alert-info" id="no-objects-tracked" style="display: block;">
+                                                尚未选择追踪目标。
+                                            </div>
+                                            <div id="tracked-objects-list" class="list-group">
+                                                <!-- 追踪目标将通过JavaScript动态加载 -->
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button id="reset-tracking" class="btn btn-warning">重置追踪器</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 追踪报告功能已移除 -->
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <!-- 使用本地JavaScript资源 -->
+    <script src="static/libs/bootstrap.bundle.min.js"></script>
     <!-- Chart.js 图表库 -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@3.9.1/dist/chart.min.js"></script>
+    <script src="static/libs/chart.min.js"></script>
     <!-- 轮询管理器，用于管理API轮询 -->
-    <script src="js/polling_manager.js"></script>
+    <script src="static/js/polling_manager.js"></script>
     <!-- 报警声音生成器 -->
-    <script src="js/alert-sound.js"></script>
+    <script src="static/js/alert-sound.js"></script>
     <!-- 报警区域设置 -->
-    <script src="js/alert-zone.js"></script>
+    <script src="static/js/alert-zone.js"></script>
     <!-- 报警统计分析 -->
-    <script src="js/alert-stats.js"></script>
+    <script src="static/js/alert-stats.js"></script>
     <!-- 轨迹记录和预测 -->
-    <script src="js/trajectory.js"></script>
-    <script src="js/main.js"></script>
+    <script src="static/js/trajectory.js"></script>
+    <!-- 自注意力追踪 -->
+    <script src="static/js/attention_tracker.js"></script>
+    <script src="static/js/main.js"></script>
 
     <!-- 引入模态框 -->
     <div id="modals-container"></div>

@@ -8,10 +8,10 @@ from app.services import detection_service
 
 router = APIRouter()
 
-@router.post("/", response_model=DetectionTask)
+@router.post("/")
 async def create_detection_task(
-    model_id: str = Form(...),
     file: UploadFile = File(...),
+    model_id: str = Form(None),
     conf_thres: float = Form(0.25),
     iou_thres: float = Form(0.45),
     db: Session = Depends(get_db)
@@ -24,12 +24,28 @@ async def create_detection_task(
         "iou_thres": iou_thres
     }
 
-    return await detection_service.create_detection_task(
+    task = await detection_service.create_detection_task(
         db=db,
         model_id=model_id,
         file=file,
         parameters=parameters
     )
+
+    # 获取检测结果
+    result = detection_service.get_detection_result(db, task_id=task.id)
+
+    # 如果是前端追踪请求，直接返回检测结果
+    if file.filename.endswith('.jpg') and 'frame' in file.filename:
+        # 提取所有检测结果
+        detections = []
+        if result and result.get("results") and isinstance(result["results"], list):
+            for res in result["results"]:
+                if res.get("detections") and isinstance(res["detections"], list):
+                    detections.extend(res["detections"])
+        return {"detections": detections}
+
+    # 否则返回任务信息
+    return task
 
 @router.get("/", response_model=List[DetectionTask])
 def read_detection_tasks(

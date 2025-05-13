@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.crud import training_task, dataset, model
 from app.models.training_task import TrainingTask
 from app.schemas.training_task import TrainingTaskCreate, TrainingTaskUpdate
+from app.services.ascend_service import AscendDeviceManager
 
 # 导入可能需要的PyTorch和Ultralytics模型类
 try:
@@ -139,34 +140,77 @@ class DeviceManager:
         return True, "显存设置有效", total_memory
 
     @staticmethod
-    def get_device_info(device_type: str = 'auto', gpu_memory: Optional[int] = None, gpu_index: int = 0) -> dict:
+    def get_device_info(device_type: str = 'auto', gpu_memory: Optional[int] = None, gpu_index: int = 0,
+                        ascend_memory: Optional[int] = None, ascend_index: int = 0) -> dict:
         """
         获取设备信息并配置训练设备
-        :param device_type: 'cpu', 'gpu' 或 'auto'
+        :param device_type: 'cpu', 'gpu', 'ascend' 或 'auto'
         :param gpu_memory: GPU显存限制（MB）
         :param gpu_index: GPU索引，默认为0
+        :param ascend_memory: 昇腾NPU内存限制（MB）
+        :param ascend_index: 昇腾NPU索引，默认为0
         :return: 设备配置信息
         """
-        # 获取所有可用的GPU
+        # 获取所有可用的GPU和昇腾NPU
         available_gpus = DeviceManager.get_available_gpus()
+        available_ascends = AscendDeviceManager.get_available_ascends()
 
         device_info = {
             'device_type': device_type,
             'device': 'cpu',
             'gpu_memory': None,
             'gpu_index': gpu_index,
+            'ascend_memory': None,
+            'ascend_index': ascend_index,
             'cpu_cores': None,
-            'available_gpus': available_gpus
+            'available_gpus': available_gpus,
+            'available_ascends': available_ascends
         }
 
-        # 检测是否有可用的GPU
+        # 检测是否有可用的GPU和昇腾NPU
         has_cuda = torch.cuda.is_available()
+        has_ascend = len(available_ascends) > 0
 
-        # 自动模式下，优先使用GPU
+        # 自动模式下，优先使用昇腾NPU，其次是GPU，最后是CPU
         if device_type == 'auto':
-            device_type = 'gpu' if has_cuda else 'cpu'
+            if has_ascend:
+                device_type = 'ascend'
+            elif has_cuda:
+                device_type = 'gpu'
+            else:
+                device_type = 'cpu'
             device_info['device_type'] = device_type
 
+        # 处理昇腾NPU设备
+        if device_type == 'ascend':
+            if not has_ascend:
+                print('\n=== 警告: 昇腾NPU不可用，将尝试使用GPU训练 ===')
+                if has_cuda:
+                    device_type = 'gpu'
+                    device_info['device_type'] = 'gpu'
+                else:
+                    device_type = 'cpu'
+                    device_info['device_type'] = 'cpu'
+            else:
+                # 使用昇腾NPU设备管理器获取设备信息
+                ascend_device_info = AscendDeviceManager.get_device_info(
+                    ascend_memory=ascend_memory,
+                    ascend_index=ascend_index
+                )
+
+                # 更新设备信息
+                device_info.update({
+                    'device': ascend_device_info['device'],
+                    'ascend_memory': ascend_device_info['ascend_memory'],
+                    'ascend_index': ascend_device_info['ascend_index']
+                })
+
+                # 如果昇腾NPU不可用，回退到其他设备
+                if ascend_device_info['device_type'] != 'ascend':
+                    device_type = ascend_device_info['device_type']
+                    device_info['device_type'] = device_type
+
+        # 处理GPU设备
         if device_type == 'gpu':
             if not has_cuda:
                 print('\n=== 警告: GPU不可用，将使用CPU训练 ===')
@@ -230,6 +274,7 @@ class DeviceManager:
                     device_info['device_type'] = 'cpu'
                     device_info['device'] = 'cpu'
 
+        # 处理CPU设备
         if device_type == 'cpu':
             # 获取CPU核心数
             cpu_cores = os.cpu_count()
@@ -260,19 +305,30 @@ def train_model(
     image_size: int,
     device_type: str = 'auto',
     gpu_memory: Optional[int] = None,
+    gpu_index: int = 0,
+    ascend_memory: Optional[int] = None,
+    ascend_index: int = 0,
     **kwargs
 ) -> Path:
     """
     训练模型的主函数
     """
     # 获取设备配置
-    device_info = DeviceManager.get_device_info(device_type, gpu_memory)
+    device_info = DeviceManager.get_device_info(
+        device_type=device_type,
+        gpu_memory=gpu_memory,
+        gpu_index=gpu_index,
+        ascend_memory=ascend_memory,
+        ascend_index=ascend_index
+    )
 
     # 打印设备信息
     if device_info['device_type'] == 'cpu':
         print(f"\n=== 使用 CPU 训练，线程数: {device_info['cpu_cores']} ===")
-    else:
+    elif device_info['device_type'] == 'gpu':
         print(f"\n=== 使用 GPU 训练，显存限制: {device_info['gpu_memory']}MB ===")
+    elif device_info['device_type'] == 'ascend':
+        print(f"\n=== 使用 昇腾NPU 训练，内存限制: {device_info['ascend_memory']}MB ===")
 
     # 配置训练参数
     train_args = {
@@ -289,6 +345,23 @@ def train_model(
     try:
         from ultralytics import YOLO
         model = YOLO(model_type)
+
+        # 如果是昇腾NPU设备，需要进行特殊处理
+        if device_info['device_type'] == 'ascend':
+            # 这里需要根据实际的昇腾NPU API进行实现
+            # 以下是示例代码，实际使用时需要替换为真实的API调用
+            try:
+                import torch_npu
+                # 设置环境变量
+                os.environ['ASCEND_VISIBLE_DEVICES'] = str(device_info['ascend_index'])
+                # 其他昇腾NPU特定的设置
+                # ...
+            except ImportError:
+                print("\n=== 警告: 无法导入torch_npu，将尝试使用其他设备 ===")
+                # 回退到CPU
+                train_args['device'] = 'cpu'
+
+        # 执行训练
         results = model.train(**train_args)
 
         # 返回训练后的模型路径

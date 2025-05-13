@@ -16,6 +16,8 @@ logs/*
 *.log
 packages/*
 yolov8n/*
+dl/*
+README.md
 
 # 数据库
 postgres_data/

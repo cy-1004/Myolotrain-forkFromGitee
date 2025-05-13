@@ -50,43 +50,56 @@ except ImportError as e:
 
 async def create_detection_task(
     db: Session,
-    model_id: str,
-    file: UploadFile,
-    parameters: Dict[str, Any]
+    model_id: str = None,
+    file: UploadFile = None,
+    parameters: Dict[str, Any] = None
 ) -> DetectionTask:
     """
     Create a new detection task
     """
-    # Check if model exists
+    # 初始化参数
+    if parameters is None:
+        parameters = {}
+
+    # 默认模型ID和路径
+    DEFAULT_MODEL_ID = "6b30123c-2c33-43c0-a045-41cda7e61d37"  # 使用生成的UUID
+    model_path = "yolov8n.pt"  # 默认模型路径
+
+    # 如果没有提供模型ID，使用默认模型ID
+    if not model_id:
+        model_id = DEFAULT_MODEL_ID
+        print(f"使用默认模型ID: {model_id}")
+
+    # 检查模型是否存在
     db_model = model.get(db, id=model_id)
     if not db_model:
-        raise HTTPException(
-            status_code=404,
-            detail="Model not found",
-        )
+        # 如果找不到模型，创建一个默认模型记录
+        db_model = model.create_with_fields(db, obj_in={
+            "id": DEFAULT_MODEL_ID,
+            "name": "YOLOv8n",
+            "description": "默认YOLOv8n模型",
+            "path": model_path,
+            "type": "detection",
+            "task": "object_detection",
+            "source": "default"
+        })
+        print(f"创建默认模型: {db_model.name}")
+
+    # 使用模型路径
+    model_path = db_model.path
 
     # Generate unique ID for the detection task
     task_id = str(uuid.uuid4())
 
-    # Create input and output directories
-    input_dir = settings.UPLOADS_DIR / task_id
-    output_dir = settings.RESULTS_DIR / task_id
-    os.makedirs(input_dir, exist_ok=True)
-    os.makedirs(output_dir, exist_ok=True)
+    # 直接读取上传的文件内容到内存中，不保存到本地
+    content = await file.read()
 
-    # Save the uploaded file
-    file_extension = Path(file.filename).suffix
-    input_path = input_dir / f"input{file_extension}"
-    with open(input_path, "wb") as buffer:
-        content = await file.read()
-        buffer.write(content)
-
-    # Create detection task with all required fields
+    # 创建内存中的检测任务记录
     obj_in_data = {
-        "model_id": model_id,
+        "model_id": model_id,  # 确保model_id总是有值
         "parameters": parameters,
-        "input_path": str(input_path),
-        "output_path": str(output_dir),
+        "input_path": f"memory:{file.filename}",  # 使用内存标识符
+        "output_path": f"memory:{task_id}",       # 使用内存标识符
         "status": "pending"
     }
 
@@ -94,7 +107,7 @@ async def create_detection_task(
     db_task = detection_task.create_with_fields(db, obj_in=obj_in_data)
 
     # 在实际实现中，这将由后台任务处理
-    # 现在，我们将执行实际的检测过程
+    # 执行实际的检测过程
     try:
         # 导入YOLO模型
         from ultralytics import YOLO
@@ -135,32 +148,36 @@ async def create_detection_task(
         except ImportError as e:
             print(f"Warning: Could not import required classes: {e}")
 
+        # 导入必要的库
+        import cv2
+        import numpy as np
+        from io import BytesIO
+
         # 加载模型
-        model_path = db_model.path
         yolo_model = YOLO(model_path)
+        print(f"成功加载模型: {model_path}")
 
-        # 执行检测
-        results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45))
+        # 将内容转换为numpy数组
+        nparr = np.frombuffer(content, np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
-        # 保存结果
+        if img is None:
+            raise ValueError("无法解码图像数据")
+
+        # 执行检测 - 直接传递图像数组而不是文件路径
+        results = yolo_model(img, conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45))
+
+        # 在内存中处理结果
+        import json
+        memory_results = []
+
         for i, result in enumerate(results):
-            # 保存带有检测框的图像
-            result_path = output_dir / f"result_{i}.jpg"
-
-            # 使用新版Ultralytics API保存图像
-            # 方法1: 使用结果中的绘制后图像
-            import cv2
-            import numpy as np
-
             # 获取绘制后的图像
-            # 如果结果中有绘制后的图像，直接使用
             if hasattr(result, 'plot') and callable(getattr(result, 'plot')):
-                # 使用plot方法获取绘制后的图像
                 plotted_img = result.plot()
-                cv2.imwrite(str(result_path), plotted_img)
             else:
                 # 如果没有plot方法，手动绘制检测框
-                img = result.orig_img.copy()
+                plotted_img = img.copy()
                 boxes = result.boxes
                 for box in boxes:
                     x1, y1, x2, y2 = map(int, box.xyxy.tolist()[0])
@@ -170,34 +187,41 @@ async def create_detection_task(
 
                     # 绘制检测框
                     color = (0, 255, 0)  # BGR格式，绿色
-                    cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+                    cv2.rectangle(plotted_img, (x1, y1), (x2, y2), color, 2)
 
                     # 绘制标签
                     font = cv2.FONT_HERSHEY_SIMPLEX
-                    cv2.putText(img, label, (x1, y1 - 10), font, 0.5, color, 2)
+                    cv2.putText(plotted_img, label, (x1, y1 - 10), font, 0.5, color, 2)
 
-                # 保存图像
-                cv2.imwrite(str(result_path), img)
+            # 将检测结果转换为JSON格式
+            boxes = result.boxes
+            json_results = []
+            for box in boxes:
+                class_id = int(box.cls.item())
+                json_results.append({
+                    'class': class_id,  # 保留'class'字段以兼容旧代码
+                    'class_id': class_id,  # 添加'class_id'字段以兼容前端代码
+                    'class_name': result.names[class_id],
+                    'confidence': float(box.conf.item()),
+                    'bbox': box.xyxy.tolist()[0],
+                })
 
-            # 保存JSON结果
-            json_path = output_dir / f"result_{i}.json"
-            with open(json_path, 'w') as f:
-                import json
-                # 将检测结果转换为JSON格式
-                boxes = result.boxes
-                json_results = []
-                for box in boxes:
-                    json_results.append({
-                        'class': int(box.cls.item()),
-                        'class_name': result.names[int(box.cls.item())],
-                        'confidence': float(box.conf.item()),
-                        'bbox': box.xyxy.tolist()[0],
-                    })
-                json.dump(json_results, f, indent=2)
+            # 不保存图像数据，只保存检测结果
+            # 这样可以大幅减少内存占用
+            memory_results.append({
+                'detections': json_results
+            })
+
+        # 将结果存储在参数中
+        updated_parameters = {
+            **parameters,
+            'memory_results': memory_results
+        }
 
         # 更新任务状态为已完成
         db_task = detection_task.update(db, db_obj=db_task, obj_in={
-            "status": "completed"
+            "status": "completed",
+            "parameters": updated_parameters
         })
     except Exception as e:
         # 如果发生错误，更新任务状态为失败
@@ -232,7 +256,7 @@ def get_detection_tasks(db: Session, skip: int = 0, limit: int = 100) -> List[De
 
 def get_detection_result(db: Session, task_id: str) -> Dict[str, Any]:
     """
-    Get the detection result for a task
+    Get the detection result for a task - 支持内存中的结果
     """
     # 获取任务信息
     db_task = detection_task.get(db, id=task_id)
@@ -250,6 +274,42 @@ def get_detection_result(db: Session, task_id: str) -> Dict[str, Any]:
             "results": None
         }
 
+    # 检查是否是内存中的结果
+    if db_task.output_path.startswith("memory:"):
+        # 从参数中获取内存结果
+        memory_results = db_task.parameters.get('memory_results', [])
+
+        if not memory_results:
+            return {
+                "status": "error",
+                "message": "No detection results found in memory",
+                "results": None
+            }
+
+        # 构建结果对象
+        results = []
+        for i, result in enumerate(memory_results):
+            try:
+                # 从内存结果中提取检测结果
+                detections = result.get('detections', [])
+
+                # 不返回图像数据，只返回检测结果
+                results.append({
+                    "memory_image_id": f"memory_image_{i}",  # 使用内存标识符
+                    "detections": detections,
+                    "count": len(detections)
+                })
+            except Exception as e:
+                print(f"Error processing memory result #{i}: {e}")
+
+        return {
+            "status": "completed",
+            "message": "Detection completed successfully (memory mode)",
+            "results": results,
+            "input_image": db_task.input_path.replace("memory:", "")
+        }
+
+    # 以下是原有的文件系统处理逻辑，保留以兼容旧数据
     # 获取输出目录
     output_dir = Path(db_task.output_path)
     if not output_dir.exists():

@@ -1,10 +1,15 @@
 ﻿# =============================================
-# 深度学习框架 - GPU支持
+# Deep Learning Framework - GPU support
 # =============================================
 # 需要单独安装torch
 
+#华为昇腾需要单独安装：
+#torch_npu
+#acl
+#onnxruntime-ascend
 
-# YOLOv8及其依赖
+
+# YOLOv8 and dependencies
 ultralytics>=8.0.196
 numpy>=1.24.0
 opencv-python>=4.8.0
@@ -16,27 +21,31 @@ psutil>=5.9.0
 pynvml>=11.5.0
 
 # =============================================
-# GPU支持的额外依赖
+# GPU support additional dependencies
 # =============================================
 # GPU监控工具，类似nvidia-smi但功能更强大
 nvitop>=1.0.0
 
-# API和Web框架
+# CUDA加速的NumPy库，根据实际CUDA版本安装
+# cupy-cuda12x>=12.0.0
+
+# API and Web Framework
 fastapi>=0.115.0
 uvicorn>=0.34.0
 python-multipart>=0.0.5
 
-# 数据库
+# Database
 sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.0  # PostgreSQL数据库驱动
+psycopg2-binary>=2.9.0
 
-# 配置
+
+# Configuration
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 
-# 文件处理
+# File handling
 aiofiles>=23.0
 
-# 监控和日志
+# Monitoring and Logging
 tensorboard>=2.15.0
 

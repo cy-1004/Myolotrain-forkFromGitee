@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.schemas.training_task import TrainingTask
 from app.services import training_service
 from app.services.training_service import DeviceManager
+from app.services.ascend_service import AscendDeviceManager
 
 router = APIRouter()
 
@@ -56,8 +57,9 @@ def create_training_task(
     if not dataset_id and not local_dataset_path:
         raise HTTPException(status_code=400, detail="必须提供 dataset_id 或 local_dataset_path")
 
-    # 初始化GPU信息
+    # 初始化设备信息
     gpu_info = None
+    ascend_info = None
     recommended_memory = None
 
     # 如果选择了GPU设备，自动获取GPU信息
@@ -93,6 +95,40 @@ def create_training_task(
                     if not hardware_config.get("gpu_memory"):
                         hardware_config["gpu_memory"] = recommended_memory
                         print(f"自动设置GPU显存限制为: {hardware_config['gpu_memory']}MB")
+
+    # 如果选择了昇腾NPU设备，自动获取昇腾NPU信息
+    elif hardware_config and hardware_config.get("device_type") == "ascend":
+        # 获取昇腾NPU信息
+        ascends = AscendDeviceManager.get_available_ascends()
+
+        # 如果有可用的昇腾NPU
+        if ascends:
+            # 检查是否指定了昇腾NPU ID
+            ascend_index = hardware_config.get("ascend_index", 0)
+
+            # 查找指定的昇腾NPU
+            for ascend in ascends:
+                if ascend.get("index", 0) == ascend_index:
+                    ascend_info = ascend
+                    break
+
+            # 如果没有找到指定的昇腾NPU，使用第一个昇腾NPU
+            if not ascend_info and ascends:
+                ascend_info = ascends[0]
+                hardware_config["ascend_index"] = ascend_info.get("index", 0)
+                print(f"指定的昇腾NPU ID {ascend_index} 不存在，使用昇腾NPU ID {hardware_config['ascend_index']}")
+
+            if ascend_info:
+                free_memory = ascend_info.get("memory_free", 0)
+
+                if free_memory > 0:
+                    # 计算推荐的内存设置（可用内存的80%）
+                    recommended_memory = int(free_memory * 0.8)
+
+                    # 如果没有设置内存限制，则使用推荐值
+                    if not hardware_config.get("ascend_memory"):
+                        hardware_config["ascend_memory"] = recommended_memory
+                        print(f"自动设置昇腾NPU内存限制为: {hardware_config['ascend_memory']}MB")
 
     # 创建训练任务
     task = training_service.create_training_task(
@@ -132,6 +168,18 @@ def create_training_task(
             "free_memory": gpu_info.get("memory_free", 0),
             "recommended_memory": recommended_memory,
             "gpu_index": gpu_info.get("index", 0)
+        }
+
+    # 添加昇腾NPU信息到响应中
+    if ascend_info:
+        response_data["ascend_info"] = {
+            "has_ascend": True,
+            "ascend_name": ascend_info.get("name", ""),
+            "total_memory": ascend_info.get("memory", 0),
+            "used_memory": ascend_info.get("memory_used", 0),
+            "free_memory": ascend_info.get("memory_free", 0),
+            "recommended_memory": recommended_memory,
+            "ascend_index": ascend_info.get("index", 0)
         }
 
     return response_data
@@ -311,9 +359,11 @@ def delete_training_task(
 def get_device_info():
     """获取设备信息，包括可用的GPU列表及其显存大小"""
     gpus = DeviceManager.get_available_gpus()
+    ascends = AscendDeviceManager.get_available_ascends()
     recommended_memory = None
     current_device = None
     gpu_info = None
+    ascend_info = None
 
     # 如果有可用的GPU
     if gpus:
@@ -335,12 +385,19 @@ def get_device_info():
         except Exception as e:
             print(f"获取当前活跃GPU设备失败: {str(e)}")
 
+    # 如果有可用的昇腾NPU
+    if ascends:
+        ascend_info = ascends[0]  # 使用第一个昇腾NPU的信息
+
     return {
         "gpus": gpus,
+        "ascends": ascends,
         "has_cuda": torch.cuda.is_available(),
+        "has_ascend": len(ascends) > 0,
         "recommended_memory": recommended_memory,
         "current_device": current_device,
-        "gpu_info": gpu_info
+        "gpu_info": gpu_info,
+        "ascend_info": ascend_info
     }
 
 class GPUMemoryValidationRequest(BaseModel):
@@ -409,6 +466,93 @@ def validate_gpu_memory(request: GPUMemoryValidationRequest):
         "has_gpu": has_gpu,
         "gpu_index": request.gpu_index
     }
+
+class AscendMemoryValidationRequest(BaseModel):
+    ascend_memory: int
+    ascend_index: Optional[int] = 0
+
+@router.post("/validate-ascend-memory")
+def validate_ascend_memory(request: AscendMemoryValidationRequest):
+    """验证昇腾NPU内存设置是否合理"""
+    # 验证请求的内存是否合理
+    is_valid, message, total_memory = AscendDeviceManager.validate_ascend_memory(
+        requested_memory=request.ascend_memory,
+        ascend_index=request.ascend_index
+    )
+
+    # 获取昇腾NPU信息
+    ascends = AscendDeviceManager.get_available_ascends()
+
+    # 初始化变量
+    free_memory = 0
+    used_memory = 0
+    recommended_memory = None
+    ascend_name = ""
+    has_ascend = False
+
+    # 检查指定的昇腾NPU是否存在
+    ascend_info = None
+    for ascend in ascends:
+        if ascend.get("index", 0) == request.ascend_index:
+            ascend_info = ascend
+            break
+
+    if ascend_info:
+        has_ascend = True
+        ascend_name = ascend_info.get("name", "")
+        total_memory = ascend_info.get("memory", 0)
+        free_memory = ascend_info.get("memory_free", 0)
+        used_memory = ascend_info.get("memory_used", 0)
+
+        # 计算推荐的内存设置（可用内存的80%）
+        if free_memory > 0:
+            recommended_memory = int(free_memory * 0.8)
+
+    return {
+        "valid": is_valid,
+        "message": message,
+        "total_memory": total_memory,
+        "free_memory": free_memory,
+        "used_memory": used_memory,
+        "recommended_memory": recommended_memory,
+        "ascend_name": ascend_name,
+        "has_ascend": has_ascend,
+        "ascend_index": request.ascend_index
+    }
+
+@router.get("/ascend-info", response_model=Dict)
+def get_ascend_info():
+    """获取所有可用的昇腾NPU信息，用于前端显示和选择"""
+    ascends = AscendDeviceManager.get_available_ascends()
+
+    response = {
+        "has_ascend": len(ascends) > 0,
+        "ascends": [],
+        "current_device": None
+    }
+
+    # 如果有可用的昇腾NPU，添加到响应中
+    if ascends:
+        for i, ascend in enumerate(ascends):
+            # 添加display_name字段用于显示
+            ascend_info = {
+                "index": ascend.get("index", i),
+                "name": ascend.get("name", f"Ascend NPU {i}"),
+                "display_name": f"NPU {i}: {ascend.get('name', 'Unknown')}",
+                "total_memory": ascend.get("memory", 0),
+                "used_memory": ascend.get("memory_used", 0),
+                "free_memory": ascend.get("memory_free", 0),
+                "recommended_memory": ascend.get("recommended_memory", 0)
+            }
+            response["ascends"].append(ascend_info)
+
+        # 设置当前设备为第一个昇腾NPU
+        response["current_device"] = {
+            "index": ascends[0].get("index", 0),
+            "name": ascends[0].get("name", "Unknown")
+        }
+
+    return response
 
 
 

@@ -43,7 +43,26 @@ function testApiEndpoints() {
 // 页面加载完成后执行
 document.addEventListener('DOMContentLoaded', function() {
     // 初始化Bootstrap模态框
-    modal = new bootstrap.Modal(document.getElementById('mainModal'));
+    try {
+        if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
+            modal = new bootstrap.Modal(document.getElementById('mainModal'));
+            console.log('Bootstrap模态框初始化成功');
+        } else {
+            console.warn('Bootstrap未加载，跳过模态框初始化');
+            // 创建一个空对象，避免后续代码出错
+            modal = {
+                show: function() { console.warn('模态框功能不可用'); },
+                hide: function() { console.warn('模态框功能不可用'); }
+            };
+        }
+    } catch (error) {
+        console.error('初始化Bootstrap模态框失败:', error);
+        // 创建一个空对象，避免后续代码出错
+        modal = {
+            show: function() { console.warn('模态框功能不可用'); },
+            hide: function() { console.warn('模态框功能不可用'); }
+        };
+    }
 
     // 导航菜单点击事件
     document.querySelectorAll('.nav-link').forEach(link => {
@@ -108,6 +127,9 @@ function loadPage(page) {
         case 'video':
             loadVideoPage();
             bindVideoEvents();
+            break;
+        case 'tracking':
+            initTrackingPage();
             break;
     }
 }
@@ -671,6 +693,233 @@ function bindOpenCVEventHandlers() {
             .catch(error => {
                 // 加载提示已禁用
                 // document.getElementById('opencv-loading-overlay').style.display = 'none';
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 高级数据增强相关事件
+
+    // CutMix Alpha 参数滑块
+    const cutmixAlpha = document.getElementById('cutmix-alpha');
+    const cutmixAlphaValue = document.getElementById('cutmix-alpha-value');
+    if (cutmixAlpha && cutmixAlphaValue) {
+        cutmixAlpha.addEventListener('input', function() {
+            cutmixAlphaValue.textContent = this.value;
+        });
+    }
+
+    // MixUp Alpha 参数滑块
+    const mixupAlpha = document.getElementById('mixup-alpha');
+    const mixupAlphaValue = document.getElementById('mixup-alpha-value');
+    if (mixupAlpha && mixupAlphaValue) {
+        mixupAlpha.addEventListener('input', function() {
+            mixupAlphaValue.textContent = this.value;
+        });
+    }
+
+    // 天气强度滑块
+    const weatherIntensity = document.getElementById('weather-intensity');
+    const weatherIntensityValue = document.getElementById('weather-intensity-value');
+    if (weatherIntensity && weatherIntensityValue) {
+        weatherIntensity.addEventListener('input', function() {
+            weatherIntensityValue.textContent = this.value;
+        });
+    }
+
+    // CutMix 表单提交
+    const cutmixForm = document.getElementById('cutmix-form');
+    if (cutmixForm) {
+        cutmixForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            // 获取表单数据
+            const formData = new FormData(this);
+
+            // 显示原始图像
+            const image1 = document.getElementById('cutmix-image1').files[0];
+            const image2 = document.getElementById('cutmix-image2').files[0];
+
+            if (!image1 || !image2) {
+                alert('请选择两张图像');
+                return;
+            }
+
+            // 显示原始图像预览
+            const reader1 = new FileReader();
+            reader1.onload = function(e) {
+                document.getElementById('cutmix-original1').src = e.target.result;
+            };
+            reader1.readAsDataURL(image1);
+
+            const reader2 = new FileReader();
+            reader2.onload = function(e) {
+                document.getElementById('cutmix-original2').src = e.target.result;
+            };
+            reader2.readAsDataURL(image2);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || 'CutMix 增强失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示结果
+                document.getElementById('cutmix-result').style.display = 'block';
+                document.getElementById('cutmix-output').src = data.output_path;
+                document.getElementById('download-cutmix').href = data.output_path;
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // MixUp 表单提交
+    const mixupForm = document.getElementById('mixup-form');
+    if (mixupForm) {
+        mixupForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            // 获取表单数据
+            const formData = new FormData(this);
+
+            // 显示原始图像
+            const image1 = document.getElementById('mixup-image1').files[0];
+            const image2 = document.getElementById('mixup-image2').files[0];
+
+            if (!image1 || !image2) {
+                alert('请选择两张图像');
+                return;
+            }
+
+            // 显示原始图像预览
+            const reader1 = new FileReader();
+            reader1.onload = function(e) {
+                document.getElementById('mixup-original1').src = e.target.result;
+            };
+            reader1.readAsDataURL(image1);
+
+            const reader2 = new FileReader();
+            reader2.onload = function(e) {
+                document.getElementById('mixup-original2').src = e.target.result;
+            };
+            reader2.readAsDataURL(image2);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || 'MixUp 增强失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示结果
+                document.getElementById('mixup-result').style.display = 'block';
+                document.getElementById('mixup-output').src = data.output_path;
+                document.getElementById('download-mixup').href = data.output_path;
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // Mosaic 表单提交
+    const mosaicForm = document.getElementById('mosaic-form');
+    if (mosaicForm) {
+        mosaicForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            // 获取表单数据
+            const formData = new FormData(this);
+
+            // 检查是否选择了四张图像
+            const image1 = document.getElementById('mosaic-image1').files[0];
+            const image2 = document.getElementById('mosaic-image2').files[0];
+            const image3 = document.getElementById('mosaic-image3').files[0];
+            const image4 = document.getElementById('mosaic-image4').files[0];
+
+            if (!image1 || !image2 || !image3 || !image4) {
+                alert('请选择四张图像');
+                return;
+            }
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || 'Mosaic 增强失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示结果
+                document.getElementById('mosaic-result').style.display = 'block';
+                document.getElementById('mosaic-output').src = data.output_path;
+                document.getElementById('download-mosaic').href = data.output_path;
+            })
+            .catch(error => {
+                alert('错误: ' + error.message);
+            });
+        });
+    }
+
+    // 天气模拟表单提交
+    const weatherForm = document.getElementById('weather-form');
+    if (weatherForm) {
+        weatherForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+
+            // 获取表单数据
+            const formData = new FormData(this);
+
+            // 显示原始图像
+            const image = document.getElementById('weather-image').files[0];
+
+            if (!image) {
+                alert('请选择图像');
+                return;
+            }
+
+            // 显示原始图像预览
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                document.getElementById('weather-original').src = e.target.result;
+            };
+            reader.readAsDataURL(image);
+
+            // 发送请求
+            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => { throw new Error(err.detail || '天气模拟增强失败'); });
+                }
+                return response.json();
+            })
+            .then(data => {
+                // 显示结果
+                document.getElementById('weather-result').style.display = 'block';
+                document.getElementById('weather-output').src = data.output_path;
+                document.getElementById('download-weather').href = data.output_path;
+            })
+            .catch(error => {
                 alert('错误: ' + error.message);
             });
         });
@@ -2261,13 +2510,20 @@ function showAddTrainingModal() {
         deviceTypeSelect.addEventListener('change', function() {
             const cpuOptions = document.querySelectorAll('.cpu-option');
             const gpuOptions = document.querySelectorAll('.gpu-option');
+            const ascendOptions = document.querySelectorAll('.ascend-option');
 
             if (this.value === 'cpu') {
                 cpuOptions.forEach(option => option.style.display = 'block');
                 gpuOptions.forEach(option => option.style.display = 'none');
-            } else {
+                ascendOptions.forEach(option => option.style.display = 'none');
+            } else if (this.value === 'gpu') {
                 cpuOptions.forEach(option => option.style.display = 'none');
                 gpuOptions.forEach(option => option.style.display = 'block');
+                ascendOptions.forEach(option => option.style.display = 'none');
+            } else if (this.value === 'ascend') {
+                cpuOptions.forEach(option => option.style.display = 'none');
+                gpuOptions.forEach(option => option.style.display = 'none');
+                ascendOptions.forEach(option => option.style.display = 'block');
             }
         });
     }
@@ -2341,6 +2597,75 @@ function showAddTrainingModal() {
         });
     }
 
+    // 绑定获取昇腾NPU信息按钮事件
+    const getAscendInfoBtn = document.getElementById('get-ascend-info');
+    const ascendInfoDiv = document.getElementById('ascend-info');
+    const ascendSelect = document.getElementById('ascend-select');
+    const ascendMemoryInput = document.getElementById('ascend-memory');
+    const ascendMemoryInfoDiv = document.getElementById('ascend-memory-info');
+    const validateAscendMemoryBtn = document.getElementById('validate-ascend-memory');
+    const ascendValidationResultDiv = document.getElementById('ascend-validation-result');
+
+    if (getAscendInfoBtn) {
+        getAscendInfoBtn.addEventListener('click', async function() {
+            try {
+                // 显示加载中状态
+                getAscendInfoBtn.disabled = true;
+                getAscendInfoBtn.textContent = '获取中...';
+
+                const response = await fetch(`${API_URL}/training/ascend-info`);
+                const data = await response.json();
+
+                // 恢复按钮状态
+                getAscendInfoBtn.disabled = false;
+                getAscendInfoBtn.textContent = '获取昇腾信息';
+
+                if (data.has_ascend) {
+                    // 清空昇腾选择框
+                    ascendSelect.innerHTML = '';
+
+                    // 添加昇腾NPU选项
+                    data.ascends.forEach(ascend => {
+                        const option = document.createElement('option');
+                        option.value = ascend.index;
+                        option.textContent = ascend.display_name;
+                        option.dataset.memory = ascend.free_memory;
+                        option.dataset.recommended = ascend.recommended_memory;
+                        option.dataset.totalMemory = ascend.total_memory;
+                        option.dataset.usedMemory = ascend.used_memory;
+                        option.dataset.name = ascend.name;
+                        ascendSelect.appendChild(option);
+                    });
+
+                    // 设置默认内存值
+                    const selectedAscend = data.ascends[0];
+                    ascendMemoryInput.value = selectedAscend.recommended_memory;
+                    ascendMemoryInfoDiv.innerHTML = `
+                        <div>昇腾NPU型号: ${selectedAscend.name}</div>
+                        <div>总内存: ${selectedAscend.total_memory} MB</div>
+                        <div>已用内存: ${selectedAscend.used_memory} MB</div>
+                        <div>可用内存: ${selectedAscend.free_memory} MB</div>
+                        <div class="text-success">推荐内存: ${selectedAscend.recommended_memory} MB</div>
+                    `;
+
+                    // 显示昇腾信息
+                    ascendInfoDiv.style.display = 'block';
+                } else {
+                    alert('没有可用的昇腾NPU，请使用其他模式训练');
+                    deviceTypeSelect.value = 'cpu';
+                    deviceTypeSelect.dispatchEvent(new Event('change'));
+                }
+            } catch (error) {
+                console.error('获取昇腾NPU信息失败:', error);
+                alert('获取昇腾NPU信息失败，请检查网络连接');
+
+                // 恢复按钮状态
+                getAscendInfoBtn.disabled = false;
+                getAscendInfoBtn.textContent = '获取昇腾信息';
+            }
+        });
+    }
+
     // 绑定GPU选择改变事件
     if (gpuSelect) {
         gpuSelect.addEventListener('change', function() {
@@ -2408,6 +2733,77 @@ function showAddTrainingModal() {
                 // 恢复按钮状态
                 validateMemoryBtn.disabled = false;
                 validateMemoryBtn.textContent = '验证显存设置';
+            }
+        });
+    }
+
+    // 绑定昇腾NPU选择改变事件
+    if (ascendSelect) {
+        ascendSelect.addEventListener('change', function() {
+            const selectedOption = this.options[this.selectedIndex];
+            const freeMemory = parseInt(selectedOption.dataset.memory);
+            const recommendedMemory = parseInt(selectedOption.dataset.recommended);
+            const totalMemory = parseInt(selectedOption.dataset.totalMemory);
+            const usedMemory = parseInt(selectedOption.dataset.usedMemory);
+            const ascendName = selectedOption.dataset.name;
+
+            ascendMemoryInput.value = recommendedMemory;
+
+            ascendMemoryInfoDiv.innerHTML = `
+                <div>昇腾NPU型号: ${ascendName}</div>
+                <div>总内存: ${totalMemory} MB</div>
+                <div>已用内存: ${usedMemory} MB</div>
+                <div>可用内存: ${freeMemory} MB</div>
+                <div class="text-success">推荐内存: ${recommendedMemory} MB</div>
+            `;
+        });
+    }
+
+    // 绑定验证昇腾内存设置按钮事件
+    if (validateAscendMemoryBtn) {
+        validateAscendMemoryBtn.addEventListener('click', async function() {
+            const ascendMemory = parseInt(ascendMemoryInput.value);
+            const ascendIndex = parseInt(ascendSelect.value);
+
+            if (isNaN(ascendMemory) || ascendMemory <= 0) {
+                ascendValidationResultDiv.innerHTML = '<div class="text-danger">请输入有效的内存值</div>';
+                return;
+            }
+
+            try {
+                // 显示加载中状态
+                validateAscendMemoryBtn.disabled = true;
+                validateAscendMemoryBtn.textContent = '验证中...';
+
+                const response = await fetch(`${API_URL}/training/validate-ascend-memory`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        ascend_memory: ascendMemory,
+                        ascend_index: ascendIndex
+                    })
+                });
+
+                const data = await response.json();
+
+                // 恢复按钮状态
+                validateAscendMemoryBtn.disabled = false;
+                validateAscendMemoryBtn.textContent = '验证内存设置';
+
+                if (data.valid) {
+                    ascendValidationResultDiv.innerHTML = `<div class="text-success">${data.message}</div>`;
+                } else {
+                    ascendValidationResultDiv.innerHTML = `<div class="text-danger">${data.message}</div>`;
+                }
+            } catch (error) {
+                console.error('验证昇腾内存设置失败:', error);
+                ascendValidationResultDiv.innerHTML = '<div class="text-danger">验证昇腾内存设置失败，请检查网络连接</div>';
+
+                // 恢复按钮状态
+                validateAscendMemoryBtn.disabled = false;
+                validateAscendMemoryBtn.textContent = '验证内存设置';
             }
         });
     }
@@ -2560,7 +2956,7 @@ function submitAddTraining() {
     // 根据设备类型添加相应的参数
     if (deviceTypeSelect.value === 'cpu') {
         hardwareConfig.cpu_cores = parseInt(cpuCoresInput.value);
-    } else {
+    } else if (deviceTypeSelect.value === 'gpu') {
         // 获取GPU显存和GPU ID
         hardwareConfig.gpu_memory = parseInt(gpuMemoryInput.value);
 
@@ -2568,6 +2964,15 @@ function submitAddTraining() {
         const gpuSelect = document.getElementById('gpu-select');
         if (gpuSelect && gpuSelect.value) {
             hardwareConfig.gpu_index = parseInt(gpuSelect.value);
+        }
+    } else if (deviceTypeSelect.value === 'ascend') {
+        // 获取昇腾NPU内存和NPU ID
+        hardwareConfig.ascend_memory = parseInt(ascendMemoryInput.value);
+
+        // 如果用户选择了特定昇腾NPU，添加NPU ID
+        const ascendSelect = document.getElementById('ascend-select');
+        if (ascendSelect && ascendSelect.value) {
+            hardwareConfig.ascend_index = parseInt(ascendSelect.value);
         }
     }
 
