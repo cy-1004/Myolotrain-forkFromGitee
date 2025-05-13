@@ -7,6 +7,22 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 
 ### 更新日志：
 
+**-20250513 增加华为昇腾NPU支持、增加新的目标追踪功能：**
+
+> 1、关于昇腾NPU支持（仅支持linux部署使用）：
+> - 通过torch_npu实现（深度学习框架依旧为pytorch，暂不支持MindSpore）
+> - 需要手动安装：torch_npu（必须）、acl（必须）、onnxruntime-ascend（可选安装，后期扩展onnx格式数据集以及MindSpore架构）
+> - torch_npu下载地址：https://gitee.com/ascend/pytorch/releases
+> - 在新建训练任务选择设备类型“华为昇腾”并“获取昇腾信息”确认NPU信息获取无误后启动训练即可
+
+> 2、目标追踪功能：
+> - 【目标追踪】功能整体架构：采用Yolo检测加基于transformer追踪的架构，结合Layer Scale（增强深层网络的训练稳定性），CBAM（通道+空间注意力融合，增强特征表示），交叉注意力（更精确地建模目标间关系），实现多/单目标追踪
+相较于原实时检测中的追踪功能，追踪效果更好并支持了单目标追踪。
+
+> 3、其他变化：
+> - 两个预训练模型目录迁移到根目录下
+
+
  **- 20250508 增加数据增强中生成标注功能：**
 > - 图像处理==>数据增强时，根据原始图像的标注文件生成增强图像的标注文件
 > - 增加环境安装及启动程序[Myolotrain启动器.exe]（使用管理员身份运行），解决原启动.bat脚本中的虚拟环境安装等问题
@@ -25,9 +41,11 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 ### 注意事项 :exclamation:  :exclamation:  :exclamation: ：
  **（20250418）目前暂不支持yolov5，支持yolov8以上** 
 
- **（20250418）在models有yolov8n、yolov11n两个预训练模型，datasets_import下有测试数据集，供测试使用** 
+ **（20250418）在根目录有yolov8n、yolov11n两个预训练模型，datasets_import下有测试数据集，供测试使用** 
 
- **（20250419）关于GPU训练torch版本的说明：** 本项目环境使用CUDA12.6，如您使用的更高的CUDA版本，请自行安装torch环境（包括torch、torchaudio和torchvision）或降低CUDA版本。
+ ~~**（20250419）关于GPU训练torch版本的说明：** 本项目环境使用CUDA12.6，如您使用的更高的CUDA版本，请自行安装torch环境（包括torch、torchaudio和torchvision）或降低CUDA版本。~~
+
+**须手动安装torch环境（华为昇腾NPU环境请参考更新日志）**
 
 如果torch相关依赖安装失败，请手动安装：
 
@@ -167,6 +185,25 @@ ZIP导入功能
 
 ![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/%E8%BD%A8%E8%BF%B9%E5%92%8C%E9%A2%84%E6%B5%8B.png)
 
+#### 1.2.7 目标追踪
+
+技术实现流程：
+
+1、**输入处理**：从摄像头获取视频帧，使用YOLO模型进行目标检测
+
+2、**特征提取**：裁剪检测到的目标区域、使用带有CBAM的特征提取器提取特征、使用带有Layer Scale的Transformer编码器增强特征
+
+3、**目标匹配**：预测轨迹的下一个位置、使用交叉注意力计算当前检测与现有轨迹的相似度、结合IOU和特征相似度进行匹配
+
+4、**轨迹更新**：更新匹配的轨迹、创建新的轨迹、管理未匹配的轨迹
+
+5、**结果可视化**：绘制检测框和追踪框、显示目标ID和类别、绘制运动轨迹
+
+
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/transformer%E8%BF%BD%E8%B8%AA.png)
+
+![输入图片说明](%E4%BB%8B%E7%BB%8Dimages/transformer%E5%8D%95%E7%9B%AE%E6%A0%87%E8%BF%BD%E8%B8%AA.png)
 
 ## 2 目录结构
 
