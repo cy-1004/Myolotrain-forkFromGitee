@@ -56,7 +56,6 @@ if exist requirements.txt (
   echo Installing other dependencies...
   pip install -r requirements.txt
 )
-
 :: Initialize database
 echo Initializing database...
 python "%~dp0init_db.py"
@@ -93,12 +92,34 @@ call venv\Scripts\activate.bat
 :: Install PyTorch CPU version
 echo Installing PyTorch CPU version...
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
-
+:: Install FastAPI and Uvicorn
+echo Installing FastAPI and Uvicorn...
+:: 安装 FastAPI 完整版
+pip install fastapi[all]
+:: 安装核心依赖
+pip install ultralytics python-multipart tensorboard
 :: Install other dependencies
 if exist requirements.txt (
   echo Installing other dependencies...
   pip install -r requirements.txt
 )
+:: 安装 PostgreSQL 驱动
+echo Installing PostgreSQL dependencies...
+pip install psycopg2-binary
+
+:: 新增：安装 SQLAlchemy
+echo Installing SQLAlchemy...
+pip install sqlalchemy
+:: 新增：安装 pydantic
+echo Installing pydantic...
+pip install pydantic
+:: 安装 pydantic-settings
+echo Installing pydantic-settings...
+pip install pydantic-settings
+:: 可选：升级 pip
+python -m pip install --upgrade pip
+
+
 
 :: Initialize database
 echo Initializing database...
@@ -123,7 +144,8 @@ if exist venv\Scripts\activate.bat (
 
 :: Start application
 echo Starting application...
-start "YOLOv8 Platform" cmd /c "cd /d "%~dp0" && python run.py"
+@REM start "YOLOv8 Platform" cmd /c "cd /d "%~dp0" && python run.py"
+start "YOLOv8 Platform" cmd /k "cd /d "%~dp0" && python run.py"
 
 echo.
 echo Application started!
