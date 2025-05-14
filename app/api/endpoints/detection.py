@@ -42,7 +42,7 @@ async def create_detection_task(
             for res in result["results"]:
                 if res.get("detections") and isinstance(res["detections"], list):
                     detections.extend(res["detections"])
-        return {"detections": detections}
+        return {"detections": detections, "id": task.id}
 
     # 否则返回任务信息
     return task
