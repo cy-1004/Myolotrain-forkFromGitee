@@ -3,6 +3,7 @@ import os
 import sys
 import time
 import subprocess
+import platform
 import uuid
 import json
 import torch
@@ -53,12 +54,6 @@ try:
                     print(f"Could not add {module.__name__}.{name} to safe globals: {e}")
 except ImportError as e:
     print(f"Warning: Could not import required classes: {e}")
-
-import os
-import platform
-import torch
-from pathlib import Path
-from typing import Optional
 
 class DeviceManager:
     @staticmethod
@@ -1283,8 +1278,33 @@ def get_training_logs(db: Session, task_id: str) -> Dict[str, Any]:
             task_id_part = os.path.basename(output_dir)
             if task_id_part.startswith("training_"):
                 task_id = task_id_part.replace("training_", "")
-                # 直接指向该训练任务的输出目录下的exp目录
-                tensorboard_url = f"{tensorboard_url}/?run=training_{task_id}/exp"
+
+                # 检查TensorBoard日志文件是否存在
+                exp_dir = os.path.join(settings.MODELS_DIR, f"training_{task_id}/exp")
+
+                # 检查目录是否存在
+                if os.path.exists(exp_dir):
+                    # 检查是否有events.out.tfevents文件
+                    has_events_file = False
+                    for file in os.listdir(exp_dir):
+                        if file.startswith("events.out.tfevents"):
+                            has_events_file = True
+                            break
+
+                    if has_events_file:
+                        print(f"找到TensorBoard日志文件: {exp_dir}")
+                    else:
+                        print(f"警告: 目录存在但未找到TensorBoard日志文件: {exp_dir}")
+                else:
+                    print(f"警告: TensorBoard日志目录不存在: {exp_dir}")
+
+                # 使用简单的URL格式，不指定具体的run
+                # TensorBoard会自动显示找到的所有日志
+                tensorboard_url = f"{tensorboard_url}/"
+
+                # 打印日志，帮助调试
+                print(f"生成的TensorBoard URL: {tensorboard_url}")
+                print(f"对应的本地路径: {exp_dir}")
 
     return {
         "logs": log_output,

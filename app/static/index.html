@@ -84,6 +84,7 @@
                 <div class="btn-group" role="group">
                     <button class="btn btn-primary" id="add-dataset-btn">上传ZIP数据集</button>
                     <button class="btn btn-success" id="import-local-dataset-btn">服务器数据集</button>
+                    <button class="btn btn-info" id="convert-coco-btn">COCO格式JSON转换</button>
                 </div>
             </div>
         </div>
@@ -151,6 +152,7 @@
                 <h2>训练管理</h2>
             </div>
             <div class="col-auto">
+                <button class="btn btn-warning me-2" id="restart-tensorboard-btn">重启TensorBoard</button>
                 <button class="btn btn-primary" id="add-training-btn">创建训练任务</button>
             </div>
         </div>
@@ -1474,6 +1476,85 @@
 
             <div class="alert alert-info">
                 <strong>提示：</strong> 对于大型数据集，建议先保存至服务器datasets_import目录下，避免通过网页上传大文件。
+            </div>
+        </form>
+    </template>
+
+    <!-- COCO格式JSON转换模态框内容 -->
+    <template id="convert-coco-template">
+        <form id="convert-coco-form">
+            <div class="mb-3">
+                <label for="coco-json-file" class="form-label">上传COCO格式JSON文件</label>
+                <input class="form-control" type="file" id="coco-json-file" accept=".json" required>
+                <div class="form-text">
+                    <strong>COCO格式要求：</strong>
+                    <ul class="mt-2">
+                        <li>JSON文件必须包含<code>images</code>、<code>annotations</code>和<code>categories</code>字段</li>
+                        <li>系统将自动创建YOLO格式的标签文件</li>
+                        <li>如果文件名包含路径信息（如<code>data/image.jpg</code>），系统会自动提取文件名部分</li>
+                    </ul>
+                </div>
+            </div>
+
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="coco-split-enabled" checked>
+                    <label class="form-check-label" for="coco-split-enabled">分割为训练/验证/测试集</label>
+                </div>
+                <div class="form-text">启用后，系统将根据设置的比例自动分割标签文件为训练集、验证集和测试集</div>
+            </div>
+
+            <div id="coco-split-options">
+                <div class="card mt-3 mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">分割设置</h5>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="coco-train-ratio" class="form-label">训练集比例: <span id="coco-train-ratio-value">70%</span></label>
+                                <input type="range" class="form-range" min="0.5" max="0.9" step="0.05" value="0.7" id="coco-train-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="coco-val-ratio" class="form-label">验证集比例: <span id="coco-val-ratio-value">15%</span></label>
+                                <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="coco-val-ratio">
+                            </div>
+                        </div>
+
+                        <div class="row mb-3">
+                            <div class="col">
+                                <label for="coco-test-ratio" class="form-label">测试集比例: <span id="coco-test-ratio-value">15%</span></label>
+                                <input type="range" class="form-range" min="0.05" max="0.3" step="0.05" value="0.15" id="coco-test-ratio">
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="coco-random-seed" class="form-label">随机种子</label>
+                            <input type="number" class="form-control" id="coco-random-seed" value="42" min="1" max="1000">
+                            <div class="form-text">设置随机种子以确保分割结果的可重复性</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="progress mb-3" style="display: none;" id="coco-convert-progress-container">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" id="coco-convert-progress-bar">0%</div>
+            </div>
+
+            <div id="coco-convert-status" class="alert alert-info" style="display: none;"></div>
+
+            <div id="coco-convert-result" class="alert alert-success" style="display: none;">
+                <h5>转换成功！</h5>
+                <p>YOLO格式标签文件已生成，存储在以下目录：</p>
+                <div class="input-group mb-3">
+                    <input type="text" class="form-control" id="coco-output-path" readonly>
+                    <button class="btn btn-outline-secondary" type="button" id="open-output-folder">打开文件夹</button>
+                </div>
+                <div class="mt-3">
+                    <button type="button" class="btn btn-primary" id="download-labels-zip">下载标签文件(ZIP)</button>
+                </div>
             </div>
         </form>
     </template>

@@ -16,20 +16,20 @@ import torch
 torch.multiprocessing.set_start_method('spawn', force=True)
 
 # 覆盖torch.load函数，确保使用weights_only=False
-original_torch_load = torch.load
+import torch as torch_for_patch
+original_torch_load = torch_for_patch.load
 def patched_torch_load(*args, **kwargs):
     if 'weights_only' not in kwargs:
         kwargs['weights_only'] = False
         print('\n=== 覆盖torch.load，使用weights_only=False ===')
     return original_torch_load(*args, **kwargs)
-torch.load = patched_torch_load
+torch_for_patch.load = patched_torch_load
 
 # 禁用matplotlib字体警告
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
 
 import matplotlib
-from pathlib import Path
 
 def main():
     try:
@@ -47,7 +47,9 @@ def main():
 
         # 如果使用 CPU，设置线程数
         if device_type == 'cpu':
-            torch.set_num_threads(cpu_cores)
+            # 使用全局导入的torch模块
+            import torch as torch_local  # 使用不同的名称避免混淆
+            torch_local.set_num_threads(cpu_cores)
             print('\n=== 使用 CPU 训练，线程数: ' + str(cpu_cores) + ' ===')
         else:
             print('\n=== 使用 GPU 训练，显存限制 ' + str(gpu_memory) + 'MB ===')
@@ -111,7 +113,7 @@ def main():
 
         # 添加安全全局变量
         print('\n=== 添加PyTorch安全全局变量 ===')
-        import torch
+        # 使用全局导入的torch模块
         try:
             # 导入PyTorch核心类
             from torch.nn.modules.container import Sequential
@@ -122,17 +124,20 @@ def main():
 
             # 导入Ultralytics模块类
             from ultralytics.nn.modules import conv
-            from ultralytics.nn.modules import block
-            from ultralytics.nn.modules import head
+            # 只导入需要的模块，避免未使用的导入
+            # from ultralytics.nn.modules import block
+            # from ultralytics.nn.modules import head
 
             # 添加PyTorch核心类到安全全局变量
-            torch.serialization.add_safe_globals([Sequential, Module, ModuleList, ModuleDict])
+            # 使用全局torch模块
+            import torch as torch_global
+            torch_global.serialization.add_safe_globals([Sequential, Module, ModuleList, ModuleDict])
 
             # 添加Ultralytics模型类到安全全局变量
-            torch.serialization.add_safe_globals([DetectionModel, SegmentationModel, ClassificationModel, PoseModel])
+            torch_global.serialization.add_safe_globals([DetectionModel, SegmentationModel, ClassificationModel, PoseModel])
 
             # 添加Ultralytics模块类
-            torch.serialization.add_safe_globals([conv.Conv])
+            torch_global.serialization.add_safe_globals([conv.Conv])
 
             # 添加所有Ultralytics模块类
             # 直接添加常用的类
@@ -140,7 +145,7 @@ def main():
                 # 添加常用的模块类
                 from torch.nn.modules.container import Sequential
                 from ultralytics.nn.modules.conv import Conv
-                torch.serialization.add_safe_globals([Sequential, Conv])
+                torch_global.serialization.add_safe_globals([Sequential, Conv])
                 print('\n=== 成功添加常用模块类到安全全局变量 ===')
             except Exception as e:
                 print('\n=== 警告: 无法添加常用模块类到安全全局变量: ' + str(e) + ' ===')

@@ -43,10 +43,17 @@ class TensorBoardManager:
             os.makedirs(self.log_dir, exist_ok=True)
 
             try:
-                # 启动TensorBoard进程，直接监控模型输出目录
+                # 启动TensorBoard进程，直接监控包含TensorBoard事件文件的目录
                 # YOLOv8在训练时会将TensorBoard日志写入到模型输出目录下的exp目录中
+
+                # 直接监控models目录，不使用复杂的目录结构
+                # TensorBoard会自动递归查找所有子目录中的事件文件
+                logdir = str(self.models_dir)
+
+                print(f"TensorBoard监控目录: {logdir}")
+
                 self.tensorboard_process = subprocess.Popen(
-                    [sys.executable, "-m", "tensorboard.main", "--logdir", str(self.models_dir),
+                    [sys.executable, "-m", "tensorboard.main", "--logdir", logdir,
                      "--port", str(self.port), "--bind_all"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,

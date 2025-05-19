@@ -5,6 +5,9 @@ import uuid
 import hashlib
 import re
 import asyncio
+import json
+import cv2
+import numpy as np
 from pathlib import Path
 from typing import List, Optional, Dict, Tuple, Any
 
@@ -1631,5 +1634,460 @@ def import_external_dataset(
         raise HTTPException(
             status_code=500,
             detail=f"Error importing external dataset: {str(e)}",
+        )
+
+def convert_coco_to_yolo(json_path, output_dir, split_enabled=True, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15, random_seed=42):
+    """
+    将COCO格式的JSON文件转换为YOLO格式的标签文件
+
+    Args:
+        json_path: COCO格式JSON文件路径
+        output_dir: 输出目录
+        split_enabled: 是否分割数据集
+        train_ratio: 训练集比例
+        val_ratio: 验证集比例
+        test_ratio: 测试集比例
+        random_seed: 随机种子
+
+    Returns:
+        result: 转换结果
+    """
+    # 读取COCO格式的JSON文件
+    with open(json_path, "r", encoding="utf-8") as f:
+        coco_data = json.load(f)
+
+    # 验证COCO格式
+    if "images" not in coco_data or "annotations" not in coco_data or "categories" not in coco_data:
+        raise ValueError("无效的COCO格式JSON文件，缺少必要的字段")
+
+    # 创建类别ID到索引的映射
+    class_mapping = {}
+    classes = []
+    for i, category in enumerate(coco_data["categories"]):
+        class_mapping[category["id"]] = i
+        classes.append(category["name"])
+
+    # 创建图像ID到文件名的映射（处理带有路径的文件名）
+    image_id_to_filename = {}
+    for image in coco_data["images"]:
+        # 提取文件名（去除路径部分）
+        file_name = image["file_name"]
+        # 如果文件名包含路径分隔符，只保留文件名部分
+        if '/' in file_name or '\\' in file_name:
+            file_name = os.path.basename(file_name)
+        image_id_to_filename[image["id"]] = file_name
+
+    # 创建图像ID到尺寸的映射
+    image_id_to_size = {image["id"]: (image["width"], image["height"]) for image in coco_data["images"]}
+
+    # 按图像ID分组标注
+    annotations_by_image = {}
+    for annotation in coco_data["annotations"]:
+        image_id = annotation["image_id"]
+        if image_id not in annotations_by_image:
+            annotations_by_image[image_id] = []
+        annotations_by_image[image_id].append(annotation)
+
+    # 获取所有图像ID
+    image_ids = list(image_id_to_filename.keys())
+
+    # 如果启用分割，则分割数据集
+    if split_enabled:
+        # 设置随机种子
+        np.random.seed(random_seed)
+
+        # 随机打乱图像ID
+        np.random.shuffle(image_ids)
+
+        # 计算分割点
+        train_end = int(len(image_ids) * train_ratio)
+        val_end = train_end + int(len(image_ids) * val_ratio)
+
+        # 分割数据集
+        train_ids = set(image_ids[:train_end])
+        val_ids = set(image_ids[train_end:val_end])
+        test_ids = set(image_ids[val_end:])
+
+        # 创建训练集、验证集和测试集的目录
+        train_dir = os.path.join(output_dir, "train", "labels")
+        val_dir = os.path.join(output_dir, "val", "labels")
+        test_dir = os.path.join(output_dir, "test", "labels")
+
+        os.makedirs(train_dir, exist_ok=True)
+        os.makedirs(val_dir, exist_ok=True)
+        os.makedirs(test_dir, exist_ok=True)
+
+        # 转换标注
+        train_count = 0
+        val_count = 0
+        test_count = 0
+
+        for image_id, annotations in annotations_by_image.items():
+            # 获取图像文件名和尺寸
+            filename = image_id_to_filename[image_id]
+            width, height = image_id_to_size[image_id]
+
+            # 提取文件名（不包含扩展名）
+            base_filename = os.path.splitext(filename)[0]
+
+            # 确定目标目录
+            if image_id in train_ids:
+                output_file = os.path.join(train_dir, f"{base_filename}.txt")
+                train_count += 1
+            elif image_id in val_ids:
+                output_file = os.path.join(val_dir, f"{base_filename}.txt")
+                val_count += 1
+            elif image_id in test_ids:
+                output_file = os.path.join(test_dir, f"{base_filename}.txt")
+                test_count += 1
+            else:
+                continue  # 跳过未分配的图像
+
+            # 创建YOLO格式的标注文件
+            with open(output_file, "w") as f:
+                for annotation in annotations:
+                    # 获取类别索引
+                    category_id = annotation["category_id"]
+                    if category_id not in class_mapping:
+                        continue
+                    class_idx = class_mapping[category_id]
+
+                    # 获取边界框坐标
+                    bbox = annotation["bbox"]  # [x, y, width, height]
+
+                    # 转换为YOLO格式（归一化的中心点坐标和宽高）
+                    x_center = (bbox[0] + bbox[2] / 2) / width
+                    y_center = (bbox[1] + bbox[3] / 2) / height
+                    bbox_width = bbox[2] / width
+                    bbox_height = bbox[3] / height
+
+                    # 写入文件
+                    f.write(f"{class_idx} {x_center:.6f} {y_center:.6f} {bbox_width:.6f} {bbox_height:.6f}\n")
+
+        # 返回结果
+        return {
+            "classes": classes,
+            "file_count": {
+                "total": train_count + val_count + test_count,
+                "train": train_count,
+                "val": val_count,
+                "test": test_count
+            },
+            "annotation_count": len(coco_data["annotations"])
+        }
+    else:
+        # 不分割数据集，直接转换
+        labels_dir = os.path.join(output_dir, "labels")
+        os.makedirs(labels_dir, exist_ok=True)
+
+        # 转换标注
+        file_count = 0
+
+        for image_id, annotations in annotations_by_image.items():
+            # 获取图像文件名和尺寸
+            filename = image_id_to_filename[image_id]
+            width, height = image_id_to_size[image_id]
+
+            # 提取文件名（不包含扩展名）
+            base_filename = os.path.splitext(filename)[0]
+
+            # 创建YOLO格式的标注文件
+            output_file = os.path.join(labels_dir, f"{base_filename}.txt")
+
+            with open(output_file, "w") as f:
+                for annotation in annotations:
+                    # 获取类别索引
+                    category_id = annotation["category_id"]
+                    if category_id not in class_mapping:
+                        continue
+                    class_idx = class_mapping[category_id]
+
+                    # 获取边界框坐标
+                    bbox = annotation["bbox"]  # [x, y, width, height]
+
+                    # 转换为YOLO格式（归一化的中心点坐标和宽高）
+                    x_center = (bbox[0] + bbox[2] / 2) / width
+                    y_center = (bbox[1] + bbox[3] / 2) / height
+                    bbox_width = bbox[2] / width
+                    bbox_height = bbox[3] / height
+
+                    # 写入文件
+                    f.write(f"{class_idx} {x_center:.6f} {y_center:.6f} {bbox_width:.6f} {bbox_height:.6f}\n")
+
+            file_count += 1
+
+        # 返回结果
+        return {
+            "classes": classes,
+            "file_count": {
+                "total": file_count,
+                "train": file_count,
+                "val": 0,
+                "test": 0
+            },
+            "annotation_count": len(coco_data["annotations"])
+        }
+
+def coco_to_yolo(coco_bbox, img_width, img_height):
+    """
+    将COCO格式的边界框转换为YOLO格式
+
+    COCO格式: [x_min, y_min, width, height]
+    YOLO格式: [x_center, y_center, width, height] (归一化到0-1)
+
+    Args:
+        coco_bbox: COCO格式的边界框 [x_min, y_min, width, height]
+        img_width: 图像宽度
+        img_height: 图像高度
+
+    Returns:
+        YOLO格式的边界框 [x_center, y_center, width, height]
+    """
+    x_min, y_min, width, height = coco_bbox
+
+    # 计算中心点坐标
+    x_center = x_min + width / 2
+    y_center = y_min + height / 2
+
+    # 归一化坐标
+    x_center /= img_width
+    y_center /= img_height
+    width /= img_width
+    height /= img_height
+
+    return [x_center, y_center, width, height]
+
+async def import_coco_dataset(
+    db: Session,
+    name: str,
+    description: Optional[str],
+    file: UploadFile,
+    file_id: Optional[str] = None,
+    split_dataset_enabled: bool = False,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    random_seed: int = 42
+) -> Dataset:
+    """
+    从COCO格式的JSON文件导入数据集
+
+    Args:
+        db: 数据库会话
+        name: 数据集名称
+        description: 数据集描述
+        file: 上传的COCO JSON文件
+        file_id: 上传文件ID（用于状态跟踪）
+        split_dataset_enabled: 是否启用数据集分割
+        train_ratio: 训练集比例
+        val_ratio: 验证集比例
+        test_ratio: 测试集比例
+        random_seed: 随机种子
+
+    Returns:
+        Dataset: 创建的数据集对象
+    """
+    # 检查数据集名称是否已存在
+    db_dataset = dataset.get_by_name(db, name=name)
+    if db_dataset:
+        if file_id:
+            upload_manager.set_failed(file_id, "Dataset with this name already exists")
+        raise HTTPException(
+            status_code=400,
+            detail="Dataset with this name already exists",
+        )
+
+    # 生成唯一ID
+    dataset_id = str(uuid.uuid4())
+    dataset_dir = settings.DATASETS_DIR / dataset_id
+    os.makedirs(dataset_dir, exist_ok=True)
+
+    # 创建必要的目录结构
+    train_dir = dataset_dir / "train" / "images"
+    val_dir = dataset_dir / "val" / "images"
+    test_dir = dataset_dir / "test" / "images"
+    train_labels_dir = dataset_dir / "train" / "labels"
+    val_labels_dir = dataset_dir / "val" / "labels"
+    test_labels_dir = dataset_dir / "test" / "labels"
+
+    os.makedirs(train_dir, exist_ok=True)
+    os.makedirs(val_dir, exist_ok=True)
+    os.makedirs(test_dir, exist_ok=True)
+    os.makedirs(train_labels_dir, exist_ok=True)
+    os.makedirs(val_labels_dir, exist_ok=True)
+    os.makedirs(test_labels_dir, exist_ok=True)
+
+    # 保存上传的JSON文件
+    json_path = dataset_dir / "coco_annotations.json"
+
+    try:
+        # 读取JSON文件内容
+        content = await file.read()
+
+        # 保存JSON文件
+        with open(json_path, "wb") as f:
+            f.write(content)
+
+        # 解析JSON文件
+        coco_data = json.loads(content)
+
+        # 验证COCO格式
+        required_fields = ["images", "annotations", "categories"]
+        for field in required_fields:
+            if field not in coco_data:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid COCO format: missing '{field}' field"
+                )
+
+        # 提取类别信息
+        categories = coco_data["categories"]
+        classes = [category["name"] for category in sorted(categories, key=lambda x: x["id"])]
+
+        # 创建类别ID到索引的映射
+        category_id_to_index = {category["id"]: i for i, category in enumerate(sorted(categories, key=lambda x: x["id"]))}
+
+        # 创建图像ID到文件名的映射（处理带有路径的文件名）
+        image_id_to_filename = {}
+        for image in coco_data["images"]:
+            # 提取文件名（去除路径部分）
+            file_name = image["file_name"]
+            # 如果文件名包含路径分隔符，只保留文件名部分
+            if '/' in file_name or '\\' in file_name:
+                file_name = os.path.basename(file_name)
+            image_id_to_filename[image["id"]] = file_name
+
+        # 创建图像ID到尺寸的映射
+        image_id_to_size = {image["id"]: (image["width"], image["height"]) for image in coco_data["images"]}
+
+        # 创建图像ID到注释的映射
+        image_id_to_annotations = {}
+        for annotation in coco_data["annotations"]:
+            image_id = annotation["image_id"]
+            if image_id not in image_id_to_annotations:
+                image_id_to_annotations[image_id] = []
+            image_id_to_annotations[image_id].append(annotation)
+
+        # 将图像分配到训练集、验证集和测试集
+        all_image_ids = list(image_id_to_filename.keys())
+
+        # 如果启用分割，则按比例分配
+        if split_dataset_enabled:
+            import random
+            random.seed(random_seed)
+            random.shuffle(all_image_ids)
+
+            # 计算每个集合的图像数量
+            total_images = len(all_image_ids)
+            train_count = int(total_images * train_ratio)
+            val_count = int(total_images * val_ratio)
+
+            # 分配图像ID
+            train_image_ids = all_image_ids[:train_count]
+            val_image_ids = all_image_ids[train_count:train_count + val_count]
+            test_image_ids = all_image_ids[train_count + val_count:]
+        else:
+            # 默认全部放入训练集
+            train_image_ids = all_image_ids
+            val_image_ids = []
+            test_image_ids = []
+
+        # 处理图像和标签
+        for image_id in all_image_ids:
+            # 获取图像文件名和尺寸
+            filename = image_id_to_filename[image_id]
+            img_width, img_height = image_id_to_size[image_id]
+
+            # 确定目标目录
+            if image_id in train_image_ids:
+                target_img_dir = train_dir
+                target_label_dir = train_labels_dir
+            elif image_id in val_image_ids:
+                target_img_dir = val_dir
+                target_label_dir = val_labels_dir
+            else:
+                target_img_dir = test_dir
+                target_label_dir = test_labels_dir
+
+            # 创建YOLO格式的标签文件
+            if image_id in image_id_to_annotations:
+                annotations = image_id_to_annotations[image_id]
+
+                # 创建标签文件
+                label_path = target_label_dir / f"{Path(filename).stem}.txt"
+
+                with open(label_path, "w") as f:
+                    for annotation in annotations:
+                        # 获取类别索引
+                        category_id = annotation["category_id"]
+                        class_index = category_id_to_index[category_id]
+
+                        # 获取边界框
+                        bbox = annotation["bbox"]
+
+                        # 转换为YOLO格式
+                        yolo_bbox = coco_to_yolo(bbox, img_width, img_height)
+
+                        # 写入标签文件
+                        f.write(f"{class_index} {yolo_bbox[0]:.6f} {yolo_bbox[1]:.6f} {yolo_bbox[2]:.6f} {yolo_bbox[3]:.6f}\n")
+
+        # 创建classes.txt文件
+        classes_file = dataset_dir / "classes.txt"
+        with open(classes_file, "w", encoding="utf-8") as f:
+            for cls in classes:
+                f.write(f"{cls}\n")
+
+        # 创建dataset.yaml文件
+        dataset_yaml = {
+            "path": str(dataset_dir),
+            "train": "train/images",
+            "val": "val/images",
+            "test": "test/images",
+            "nc": len(classes),
+            "names": classes
+        }
+
+        try:
+            import yaml
+            with open(dataset_dir / "dataset.yaml", "w", encoding="utf-8") as f:
+                yaml.dump(dataset_yaml, f, default_flow_style=False)
+        except Exception as e:
+            print(f"Error creating dataset.yaml: {e}")
+            with open(dataset_dir / "dataset.yaml", "w", encoding="utf-8") as f:
+                f.write(f"path: {str(dataset_dir)}\n")
+                f.write("train: train/images\n")
+                f.write("val: val/images\n")
+                f.write("test: test/images\n")
+                f.write(f"nc: {len(classes)}\n")
+                f.write(f"names: {str(classes)}\n")
+
+        # 创建数据库记录
+        obj_in_data = {
+            "name": name,
+            "description": description or "",
+            "path": str(dataset_dir),
+            "classes": classes,
+            "image_count": len(all_image_ids),
+            "status": "available"
+        }
+
+        # 创建数据库记录
+        db_dataset = dataset.create_with_fields(db, obj_in=obj_in_data)
+
+        return db_dataset
+
+    except Exception as e:
+        # 清理临时文件
+        if dataset_dir.exists():
+            shutil.rmtree(dataset_dir)
+
+        # 记录详细错误
+        import traceback
+        error_details = traceback.format_exc()
+        print(f"Error importing COCO dataset: {str(e)}\n{error_details}")
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error importing COCO dataset: {str(e)}",
         )
 

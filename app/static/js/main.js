@@ -78,6 +78,33 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 默认加载数据集页面
     loadPage('datasets');
+
+    // 添加调试代码 - 5秒后检查COCO按钮是否存在并强制绑定事件
+    setTimeout(function() {
+        console.log('DEBUG: 检查COCO按钮并强制绑定事件');
+        const cocoButton = document.getElementById('import-coco-dataset-btn');
+        if (cocoButton) {
+            console.log('DEBUG: 找到COCO按钮:', cocoButton);
+            console.log('DEBUG: COCO按钮当前onclick:', cocoButton.onclick);
+
+            // 直接绑定全局函数
+            window.showCocoModal = function() {
+                console.log('DEBUG: 通过全局函数调用showImportCocoDatasetModal');
+                showImportCocoDatasetModal();
+                return false;
+            };
+
+            // 强制重新绑定事件
+            cocoButton.onclick = window.showCocoModal;
+
+            // 添加内联事件处理
+            cocoButton.setAttribute('onclick', 'return window.showCocoModal();');
+
+            console.log('DEBUG: COCO按钮事件已强制重新绑定');
+        } else {
+            console.error('DEBUG: 5秒后仍未找到COCO按钮');
+        }
+    }, 5000);
 });
 
 // 加载页面内容
@@ -1129,6 +1156,8 @@ function loadDatasets() {
 // 绑定数据集页面事件
 function bindDatasetEvents() {
     console.log('Binding dataset events');
+
+    // 绑定添加数据集按钮
     const addButton = document.getElementById('add-dataset-btn');
     if (addButton) {
         console.log('Found add-dataset-btn, binding click event');
@@ -1137,6 +1166,7 @@ function bindDatasetEvents() {
         console.error('add-dataset-btn not found');
     }
 
+    // 绑定导入本地数据集按钮
     const importLocalButton = document.getElementById('import-local-dataset-btn');
     if (importLocalButton) {
         console.log('Found import-local-dataset-btn, binding click event');
@@ -1146,6 +1176,19 @@ function bindDatasetEvents() {
         });
     } else {
         console.error('import-local-dataset-btn not found');
+    }
+
+    // 绑定COCO格式JSON转换按钮
+    const convertCocoButton = document.getElementById('convert-coco-btn');
+    if (convertCocoButton) {
+        console.log('Found convert-coco-btn, binding click event');
+        convertCocoButton.onclick = function() {
+            console.log('Convert COCO button clicked');
+            showConvertCocoModal();
+            return false;
+        };
+    } else {
+        console.error('convert-coco-btn not found');
     }
 
     // 已删除注册外部数据集功能
@@ -1898,6 +1941,607 @@ function hideLocalDatasetInfo() {
     }
 }
 
+// 绑定比例滑块
+function bindRatioSliders(trainId, valId, testId) {
+    const trainSlider = document.getElementById(trainId);
+    const valSlider = document.getElementById(valId);
+    const testSlider = document.getElementById(testId);
+    const trainValue = document.getElementById(`${trainId}-value`);
+    const valValue = document.getElementById(`${valId}-value`);
+    const testValue = document.getElementById(`${testId}-value`);
+
+    if (!trainSlider || !valSlider || !testSlider || !trainValue || !valValue || !testValue) {
+        console.error('Ratio sliders or value elements not found');
+        return;
+    }
+
+    // 更新显示值
+    function updateValues() {
+        trainValue.textContent = `${Math.round(trainSlider.value * 100)}%`;
+        valValue.textContent = `${Math.round(valSlider.value * 100)}%`;
+        testValue.textContent = `${Math.round(testSlider.value * 100)}%`;
+    }
+
+    // 调整比例，确保总和为1
+    function adjustRatios(changedSlider) {
+        const train = parseFloat(trainSlider.value);
+        const val = parseFloat(valSlider.value);
+        const test = parseFloat(testSlider.value);
+        const total = train + val + test;
+
+        if (Math.abs(total - 1.0) > 0.001) {
+            if (changedSlider === 'train') {
+                // 调整验证集和测试集
+                const remaining = 1.0 - train;
+                const ratio = remaining > 0 ? (val + test) / remaining : 0;
+                if (ratio > 0) {
+                    valSlider.value = (val / (val + test)) * remaining;
+                    testSlider.value = remaining - valSlider.value;
+                } else {
+                    valSlider.value = remaining / 2;
+                    testSlider.value = remaining / 2;
+                }
+            } else if (changedSlider === 'val') {
+                // 调整测试集
+                testSlider.value = 1.0 - train - val;
+            } else if (changedSlider === 'test') {
+                // 调整验证集
+                valSlider.value = 1.0 - train - test;
+            }
+        }
+
+        updateValues();
+    }
+
+    // 绑定事件
+    trainSlider.addEventListener('input', function() {
+        adjustRatios('train');
+    });
+
+    valSlider.addEventListener('input', function() {
+        adjustRatios('val');
+    });
+
+    testSlider.addEventListener('input', function() {
+        adjustRatios('test');
+    });
+
+    // 初始化显示
+    updateValues();
+}
+
+// 显示COCO格式JSON转换模态框
+function showConvertCocoModal() {
+    console.log('Showing convert COCO modal');
+
+    // 获取模态框元素
+    const modalElement = document.getElementById('mainModal');
+    if (!modalElement) {
+        console.error('Modal element not found');
+        return;
+    }
+
+    // 使用Bootstrap API直接显示模态框
+    const bsModal = bootstrap.Modal.getInstance(modalElement) || new bootstrap.Modal(modalElement);
+
+    // 设置模态框内容
+    const modalTitle = modalElement.querySelector('.modal-title');
+    const modalBody = modalElement.querySelector('.modal-body');
+    const modalSubmit = document.getElementById('modalSubmit');
+
+    if (!modalTitle || !modalBody || !modalSubmit) {
+        console.error('Modal elements not found:', { modalTitle, modalBody, modalSubmit });
+        return;
+    }
+
+    modalTitle.textContent = 'COCO格式JSON转换';
+
+    // 获取模板内容
+    const template = document.getElementById('convert-coco-template');
+    if (!template) {
+        console.error('convert-coco-template not found');
+        alert('找不到COCO格式JSON转换模板，请刷新页面重试');
+        return;
+    }
+
+    console.log('Setting modal body content for COCO conversion');
+    modalBody.innerHTML = template.innerHTML;
+
+    // 确保按钮状态正确
+    if (modalSubmit) {
+        modalSubmit.disabled = false;
+        modalSubmit.textContent = '确定';
+    }
+
+    // 显示模态框
+    console.log('Showing modal for COCO conversion');
+    bsModal.show();
+
+    // 使用setTimeout确保DOM已经更新
+    setTimeout(() => {
+        // 绑定分割选项显示/隐藏
+        const splitCheckbox = document.getElementById('coco-split-enabled');
+        const splitOptions = document.getElementById('coco-split-options');
+
+        if (splitCheckbox && splitOptions) {
+            console.log('Binding COCO split checkbox events');
+            // 设置初始状态
+            splitOptions.style.display = splitCheckbox.checked ? 'block' : 'none';
+
+            // 绑定事件
+            splitCheckbox.addEventListener('change', function() {
+                console.log('COCO split checkbox changed:', this.checked);
+                splitOptions.style.display = this.checked ? 'block' : 'none';
+            });
+
+            // 绑定比例滑块
+            bindRatioSliders('coco-train-ratio', 'coco-val-ratio', 'coco-test-ratio');
+        } else {
+            console.error('COCO split elements not found:', { splitCheckbox, splitOptions });
+        }
+
+        // 绑定提交按钮事件
+        if (modalSubmit) {
+            modalSubmit.onclick = submitConvertCoco;
+        }
+
+        // 绑定打开文件夹按钮事件
+        const openFolderBtn = document.getElementById('open-output-folder');
+        if (openFolderBtn) {
+            openFolderBtn.addEventListener('click', function() {
+                const outputPath = document.getElementById('coco-output-path');
+                if (outputPath && outputPath.value) {
+                    // 使用API打开文件夹
+                    fetch(`${API_URL}/datasets/open-folder`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ path: outputPath.value })
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(err => { throw new Error(err.detail || '打开文件夹失败'); });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('打开文件夹成功:', data);
+                    })
+                    .catch(error => {
+                        console.error('打开文件夹失败:', error);
+                        alert('打开文件夹失败: ' + error.message);
+                    });
+                }
+            });
+        }
+
+        // 绑定下载ZIP按钮事件
+        const downloadZipBtn = document.getElementById('download-labels-zip');
+        if (downloadZipBtn) {
+            downloadZipBtn.addEventListener('click', function() {
+                const outputPath = document.getElementById('coco-output-path');
+                if (outputPath && outputPath.value) {
+                    // 创建下载链接
+                    const downloadUrl = `${API_URL}/datasets/download-labels-zip?path=${encodeURIComponent(outputPath.value)}`;
+
+                    // 创建一个隐藏的a标签并触发点击
+                    const a = document.createElement('a');
+                    a.style.display = 'none';
+                    a.href = downloadUrl;
+                    a.download = 'yolo_labels.zip';
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                }
+            });
+        }
+    }, 100);
+}
+
+// 提交COCO格式JSON转换表单
+async function submitConvertCoco() {
+    console.log('Submitting convert COCO form');
+    const fileInput = document.getElementById('coco-json-file');
+    const splitEnabled = document.getElementById('coco-split-enabled');
+    const trainRatio = document.getElementById('coco-train-ratio');
+    const valRatio = document.getElementById('coco-val-ratio');
+    const testRatio = document.getElementById('coco-test-ratio');
+    const randomSeed = document.getElementById('coco-random-seed');
+    const progressContainer = document.getElementById('coco-convert-progress-container');
+    const progressBar = document.getElementById('coco-convert-progress-bar');
+    const statusContainer = document.getElementById('coco-convert-status');
+    const resultContainer = document.getElementById('coco-convert-result');
+    const outputPathInput = document.getElementById('coco-output-path');
+    const modalSubmit = document.getElementById('modalSubmit');
+
+    if (!fileInput || !fileInput.files[0]) {
+        alert('请选择COCO格式的JSON文件');
+        return;
+    }
+
+    // 验证文件类型
+    if (!fileInput.files[0].name.endsWith('.json')) {
+        alert('请选择JSON格式的COCO数据集文件');
+        return;
+    }
+
+    // 禁用提交按钮
+    modalSubmit.disabled = true;
+    modalSubmit.textContent = '处理中...';
+
+    // 显示进度容器
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    statusContainer.style.display = 'block';
+    statusContainer.textContent = '正在上传COCO数据集文件...';
+    resultContainer.style.display = 'none';
+
+    try {
+        // 创建FormData对象
+        const formData = new FormData();
+        formData.append('file', fileInput.files[0]);
+        formData.append('split_enabled', splitEnabled ? splitEnabled.checked : 'true');
+        formData.append('train_ratio', trainRatio ? trainRatio.value : '0.7');
+        formData.append('val_ratio', valRatio ? valRatio.value : '0.15');
+        formData.append('test_ratio', testRatio ? testRatio.value : '0.15');
+        formData.append('random_seed', randomSeed ? randomSeed.value : '42');
+
+        // 创建XMLHttpRequest对象以支持上传进度
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_URL}/datasets/convert-coco`, true);
+
+        // 上传进度事件
+        xhr.upload.onprogress = function(e) {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressBar.style.width = percentComplete + '%';
+                progressBar.textContent = Math.round(percentComplete) + '%';
+                statusContainer.textContent = `正在上传COCO数据集文件... ${Math.round(percentComplete)}%`;
+            }
+        };
+
+        // 上传完成事件
+        xhr.onload = function() {
+            if (xhr.status === 200 || xhr.status === 201) {
+                // 上传成功
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                statusContainer.textContent = '转换成功！';
+
+                try {
+                    // 解析响应
+                    const response = JSON.parse(xhr.responseText);
+
+                    // 显示结果
+                    resultContainer.style.display = 'block';
+                    if (outputPathInput) {
+                        outputPathInput.value = response.output_dir;
+                    }
+
+                    // 重置按钮状态
+                    modalSubmit.disabled = false;
+                    modalSubmit.textContent = '关闭';
+                    modalSubmit.onclick = function() {
+                        modal.hide();
+                    };
+                } catch (e) {
+                    statusContainer.textContent = `解析响应失败: ${e.message}`;
+
+                    // 重置按钮状态
+                    modalSubmit.disabled = false;
+                    modalSubmit.textContent = '确定';
+                }
+            } else {
+                // 上传失败
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    statusContainer.textContent = `转换失败: ${response.detail || '未知错误'}`;
+                    alert(`COCO格式JSON转换失败: ${response.detail || '未知错误'}`);
+                } catch (e) {
+                    statusContainer.textContent = `转换失败: ${xhr.statusText}`;
+                    alert(`COCO格式JSON转换失败: ${xhr.statusText}`);
+                }
+
+                // 重置按钮状态
+                modalSubmit.disabled = false;
+                modalSubmit.textContent = '确定';
+            }
+        };
+
+        // 上传错误事件
+        xhr.onerror = function() {
+            statusContainer.textContent = '转换失败: 网络错误';
+            alert('COCO格式JSON转换失败: 网络错误');
+
+            // 重置按钮状态
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '确定';
+        };
+
+        // 发送请求
+        xhr.send(formData);
+    } catch (error) {
+        console.error('Error converting COCO JSON:', error);
+        statusContainer.textContent = `转换失败: ${error.message}`;
+        alert('COCO格式JSON转换失败: ' + error.message);
+
+        // 重置按钮状态
+        modalSubmit.disabled = false;
+        modalSubmit.textContent = '确定';
+    }
+}
+
+// 显示COCO数据集导入模态框
+function showImportCocoDatasetModal() {
+    console.log('Showing import COCO dataset modal - 开始执行');
+
+    try {
+        // 获取模态框元素
+        const modalElement = document.getElementById('mainModal');
+        if (!modalElement) {
+            console.error('Modal element not found');
+            alert('找不到模态框元素，请刷新页面重试');
+            return;
+        }
+
+        console.log('Modal element found:', modalElement);
+
+        // 使用Bootstrap API直接显示模态框
+        let bsModal;
+        try {
+            bsModal = bootstrap.Modal.getInstance(modalElement);
+            if (!bsModal) {
+                console.log('Creating new Bootstrap modal instance');
+                bsModal = new bootstrap.Modal(modalElement);
+            }
+        } catch (error) {
+            console.error('Error creating Bootstrap modal:', error);
+            alert('创建模态框实例失败: ' + error.message);
+            return;
+        }
+
+        // 设置模态框内容
+        const modalTitle = modalElement.querySelector('.modal-title');
+        const modalBody = modalElement.querySelector('.modal-body');
+        const modalSubmit = document.getElementById('modalSubmit');
+
+        if (!modalTitle || !modalBody || !modalSubmit) {
+            console.error('Modal elements not found:', { modalTitle, modalBody, modalSubmit });
+            alert('找不到模态框内部元素，请刷新页面重试');
+            return;
+        }
+
+        console.log('Modal elements found:', { modalTitle, modalBody, modalSubmit });
+        modalTitle.textContent = '导入COCO数据集';
+
+        // 获取模板内容
+        const template = document.getElementById('import-coco-dataset-template');
+        if (!template) {
+            console.error('import-coco-dataset-template not found');
+            alert('找不到COCO数据集导入模板，请刷新页面重试');
+            return;
+        }
+
+        console.log('Template found:', template);
+        console.log('Setting modal body content for COCO import');
+        modalBody.innerHTML = template.innerHTML;
+
+        // 确保按钮状态正确
+        if (modalSubmit) {
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '确定';
+        }
+
+        // 显示模态框
+        console.log('Showing modal for COCO import');
+        try {
+            bsModal.show();
+            console.log('Modal shown successfully');
+        } catch (error) {
+            console.error('Error showing modal:', error);
+            alert('显示模态框失败: ' + error.message);
+
+            // 尝试使用原生方法显示
+            modalElement.style.display = 'block';
+            modalElement.classList.add('show');
+            document.body.classList.add('modal-open');
+
+            // 创建背景遮罩
+            const backdrop = document.createElement('div');
+            backdrop.className = 'modal-backdrop fade show';
+            document.body.appendChild(backdrop);
+        }
+
+        // 使用setTimeout确保DOM已经更新
+        setTimeout(() => {
+            try {
+                // 绑定分割选项显示/隐藏
+                const splitCheckbox = document.getElementById('coco-split-dataset-enabled');
+                const splitOptions = document.getElementById('coco-split-options');
+
+                if (splitCheckbox && splitOptions) {
+                    console.log('Binding COCO split checkbox events');
+                    // 设置初始状态
+                    splitOptions.style.display = splitCheckbox.checked ? 'block' : 'none';
+
+                    // 绑定事件
+                    splitCheckbox.addEventListener('change', function() {
+                        console.log('COCO split checkbox changed:', this.checked);
+                        splitOptions.style.display = this.checked ? 'block' : 'none';
+                    });
+
+                    // 绑定比例滑块
+                    bindRatioSliders('coco-train-ratio', 'coco-val-ratio', 'coco-test-ratio');
+                } else {
+                    console.error('COCO split elements not found:', { splitCheckbox, splitOptions });
+                }
+
+                // 绑定提交按钮事件
+                if (modalSubmit) {
+                    console.log('Binding submit button click event');
+                    modalSubmit.onclick = function() {
+                        console.log('Submit button clicked');
+                        submitImportCocoDataset();
+                    };
+                }
+            } catch (error) {
+                console.error('Error in setTimeout callback:', error);
+            }
+        }, 100);
+
+        console.log('showImportCocoDatasetModal completed successfully');
+    } catch (error) {
+        console.error('Unhandled error in showImportCocoDatasetModal:', error);
+        alert('显示COCO数据集导入模态框时发生错误: ' + error.message);
+    }
+}
+
+// 提交导入COCO数据集表单
+async function submitImportCocoDataset() {
+    console.log('Submitting import COCO dataset form');
+    const nameInput = document.getElementById('coco-dataset-name');
+    const descriptionInput = document.getElementById('coco-dataset-description');
+    const fileInput = document.getElementById('coco-dataset-file');
+    const splitEnabled = document.getElementById('coco-split-dataset-enabled');
+    const trainRatio = document.getElementById('coco-train-ratio');
+    const valRatio = document.getElementById('coco-val-ratio');
+    const testRatio = document.getElementById('coco-test-ratio');
+    const randomSeed = document.getElementById('coco-random-seed');
+    const progressContainer = document.getElementById('coco-upload-progress-container');
+    const progressBar = document.getElementById('coco-upload-progress-bar');
+    const statusContainer = document.getElementById('coco-upload-status');
+    const modalSubmit = document.getElementById('modalSubmit');
+
+    if (!nameInput || !fileInput || !fileInput.files[0]) {
+        alert('请填写必填字段并选择COCO格式的JSON文件');
+        return;
+    }
+
+    // 验证文件类型
+    if (!fileInput.files[0].name.endsWith('.json')) {
+        alert('请选择JSON格式的COCO数据集文件');
+        return;
+    }
+
+    // 禁用提交按钮
+    modalSubmit.disabled = true;
+    modalSubmit.textContent = '处理中...';
+
+    // 显示进度容器
+    progressContainer.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressBar.textContent = '0%';
+    statusContainer.style.display = 'block';
+    statusContainer.textContent = '正在上传COCO数据集文件...';
+
+    try {
+        // 第1步：初始化上传，获取文件ID
+        const initFormData = new FormData();
+        initFormData.append('name', nameInput.value);
+        initFormData.append('file', fileInput.files[0]);
+
+        const initResponse = await fetch(`${API_URL}/datasets/upload-init`, {
+            method: 'POST',
+            body: initFormData
+        });
+
+        if (!initResponse.ok) {
+            throw new Error('初始化上传失败');
+        }
+
+        const initData = await initResponse.json();
+        const fileId = initData.file_id;
+
+        // 第2步：上传文件
+        const formData = new FormData();
+        formData.append('name', nameInput.value);
+        formData.append('description', descriptionInput.value || '');
+        formData.append('file', fileInput.files[0]);
+        formData.append('file_id', fileId);
+
+        // 添加分割选项
+        if (splitEnabled && splitEnabled.checked) {
+            formData.append('split_dataset_enabled', 'true');
+            formData.append('train_ratio', trainRatio ? trainRatio.value : '0.7');
+            formData.append('val_ratio', valRatio ? valRatio.value : '0.15');
+            formData.append('test_ratio', testRatio ? testRatio.value : '0.15');
+            formData.append('random_seed', randomSeed ? randomSeed.value : '42');
+        } else {
+            formData.append('split_dataset_enabled', 'false');
+        }
+
+        // 创建XMLHttpRequest对象以支持上传进度
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_URL}/datasets/import-coco`, true);
+
+        // 上传进度事件
+        xhr.upload.onprogress = function(e) {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressBar.style.width = percentComplete + '%';
+                progressBar.textContent = Math.round(percentComplete) + '%';
+                statusContainer.textContent = `正在上传COCO数据集文件... ${Math.round(percentComplete)}%`;
+            }
+        };
+
+        // 上传完成事件
+        xhr.onload = function() {
+            if (xhr.status === 200 || xhr.status === 201) {
+                // 上传成功
+                progressBar.style.width = '100%';
+                progressBar.textContent = '100%';
+                statusContainer.textContent = '导入成功！正在刷新数据集列表...';
+
+                // 关闭模态框
+                modal.hide();
+
+                // 重新加载数据集列表
+                loadDatasets();
+
+                // 显示成功消息
+                alert('COCO数据集导入成功！');
+            } else {
+                // 上传失败
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    statusContainer.textContent = `导入失败: ${response.detail || '未知错误'}`;
+                    alert(`导入COCO数据集失败: ${response.detail || '未知错误'}`);
+                } catch (e) {
+                    statusContainer.textContent = `导入失败: ${xhr.statusText}`;
+                    alert(`导入COCO数据集失败: ${xhr.statusText}`);
+                }
+
+                // 重置按钮状态
+                modalSubmit.disabled = false;
+                modalSubmit.textContent = '确定';
+            }
+        };
+
+        // 上传错误事件
+        xhr.onerror = function() {
+            statusContainer.textContent = '导入失败: 网络错误';
+            alert('导入COCO数据集失败: 网络错误');
+
+            // 重置按钮状态
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '确定';
+        };
+
+        // 发送请求
+        xhr.send(formData);
+    } catch (error) {
+        console.error('Error importing COCO dataset:', error);
+        statusContainer.textContent = `导入失败: ${error.message}`;
+        alert('导入COCO数据集失败: ' + error.message);
+
+        // 重置按钮状态
+        modalSubmit.disabled = false;
+        modalSubmit.textContent = '确定';
+    }
+}
+
 // 设置验证数据集目录按钮
 function setupValidateDatasetDirButton() {
     console.log('Setting up validate dataset directory button');
@@ -2480,6 +3124,14 @@ function bindTrainingEvents() {
     const addButton = document.getElementById('add-training-btn');
     if (addButton) {
         addButton.addEventListener('click', showAddTrainingModal);
+    }
+
+    // 绑定重启TensorBoard按钮事件
+    const restartTensorboardBtn = document.getElementById('restart-tensorboard-btn');
+    if (restartTensorboardBtn) {
+        restartTensorboardBtn.addEventListener('click', function() {
+            restartTensorBoard();
+        });
     }
 }
 
@@ -3249,7 +3901,32 @@ function openTensorBoard(taskId) {
 
             if (data.url) {
                 // 打开TensorBoard
-                window.open(data.url, '_blank');
+                const tbWindow = window.open(data.url, '_blank');
+
+                // 检查窗口是否被阻止
+                if (!tbWindow || tbWindow.closed || typeof tbWindow.closed === 'undefined') {
+                    // 窗口被阻止，显示提示
+                    showModal('TensorBoard打开失败',
+                        `<p>浏览器阻止了打开TensorBoard窗口。请允许弹出窗口，或者手动访问以下链接：</p>
+                        <p><a href="${data.url}" target="_blank">${data.url}</a></p>
+                        <p>如果TensorBoard无法显示数据，请尝试以下操作：</p>
+                        <div class="d-flex justify-content-center mt-3">
+                            <button id="restart-tensorboard-btn" class="btn btn-warning me-2">重启TensorBoard服务</button>
+                            <button id="open-logs-folder-btn" class="btn btn-info">打开日志目录</button>
+                        </div>`,
+                        function() {
+                            // 绑定重启按钮事件
+                            document.getElementById('restart-tensorboard-btn').addEventListener('click', function() {
+                                restartTensorBoard();
+                            });
+
+                            // 绑定打开日志目录按钮事件
+                            document.getElementById('open-logs-folder-btn').addEventListener('click', function() {
+                                openTensorBoardLogsFolder(taskId);
+                            });
+                        }
+                    );
+                }
             } else {
                 throw new Error('TensorBoard URL不可用');
             }
@@ -3260,7 +3937,19 @@ function openTensorBoard(taskId) {
                 document.body.removeChild(loadingToast);
             }
             console.error('Error opening TensorBoard:', error);
-            alert('打开TensorBoard失败: ' + error.message);
+
+            // 显示错误提示，并提供重启选项
+            showModal('TensorBoard打开失败',
+                `<p>打开TensorBoard时发生错误: ${error.message}</p>
+                <p>请尝试重启TensorBoard服务：</p>
+                <button id="restart-tensorboard-btn" class="btn btn-warning">重启TensorBoard服务</button>`,
+                function() {
+                    // 绑定重启按钮事件
+                    document.getElementById('restart-tensorboard-btn').addEventListener('click', function() {
+                        restartTensorBoard();
+                    });
+                }
+            );
         });
 }
 
@@ -3278,6 +3967,180 @@ function createModal() {
     modal.style.overflow = 'auto';
     modal.style.backgroundColor = 'rgba(0,0,0,0.4)';
     return modal;
+}
+
+// 显示模态框
+function showModal(title, content, callback) {
+    // 创建模态框
+    const modal = createModal();
+
+    // 创建模态框内容
+    const modalContent = document.createElement('div');
+    modalContent.className = 'modal-content';
+    modalContent.style.backgroundColor = '#fefefe';
+    modalContent.style.margin = '15% auto';
+    modalContent.style.padding = '20px';
+    modalContent.style.border = '1px solid #888';
+    modalContent.style.width = '50%';
+    modalContent.style.textAlign = 'center';
+
+    // 添加标题
+    const titleElement = document.createElement('h3');
+    titleElement.textContent = title;
+    modalContent.appendChild(titleElement);
+
+    // 添加内容
+    const contentElement = document.createElement('div');
+    contentElement.innerHTML = content;
+    modalContent.appendChild(contentElement);
+
+    // 添加关闭按钮
+    const closeButton = document.createElement('button');
+    closeButton.textContent = '关闭';
+    closeButton.className = 'btn btn-secondary mt-3';
+    closeButton.onclick = function() {
+        document.body.removeChild(modal);
+    };
+    modalContent.appendChild(closeButton);
+
+    // 将模态框添加到文档中
+    modal.appendChild(modalContent);
+    document.body.appendChild(modal);
+
+    // 点击模态框外部关闭
+    window.onclick = function(event) {
+        if (event.target === modal) {
+            document.body.removeChild(modal);
+        }
+    };
+
+    // 执行回调函数
+    if (typeof callback === 'function') {
+        callback();
+    }
+
+    return modal;
+}
+
+// 显示Toast提示
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.className = 'toast show';
+    toast.style.position = 'fixed';
+    toast.style.top = '20px';
+    toast.style.right = '20px';
+    toast.style.padding = '10px 20px';
+    toast.style.borderRadius = '4px';
+    toast.style.zIndex = '9999';
+    toast.style.color = 'white';
+
+    // 根据类型设置背景色
+    switch (type) {
+        case 'success':
+            toast.style.backgroundColor = '#28a745';
+            break;
+        case 'error':
+            toast.style.backgroundColor = '#dc3545';
+            break;
+        case 'warning':
+            toast.style.backgroundColor = '#ffc107';
+            toast.style.color = '#212529';
+            break;
+        case 'info':
+        default:
+            toast.style.backgroundColor = '#007bff';
+            break;
+    }
+
+    toast.innerHTML = message;
+    document.body.appendChild(toast);
+
+    // 如果设置了持续时间，则自动关闭
+    if (duration > 0) {
+        setTimeout(() => {
+            hideToast(toast);
+        }, duration);
+    }
+
+    return toast;
+}
+
+// 隐藏Toast提示
+function hideToast(toast) {
+    if (document.body.contains(toast)) {
+        document.body.removeChild(toast);
+    }
+}
+
+// 重启TensorBoard服务
+function restartTensorBoard() {
+    console.log('Restarting TensorBoard service');
+
+    // 显示加载提示
+    const loadingToast = showToast('正在重启TensorBoard服务...', 'info', 10000);
+
+    // 调用重启API
+    fetch(`${API_URL}/training/restart-tensorboard`, {
+        method: 'POST'
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to restart TensorBoard');
+        }
+        return response.json();
+    })
+    .then(data => {
+        // 隐藏加载提示
+        hideToast(loadingToast);
+
+        if (data.success) {
+            showToast('TensorBoard服务已重启，请重新打开TensorBoard', 'success', 5000);
+        } else {
+            showToast('TensorBoard服务重启失败: ' + data.message, 'error', 5000);
+        }
+    })
+    .catch(error => {
+        // 隐藏加载提示
+        hideToast(loadingToast);
+
+        console.error('Error restarting TensorBoard:', error);
+        showToast('重启TensorBoard服务失败: ' + error.message, 'error', 5000);
+    });
+}
+
+// 打开TensorBoard日志目录
+function openTensorBoardLogsFolder(taskId) {
+    console.log('Opening TensorBoard logs folder for task:', taskId);
+
+    // 显示加载提示
+    const loadingToast = showToast('正在打开日志目录...', 'info', 10000);
+
+    // 调用API获取日志目录路径
+    fetch(`${API_URL}/training/${taskId}/logs-folder`)
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('获取日志目录路径失败');
+        }
+        return response.json();
+    })
+    .then(data => {
+        // 隐藏加载提示
+        hideToast(loadingToast);
+
+        if (data.path) {
+            // 显示成功提示
+            showToast('已打开日志目录', 'success', 3000);
+        } else {
+            throw new Error('日志目录路径不可用');
+        }
+    })
+    .catch(error => {
+        // 隐藏加载提示
+        hideToast(loadingToast);
+
+        console.error('Error opening logs folder:', error);
+        showToast('打开日志目录失败: ' + error.message, 'error', 5000);
+    });
 }
 
 // 删除训练任务

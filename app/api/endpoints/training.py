@@ -1,5 +1,7 @@
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, Body
+import os
+import subprocess
+from fastapi import APIRouter, Depends, HTTPException, Body, Request
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import torch
@@ -336,13 +338,87 @@ def get_training_results(
 @router.get("/{task_id}/tensorboard")
 def get_tensorboard_url(
     task_id: str,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """
     Get the TensorBoard URL for a training task
     """
+    # 导入TensorBoard管理器
+    from app.services.tensorboard_service import tensorboard_manager
+
+    # 确保TensorBoard服务正在运行
+    if not tensorboard_manager.is_available():
+        tensorboard_manager.start()
+
     logs_data = training_service.get_training_logs(db, task_id=task_id)
-    return {"url": logs_data["tensorboard_url"]}
+
+    # 获取原始TensorBoard URL
+    tensorboard_url = logs_data["tensorboard_url"]
+
+    # 替换localhost为当前请求的主机名
+    if tensorboard_url and tensorboard_url.startswith("http://localhost:"):
+        # 获取当前请求的主机名
+        host = request.headers.get("host", "localhost")
+        # 如果主机名包含端口，只取主机部分
+        if ":" in host:
+            host = host.split(":")[0]
+        # 替换URL中的localhost
+        tensorboard_url = tensorboard_url.replace("http://localhost:", f"http://{host}:")
+
+    return {"url": tensorboard_url}
+
+@router.get("/{task_id}/logs-folder")
+def open_logs_folder(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    打开TensorBoard日志目录
+    """
+    # 获取训练任务
+    task = training_service.get_training_task(db, task_id=task_id)
+
+    # 检查任务是否存在
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+
+    # 构建日志目录路径
+    if task.parameters and "output_dir" in task.parameters:
+        output_dir = task.parameters["output_dir"]
+        exp_dir = os.path.join(output_dir, "exp")
+
+        # 检查目录是否存在
+        if os.path.exists(exp_dir):
+            # 使用系统命令打开文件夹
+            try:
+                if os.name == 'nt':  # Windows
+                    os.startfile(exp_dir)
+                else:  # Linux/Mac
+                    subprocess.Popen(['xdg-open', exp_dir])
+
+                return {"success": True, "path": exp_dir}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"打开日志目录失败: {str(e)}")
+        else:
+            raise HTTPException(status_code=404, detail="日志目录不存在")
+    else:
+        raise HTTPException(status_code=404, detail="训练任务没有输出目录信息")
+
+@router.post("/restart-tensorboard")
+def restart_tensorboard():
+    """
+    重启TensorBoard服务
+    """
+    from app.services.tensorboard_service import tensorboard_manager
+
+    # 重启TensorBoard服务
+    success = tensorboard_manager.restart()
+
+    if success:
+        return {"success": True, "message": "TensorBoard服务已重启"}
+    else:
+        return {"success": False, "message": "TensorBoard服务重启失败"}
 
 @router.delete("/{task_id}")
 def delete_training_task(
