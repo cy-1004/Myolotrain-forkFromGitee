@@ -28,6 +28,7 @@ var/
 logs/
 *.log
 data/
+dataset/
 runs/
 
 # 排除开发环境文件
