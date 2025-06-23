@@ -4626,12 +4626,8 @@ function viewTrainingDetails(taskId) {
                                 <td><span class="badge ${getStatusBadgeClass(task.status)}">${getStatusText(task.status)}</span></td>
                             </tr>
                             <tr>
-                                <th>数据集</th>
-                                <td>${task.dataset_name || '未指定'}</td>
-                            </tr>
-                            <tr>
-                                <th>模型类型</th>
-                                <td>${task.model_type || '未指定'}</td>
+                                <th>tensorboard监控目录</th>
+                                <td>${task.tensorboard_path || '未指定'}</td>
                             </tr>
                             <tr>
                                 <th>开始时间</th>
