@@ -523,13 +523,11 @@ dataset/
 
 ## 11 许可证
 
-本项目采用MIT许可证 - 详情请参见LICENSE文件
+本项目采用AGPL-3.0 协议许可证 - 详情请参见LICENSE文件
 
-## 知识产权声明
-1. 本平台代码采用 **MIT 开源协议**  
-2. 训练功能依赖 [Ultralytics YOLOv8/v11](https://github.com/ultralytics/ultralytics)，其使用 **AGPL-3.0 协议**  
-3. 用户通过本平台调用 YOLO 训练时，须遵守：  
+## 12 知识产权声明
+1. 训练功能依赖 [Ultralytics YOLOv8/v11](https://github.com/ultralytics/ultralytics)，其使用 **AGPL-3.0 协议**  
+2. 用户通过本平台调用 YOLO 训练时，须遵守：  
    - 若部署为 **公有云服务**，必须开源服务端代码（AGPL 要求）  
    - 本地私有部署无需开源  
-4. 本平台不承担用户违反第三方协议的责任  
-5. MIT协议仅针对本平台中的非ultralytics源码，属于ultralytics的内容应遵循ultralytics协议
+3. 本平台不承担用户违反第三方协议的责任  
