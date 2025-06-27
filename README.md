@@ -527,7 +527,4 @@ dataset/
 
 ## 12 知识产权声明
 1. 训练功能依赖 [Ultralytics YOLOv8/v11](https://github.com/ultralytics/ultralytics)，其使用 **AGPL-3.0 协议**  
-2. 用户通过本平台调用 YOLO 训练时，须遵守：  
-   - 若部署为 **公有云服务**，必须开源服务端代码（AGPL 要求）  
-   - 本地私有部署无需开源  
-3. 本平台不承担用户违反第三方协议的责任  
+2. 本平台不承担用户违反第三方协议的责任  
