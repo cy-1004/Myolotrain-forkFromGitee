@@ -28,21 +28,21 @@ async def create_model(
     if db_model:
         raise HTTPException(
             status_code=400,
-            detail="Model with this name already exists",
+            detail="名称已经存在",
         )
 
     # Validate model type
     if type not in settings.YOLO_MODEL_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid model type. Must be one of: {', '.join(settings.YOLO_MODEL_TYPES)}",
+            detail=f"模型类型无效，必须是： {', '.join(settings.YOLO_MODEL_TYPES)}",
         )
 
     # Validate task type
     if task not in settings.YOLO_TASK_TYPES:
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid task type. Must be one of: {', '.join(settings.YOLO_TASK_TYPES)}",
+            detail=f"任务类型无效，必须是： {', '.join(settings.YOLO_TASK_TYPES)}",
         )
 
     # Generate unique ID for the model
@@ -58,7 +58,7 @@ async def create_model(
         if os.path.getsize(model_path) < 1000:  # Arbitrary small size check
             raise HTTPException(
                 status_code=400,
-                detail="Invalid model file. File is too small.",
+                detail="模型文件无效",
             )
 
         # 创建模型对象
@@ -127,7 +127,7 @@ def delete_model(db: Session, model_id: str) -> Model:
     if tasks_using_model:
         raise HTTPException(
             status_code=400,
-            detail="Cannot delete model as it is being used by training tasks",
+            detail="无法删除模型，因为它正被训练任务使用",
         )
 
     # 检查作为输出模型
@@ -136,7 +136,7 @@ def delete_model(db: Session, model_id: str) -> Model:
     if tasks_with_output:
         raise HTTPException(
             status_code=400,
-            detail="Cannot delete model as it is an output of training tasks",
+            detail="无法删除模型，因为它是训练任务的输出",
         )
 
     # 检查模型是否正在被检测任务使用
@@ -148,7 +148,7 @@ def delete_model(db: Session, model_id: str) -> Model:
     if detection_tasks_using_model:
         raise HTTPException(
             status_code=400,
-            detail="Cannot delete model as it is being used by detection tasks",
+            detail="无法删除模型，因为它正被检测任务使用",
         )
 
     # 删除模型文件

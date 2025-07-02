@@ -3050,7 +3050,7 @@ function loadTrainingTasks() {
                     <td>
                         ${task.status === 'pending' ? `<button class="btn btn-sm btn-success start-training" data-id="${task.id}">开始训练</button>` : ''}
                         ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'pending' ? `<button class="btn btn-sm btn-warning stop-training" data-id="${task.id}">停止训练</button>` : ''}
-                        ${(task.status === 'cancelled' || task.status === 'completed' || task.status === 'failed') ? `<button class="btn btn-sm btn-success resume-training" data-id="${task.id}">继续训练</button>` : ''}
+                        ${(task.status === 'cancelled' || task.status === 'failed') ? `<button class="btn btn-sm btn-success resume-training" data-id="${task.id}">继续训练</button>` : ''}
                         ${task.status === 'running' || task.status === 'completed' || task.status === 'cancelled' ? `<button class="btn btn-sm btn-info tensorboard" data-id="${task.id}">TensorBoard</button>` : ''}
                         ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' ? `<button class="btn btn-sm btn-primary view-details" data-id="${task.id}">训练详情</button>` : ''}
                         ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' ? `<button class="btn btn-sm btn-secondary view-logs" data-id="${task.id}">查看日志</button>` : ''}
@@ -4624,10 +4624,6 @@ function viewTrainingDetails(taskId) {
                             <tr>
                                 <th>状态</th>
                                 <td><span class="badge ${getStatusBadgeClass(task.status)}">${getStatusText(task.status)}</span></td>
-                            </tr>
-                            <tr>
-                                <th>tensorboard监控目录</th>
-                                <td>${task.tensorboard_path || '未指定'}</td>
                             </tr>
                             <tr>
                                 <th>开始时间</th>

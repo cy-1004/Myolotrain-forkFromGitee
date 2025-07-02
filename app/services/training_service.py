@@ -283,10 +283,29 @@ class DeviceManager:
         if platform.system() in ['Linux', 'Darwin']:
             try:
                 import resource
-                # 设置为系统内存的75%
-                memory_limit = int(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') * 0.75)
+                # 获取系统总内存
+                total_memory = os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES')
+            
+                # 获取GPU显存信息（如果有）
+                gpu_memory = 0
+                if torch.cuda.is_available() and available_gpus:
+                    gpu_memory = available_gpus[0].get('memory', 0) * 1024 * 1024  # 转换为字节
+                
+                    # 对于大显存系统（>16GB），调整内存限制策略
+                    if gpu_memory > 16 * 1024 * 1024 * 1024:  # 16GB
+                        # 使用更宽松的内存限制（系统内存的90%）
+                        memory_limit = int(total_memory * 0.9)
+                    else:
+                        # 默认使用系统内存的75%
+                        memory_limit = int(total_memory * 0.75)
+                else:
+                    # 没有GPU或获取失败，使用默认比例
+                    memory_limit = int(total_memory * 0.75)
+                
+                # 设置内存限制
                 resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
-                device_info['memory_limit'] = memory_limit
+                device_info['memory_limit'] = memory_limit // (1024 * 1024)  # 转换为MB
+                print(f'\n=== 设置内存限制为 {device_info["memory_limit"]}MB ===')
             except Exception as e:
                 print(f'\n=== 警告: 无法设置内存限制: {str(e)} ===')
 
@@ -946,8 +965,8 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
             detail="Training task not found",
         )
 
-    # 检查任务状态，只有已完成或已取消的任务才能继续训练
-    if db_task.status not in ["completed", "cancelled", "failed"]:
+    # 检查任务状态，只有终端的任务才能继续训练
+    if db_task.status not in ["cancelled", "failed"]:
         raise HTTPException(
             status_code=400,
             detail="Only completed, cancelled or failed tasks can be resumed",

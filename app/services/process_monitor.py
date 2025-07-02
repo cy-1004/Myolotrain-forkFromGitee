@@ -117,7 +117,10 @@ class ProcessMonitor:
         返回:
             str: 'completed', 'failed', 或 'unknown'
         """
-        log_path = os.path.join(settings.TENSORBOARD_LOGS_DIR, str(task_id), "training_log.txt")
+        base_log_dir = os.path.join(settings.TENSORBOARD_LOGS_DIR, str(task_id))
+        resume_log_path = os.path.join(base_log_dir, "resume_training_log.txt")
+        log_path = resume_log_path if os.path.exists(resume_log_path) else os.path.join(base_log_dir, "training_log.txt")
+        
         if not os.path.exists(log_path):
             print(f"训练日志文件不存在: {log_path}")
             return "unknown"
