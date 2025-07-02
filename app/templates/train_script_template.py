@@ -54,49 +54,19 @@ def main():
         else:
             print('\n=== 使用 GPU 训练，显存限制 ' + str(gpu_memory) + 'MB ===')
 
-        # 设置内存限制
-        import platform
-        if platform.system() in ['Linux', 'Darwin']:
-            try:
-                import resource
-                import psutil
-                
-                # 获取系统总内存
-                total_memory = psutil.virtual_memory().total
-                available_memory = psutil.virtual_memory().available
-                
-                # 获取GPU显存信息（如果有）
-                gpu_memory = 0
-                if torch.cuda.is_available() and device_type == 'gpu':
-                    gpu_memory = torch.cuda.get_device_properties(0).total_memory
-                
-                # 智能计算内存限制
-                if gpu_memory > 16 * 1024 * 1024 * 1024:  # 16GB以上显存
-                    # 大显存系统使用更宽松的限制（可用内存的90%）
-                    calculated_limit = int(available_memory * 0.9)
-                    print(f'\n=== 检测到大显存系统({gpu_memory/1024/1024/1024:.1f}GB)，调整内存限制为可用内存的90% ===')
-                else:
-                    # 普通系统使用传入的memory_limit值
-                    calculated_limit = memory_limit * 1024 * 1024
-                
-                # 确保不超过系统可用内存
-                final_limit = min(calculated_limit, available_memory)
-                
-                # 设置内存限制
-                resource.setrlimit(resource.RLIMIT_AS, (final_limit, final_limit))
-                print(f'\n=== 内存限制设置为 {final_limit/1024/1024:.0f}MB (系统总内存: {total_memory/1024/1024:.0f}MB, 可用内存: {available_memory/1024/1024:.0f}MB) ===')
-                
-            except Exception as e:
-                # 回退机制：使用传入的memory_limit值
-                try:
-                    resource.setrlimit(resource.RLIMIT_AS, (memory_limit * 1024 * 1024, memory_limit * 1024 * 1024))
-                    print(f'\n=== 警告: 无法智能设置内存限制({str(e)})，使用默认值 {memory_limit}MB ===')
-                except:
-                    print(f'\n=== 严重警告: 完全无法设置内存限制: {str(e)} ===')
-        else:
-            # Windows系统不支持resource模块
-            print('\n=== Windows系统不支持内存限制设置，内存限制将被忽略 ===')
-            print(f'=== 建议内存使用不超过 {memory_limit}MB ===')
+    #    # 设置内存限制（造成异常，暂时关闭）
+    #    # 检测操作系统类型
+    #    import platform
+    #    if platform.system() == 'Linux' or platform.system() == 'Darwin':
+    #        try:
+    #            import resource
+    #            resource.setrlimit(resource.RLIMIT_AS, (memory_limit * 1024 * 1024, memory_limit * 1024 * 1024))
+    #            print('\n=== 内存限制设置' + str(memory_limit) + 'MB ===')
+    #        except Exception as e:
+    #            print('\n=== 警告: 无法设置内存限制: ' + str(e) + ' ===')
+    #    else:
+    #        # Windows系统不支持resource模块
+    #        print('\n=== Windows系统不支持内存限制设置，内存限制将被忽略 ===')
 
         if os.path.exists(font_path):
             print('\n=== 使用项目内置 Arial Unicode 字体: ' + str(font_path) + ' ===')
