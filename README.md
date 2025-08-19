@@ -1,9 +1,14 @@
 # Myolotrain - YOLO视觉模型训练平台
 
-[![Gitee stars](https://gitee.com/rock_kim/Myolotrain/badge/star.svg?theme=dark)](https://gitee.com/YOUR_USERNAME/myolotrain)
-[![Gitee forks](https://gitee.com/rock_kim/Myolotrain/badge/fork.svg?theme=dark)](https://gitee.com/YOUR_USERNAME/myolotrain)
+[![Gitee star](https://gitee.com/rock_kim/Myolotrain/badge/star.svg?theme=gvp)](https://gitee.com/rock_kim/Myolotrain/stargazers)
+[![Gitee fork](https://gitee.com/rock_kim/Myolotrain//badge/fork.svg?theme=gvp)](https://gitee.com/rock_kim/Myolotrain/members)
+
 
 Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机视觉任务提供了直观的图形界面。该平台集成了数据集管理、模型管理、训练管理和目标检测功能，支持windows、linux、docker等多种部署方式，使用户能够轻松地训练和部署 YOLOv8 模型，支持CPU和GPU，使用tensorboard实时查看训练进度，具备数据集自动分割、数据集增强、实时检测、动态轨迹和预测等。
+
+## 致谢
+
+
 
 ### 更新日志：
 
@@ -27,7 +32,7 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 > - 在新建训练任务选择设备类型“华为昇腾”并“获取昇腾信息”确认NPU信息获取无误后启动训练即可
 
 > 2、目标追踪功能：
-> - 【目标追踪】功能整体架构：采用Yolo检测加基于transformer追踪的架构，结合Layer Scale（增强深层网络的训练稳定性），CBAM（通道+空间注意力融合，增强特征表示），交叉注意力（更精确地建模目标间关系），实现多/单目标追踪
+> - 【目标追踪】功能整体架构：采用Yolo检测加基于transformer追踪的架构，结合CBAM（通道+空间注意力融合，增强特征表示），交叉注意力（更精确地建模目标间关系），实现多/单目标追踪
 相较于原实时检测中的追踪功能，追踪效果更好并支持了单目标追踪。
 
 > 3、其他变化：
@@ -202,7 +207,7 @@ ZIP导入功能
 
 1、**输入处理**：从摄像头获取视频帧，使用YOLO模型进行目标检测
 
-2、**特征提取**：裁剪检测到的目标区域、使用带有CBAM的特征提取器提取特征、使用带有Layer Scale的Transformer编码器增强特征
+2、**特征提取**：裁剪检测到的目标区域、使用带有CBAM的特征提取器提取特征的Transformer编码器增强特征
 
 3、**目标匹配**：预测轨迹的下一个位置、使用交叉注意力计算当前检测与现有轨迹的相似度、结合IOU和特征相似度进行匹配
 
