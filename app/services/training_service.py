@@ -344,7 +344,6 @@ def train_model(
         # 如果是昇腾NPU设备，需要进行特殊处理
         if device_info['device_type'] == 'ascend':
             # 这里需要根据实际的昇腾NPU API进行实现
-            # 以下是示例代码，实际使用时需要替换为真实的API调用
             try:
                 import torch_npu
                 # 设置环境变量
@@ -399,7 +398,7 @@ def create_training_task(
         if not dataset_path.exists():
             raise HTTPException(
                 status_code=404,
-                detail=f"Local dataset path '{local_dataset_path}' does not exist",
+                detail=f"本地数据集地址'{local_dataset_path}' 不存在",
             )
 
         # 检查并创建必要的目录结构
@@ -479,7 +478,7 @@ def create_training_task(
         if not db_model:
             raise HTTPException(
                 status_code=404,
-                detail="Model not found",
+                detail="模型未找到",
             )
 
     # 创建训练任务
@@ -527,7 +526,7 @@ def delete_training_task(db: Session, task_id: str) -> TrainingTask:
         try:
             stop_training(db, task_id)
         except Exception as e:
-            print(f"Error stopping training task: {e}")
+            print(f"停止训练任务失败: {e}")
 
     # 删除任务相关文件
     try:
@@ -560,14 +559,14 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     if not db_task:
         raise HTTPException(
             status_code=404,
-            detail="Training task not found",
+            detail="训练任务未找到",
         )
 
     # 检查任务状态
     if db_task.status in ["running", "training", "downloading_model"]:
         raise HTTPException(
             status_code=400,
-            detail="Training task is already running",
+            detail="正在训练中",
         )
 
     # Get model if provided
@@ -577,11 +576,11 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         if not db_model:
             raise HTTPException(
                 status_code=404,
-                detail="Model not found",
+                detail="模型未找到",
             )
         weights_path = db_model.path
 
-    # Update task status
+    # 更新任务状态
     db_task = training_task.update(db, db_obj=db_task, obj_in={
         "status": "pending",
         "start_time": datetime.now(),
@@ -603,7 +602,7 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         if not db_dataset:
             raise HTTPException(
                 status_code=404,
-                detail="Dataset not found",
+                detail="数据集未找到",
             )
         dataset_yaml = Path(db_dataset.path) / "dataset.yaml"
     # 如果没有数据集ID，使用参数中的数据集路径
@@ -612,14 +611,14 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     else:
         raise HTTPException(
             status_code=400,
-            detail="No dataset specified for training",
+            detail="未指定用于训练的数据集",
         )
 
     # 检查数据集YAML文件是否存在
     if not dataset_yaml.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Dataset YAML file not found: {dataset_yaml}",
+            detail=f"数据集yaml文件未找到: {dataset_yaml}",
         )
 
     # 创建输出目录
@@ -777,10 +776,6 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     script_content = script_content.replace("train_args = {{", "train_args = {")
     script_content = script_content.replace("}}", "}")
 
-
-
-
-
     # 写入脚本文件
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(script_content)
@@ -797,8 +792,8 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
 
     # 创建日志文件
     log_file_path = os.path.join(tensorboard_dir, "training_log.txt")
-    # 使用gbk编码写入日志文件，以确保中文显示正确
-    log_file = open(log_file_path, "w", encoding="gbk", errors="replace")
+    # 使用utf-8编码写入日志文件，以确保中文显示正确
+    log_file = open(log_file_path, "w", encoding="utf-8", errors="replace")
 
     # 启动训练进程
     print(f"\n=== 等待训练进程启动... ===")
@@ -825,7 +820,7 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
                 "end_time": datetime.now()
             })
 
-            raise Exception(f"Training process exited immediately with code {return_code}. Error: {error_message}")
+            raise Exception(f"训练中断 {return_code}. 错误信息: {error_message}")
 
         # 保存进程ID
         db_task = training_task.update(db, db_obj=db_task, obj_in={
@@ -855,14 +850,14 @@ def stop_training(db: Session, task_id: str) -> TrainingTask:
     if not db_task:
         raise HTTPException(
             status_code=404,
-            detail="Training task not found",
+            detail="训练任务未找到",
         )
 
     # 检查任务状态
     if db_task.status not in ["running", "training", "downloading_model", "pending"]:
         raise HTTPException(
             status_code=400,
-            detail="Training task is not running",
+            detail="训练未开始",
         )
 
     # 尝试终止进程
@@ -884,7 +879,7 @@ def stop_training(db: Session, task_id: str) -> TrainingTask:
 
             print(f"\n=== 已终止训练进程，PID: {pid} ===")
         except Exception as e:
-            print(f"Error stopping training process: {e}")
+            print(f"停止训练任务出错: {e}")
 
     # 检查是否有最新的检查点文件
     last_checkpoint = None
@@ -943,14 +938,14 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     if not db_task:
         raise HTTPException(
             status_code=404,
-            detail="Training task not found",
+            detail="训练任务未找到",
         )
 
     # 检查任务状态，只有中断的任务才能继续训练
     if db_task.status not in ["cancelled", "failed"]:
         raise HTTPException(
             status_code=400,
-            detail="Only completed, cancelled or failed tasks can be resumed",
+            detail="只有中断、失败的任务才能继续训练",
         )
 
     # 使用YOLOv8的内置恢复训练机制，不再手动查找检查点文件
@@ -958,14 +953,14 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     if not db_task.parameters or "output_dir" not in db_task.parameters:
         raise HTTPException(
             status_code=400,
-            detail="Output directory not found in task parameters",
+            detail="找不到输出目录",
         )
 
     output_dir = db_task.parameters["output_dir"]
     if not output_dir or not os.path.exists(output_dir):
         raise HTTPException(
             status_code=400,
-            detail="Output directory does not exist",
+            detail="输出目录不存在",
         )
 
     print(f"\n=== 使用YOLOv8内置恢复训练机制，输出目录 {output_dir} ===")
@@ -995,14 +990,14 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     else:
         raise HTTPException(
             status_code=400,
-            detail="No dataset specified for training",
+            detail="未指定用于训练的数据集",
         )
 
     # 检查数据集YAML文件是否存在
     if not dataset_yaml.exists():
         raise HTTPException(
             status_code=404,
-            detail=f"Dataset YAML file not found: {dataset_yaml}",
+            detail=f"yaml文件未找到: {dataset_yaml}",
         )
 
     # 准备训练参数
@@ -1093,9 +1088,6 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     script_content = script_content.replace("train_args = {{", "train_args = {")
     script_content = script_content.replace("}}", "}")
 
-
-
-
     # 写入脚本文件
     with open(script_path, "w", encoding="utf-8") as f:
         f.write(script_content)
@@ -1171,7 +1163,7 @@ def get_training_logs(db: Session, task_id: str) -> Dict[str, Any]:
     if not db_task:
         raise HTTPException(
             status_code=404,
-            detail="Training task not found",
+            detail="训练任务未找到",
         )
 
     # 检查TensorBoard日志目录

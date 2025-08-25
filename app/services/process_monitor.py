@@ -141,7 +141,11 @@ class ProcessMonitor:
             # 检查成功标记
             success_markers = [
                 "Training completed successfully",
-                "Results saved to"
+                "training completed successfully",
+                "Training completed",
+                "training completed",
+                "Results saved to",
+                "results saved to"
             ]
             for marker in success_markers:
                 if marker in log_content:

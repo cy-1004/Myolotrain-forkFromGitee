@@ -72,6 +72,9 @@ function initTrackingPage() {
     // 加载模型列表
     loadModelsForTracking();
 
+    // 加载流媒体列表
+    loadStreamOptionsForTracking();
+
     // 绑定摄像头追踪相关事件
     initCameraTracking();
 }
@@ -102,6 +105,53 @@ function loadModelsForTracking() {
         })
         .catch(error => {
             console.error('加载模型列表失败:', error);
+        });
+}
+
+/**
+ * 加载流媒体选项（用于目标追踪页面）
+ */
+function loadStreamOptionsForTracking() {
+    fetch(`${API_URL}/streaming/list`)
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.streams) {
+                const streamSelect = document.getElementById('tracking-stream-select');
+                if (streamSelect) {
+                    // 清空现有选项（除了第一个默认选项）
+                    while (streamSelect.options.length > 1) {
+                        streamSelect.remove(1);
+                    }
+
+                    // 添加流媒体选项
+                    Object.entries(data.streams).forEach(([streamId, streamInfo]) => {
+                        const option = document.createElement('option');
+                        option.value = streamId;
+                        option.textContent = `${streamId} - ${streamInfo.type} (${streamInfo.source})`;
+                        streamSelect.appendChild(option);
+                    });
+
+                    // 如果没有流媒体，显示提示
+                    if (Object.keys(data.streams).length === 0) {
+                        const option = document.createElement('option');
+                        option.value = "";
+                        option.textContent = "没有可用的流媒体";
+                        option.disabled = true;
+                        streamSelect.appendChild(option);
+                    }
+                }
+            }
+        })
+        .catch(error => {
+            console.error('加载流媒体列表失败:', error);
+            const streamSelect = document.getElementById('tracking-stream-select');
+            if (streamSelect) {
+                const option = document.createElement('option');
+                option.value = "";
+                option.textContent = "加载流媒体失败";
+                option.disabled = true;
+                streamSelect.appendChild(option);
+            }
         });
 }
 

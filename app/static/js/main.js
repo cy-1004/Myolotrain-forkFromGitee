@@ -3,6 +3,78 @@ const API_URL = '/api';  // API路径
 let currentPage = '';
 let modal;
 
+// 流媒体管理全局函数
+window.startStream = function(streamId) {
+    fetch(`${API_URL}/streaming/start/${streamId}`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('流媒体启动成功！');
+            // 重新加载列表
+            if (typeof window.loadStreamsManagementList === 'function') {
+                window.loadStreamsManagementList();
+            }
+            if (typeof window.loadStreamsList === 'function') {
+                window.loadStreamsList();
+            }
+        } else {
+            alert('启动失败: ' + (data.message || '未知错误'));
+        }
+    })
+    .catch(error => {
+        alert('启动失败: ' + error.message);
+    });
+};
+
+window.stopStream = function(streamId) {
+    fetch(`${API_URL}/streaming/stop/${streamId}`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('流媒体停止成功！');
+            // 重新加载列表
+            if (typeof window.loadStreamsManagementList === 'function') {
+                window.loadStreamsManagementList();
+            }
+            if (typeof window.loadStreamsList === 'function') {
+                window.loadStreamsList();
+            }
+        } else {
+            alert('停止失败: ' + (data.message || '未知错误'));
+        }
+    })
+    .catch(error => {
+        alert('停止失败: ' + error.message);
+    });
+};
+
+window.deleteStream = function(streamId) {
+    if (confirm('确定要删除这个流媒体吗？')) {
+        // 先停止流媒体
+        fetch(`${API_URL}/streaming/stop/${streamId}`, {
+            method: 'POST'
+        })
+        .then(() => {
+            // 再删除流媒体（如果有删除API的话）
+            alert('流媒体已停止！');
+            // 重新加载列表
+            if (typeof window.loadStreamsManagementList === 'function') {
+                window.loadStreamsManagementList();
+            }
+            if (typeof window.loadStreamsList === 'function') {
+                window.loadStreamsList();
+            }
+        })
+        .catch(error => {
+            alert('删除失败: ' + error.message);
+        });
+    }
+};
+
 // 测试API端点
 function testApiEndpoints() {
     console.log('Testing API endpoints...');
@@ -5682,14 +5754,17 @@ function bindVideoEventHandlers() {
     // 视频源选择事件
     const sourceWebcam = document.getElementById('source-webcam');
     const sourceFile = document.getElementById('source-file');
+    const sourceStream = document.getElementById('source-stream');
     const webcamOptions = document.getElementById('webcam-options');
     const videoFileOptions = document.getElementById('video-file-options');
+    const streamOptions = document.getElementById('stream-options');
 
-    if (sourceWebcam && sourceFile && webcamOptions && videoFileOptions) {
+    if (sourceWebcam && sourceFile && sourceStream && webcamOptions && videoFileOptions && streamOptions) {
         sourceWebcam.addEventListener('change', function() {
             if (this.checked) {
                 webcamOptions.style.display = 'block';
                 videoFileOptions.style.display = 'none';
+                streamOptions.style.display = 'none';
             }
         });
 
@@ -5697,6 +5772,17 @@ function bindVideoEventHandlers() {
             if (this.checked) {
                 webcamOptions.style.display = 'none';
                 videoFileOptions.style.display = 'block';
+                streamOptions.style.display = 'none';
+            }
+        });
+
+        sourceStream.addEventListener('change', function() {
+            if (this.checked) {
+                webcamOptions.style.display = 'none';
+                videoFileOptions.style.display = 'none';
+                streamOptions.style.display = 'block';
+                // 加载流媒体列表
+                window.loadStreamsList();
             }
         });
     }
@@ -5744,6 +5830,22 @@ function bindVideoEventHandlers() {
                 console.error('加载模型列表失败:', error);
                 rtModelSelect.innerHTML = '<option value="">\u52a0\u8f7d\u6a21\u578b\u5931\u8d25</option>';
             });
+
+        // 流媒体管理按钮事件
+        const refreshStreamsBtn = document.getElementById('refresh-streams-btn');
+        const manageStreamsBtn = document.getElementById('manage-streams-btn');
+        
+        if (refreshStreamsBtn) {
+            refreshStreamsBtn.addEventListener('click', function() {
+                loadStreamsList();
+            });
+        }
+        
+        if (manageStreamsBtn) {
+            manageStreamsBtn.addEventListener('click', function() {
+                showStreamManagementModal();
+            });
+        }
 
         // 加载摄像头列表
         const webcamSelect = document.getElementById('webcam-select');
@@ -6200,7 +6302,20 @@ function bindVideoEventHandlers() {
             // 获取视频源
             const videoSource = document.querySelector('input[name="video-source"]:checked').value;
 
-            if (videoSource === 'webcam') {
+            if (videoSource === 'stream') {
+                // 流媒体模式
+                const streamId = document.getElementById('stream-select').value;
+                if (!streamId) {
+                    alert('请选择一个流媒体源');
+                    return;
+                }
+                
+                // 对于流媒体，我们使用不同的检测方式
+                // 直接使用流媒体的单帧API进行检测
+                startStreamDetection(modelId, streamId);
+                return;
+                
+            } else if (videoSource === 'webcam') {
                 let webcamId = webcamSelect.value;
 
                 // 如果没有选择摄像头，但有可用的摄像头
@@ -6510,6 +6625,383 @@ function bindVideoEventHandlers() {
             });
         }
 
+        // 加载流媒体列表
+        window.loadStreamsList = function() {
+            const streamSelect = document.getElementById('stream-select');
+            if (!streamSelect) return;
+            
+            // 显示加载状态
+            streamSelect.innerHTML = '<option value="">加载中...</option>';
+            
+            fetch(`${API_URL}/streaming/list`)
+                .then(response => response.json())
+                .then(data => {
+                    streamSelect.innerHTML = '<option value="">请选择流媒体...</option>';
+                    
+                    if (data.success && data.streams) {
+                        const streams = Object.entries(data.streams);
+                        if (streams.length === 0) {
+                            streamSelect.innerHTML += '<option value="" disabled>暂无可用的流媒体</option>';
+                        } else {
+                            streams.forEach(([streamId, streamInfo]) => {
+                                if (streamInfo.is_running) {
+                                    const option = document.createElement('option');
+                                    option.value = streamId;
+                                    option.textContent = `${streamInfo.source} (${streamInfo.type}) - 运行中`;
+                                    streamSelect.appendChild(option);
+                                }
+                            });
+                        }
+                    } else {
+                        streamSelect.innerHTML += '<option value="" disabled>加载失败</option>';
+                    }
+                })
+                .catch(error => {
+                    console.error('加载流媒体列表失败:', error);
+                    streamSelect.innerHTML = '<option value="" disabled>加载失败</option>';
+                });
+        }
+        
+        // 显示流媒体管理模态框
+        function showStreamManagementModal() {
+            const modalTitle = document.querySelector('#mainModal .modal-title');
+            const modalBody = document.querySelector('#mainModal .modal-body');
+            const modalSubmit = document.getElementById('modalSubmit');
+            
+            modalTitle.textContent = '流媒体管理';
+            modalSubmit.style.display = 'none';
+            
+            modalBody.innerHTML = `
+                <div class="mb-3">
+                    <h6>创建新流媒体</h6>
+                    <form id="create-stream-form">
+                        <div class="mb-3">
+                            <label for="stream-source" class="form-label">流媒体地址</label>
+                            <input type="text" class="form-control" id="stream-source" placeholder="rtsp://username:password@ip:port/path 或 0,1,2... (摄像头ID)" required>
+                            <div class="form-text">
+                                支持格式：
+                                <ul class="small mt-1">
+                                    <li>RTSP: rtsp://username:password@192.168.1.100:554/stream</li>
+                                    <li>RTMP: rtmp://server/app/stream</li>
+                                    <li>HTTP: http://192.168.1.100:8080/video.mjpg</li>
+                                    <li>摄像头: 0, 1, 2...</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="stream-type" class="form-label">流类型</label>
+                            <select class="form-select" id="stream-type">
+                                <option value="auto">自动检测</option>
+                                <option value="rtsp">RTSP</option>
+                                <option value="rtmp">RTMP</option>
+                                <option value="http">HTTP</option>
+                                <option value="webcam">摄像头</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <button type="button" class="btn btn-outline-secondary" id="test-stream-btn">测试连接</button>
+                            <button type="submit" class="btn btn-primary">创建流媒体</button>
+                        </div>
+                        <div id="stream-test-result" class="mt-2"></div>
+                    </form>
+                </div>
+                
+                <hr>
+                
+                <div class="mb-3">
+                    <h6>当前流媒体列表</h6>
+                    <div id="streams-list">
+                        <div class="text-center">
+                            <div class="spinner-border spinner-border-sm" role="status">
+                                <span class="visually-hidden">加载中...</span>
+                            </div>
+                            加载中...
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // 绑定事件
+            bindStreamManagementEvents();
+            
+            // 加载流媒体列表
+            window.loadStreamsManagementList();
+            
+            modal.show();
+        }
+        
+        // 绑定流媒体管理事件
+        function bindStreamManagementEvents() {
+            const createStreamForm = document.getElementById('create-stream-form');
+            const testStreamBtn = document.getElementById('test-stream-btn');
+            
+            if (testStreamBtn) {
+                testStreamBtn.addEventListener('click', function() {
+                    const source = document.getElementById('stream-source').value;
+                    const type = document.getElementById('stream-type').value;
+                    const resultDiv = document.getElementById('stream-test-result');
+                    
+                    if (!source) {
+                        resultDiv.innerHTML = '<div class="alert alert-warning">请输入流媒体地址</div>';
+                        return;
+                    }
+                    
+                    resultDiv.innerHTML = '<div class="alert alert-info">正在测试连接...</div>';
+                    
+                    const formData = new FormData();
+                    formData.append('source', source);
+                    formData.append('stream_type', type);
+                    
+                    fetch(`${API_URL}/streaming/test-connection`, {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            resultDiv.innerHTML = `
+                                <div class="alert alert-success">
+                                    <strong>连接成功！</strong><br>
+                                    ${data.info ? `分辨率: ${data.info.width}x${data.info.height}` : ''}
+                                </div>
+                            `;
+                        } else {
+                            resultDiv.innerHTML = `<div class="alert alert-danger">连接失败: ${data.message}</div>`;
+                        }
+                    })
+                    .catch(error => {
+                        resultDiv.innerHTML = `<div class="alert alert-danger">测试失败: ${error.message}</div>`;
+                    });
+                });
+            }
+            
+            if (createStreamForm) {
+                createStreamForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const source = document.getElementById('stream-source').value;
+                    const type = document.getElementById('stream-type').value;
+                    
+                    const formData = new FormData();
+                    formData.append('source', source);
+                    formData.append('stream_type', type);
+                    
+                    fetch(`${API_URL}/streaming/create`, {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            // 创建成功，启动流媒体
+                            return fetch(`${API_URL}/streaming/start/${data.stream_id}`, {
+                                method: 'POST'
+                            });
+                        } else {
+                            throw new Error(data.message || '创建流媒体失败');
+                        }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('流媒体创建并启动成功！');
+                            // 重新加载列表
+                            window.loadStreamsManagementList();
+                            window.loadStreamsList();
+                            // 清空表单
+                            createStreamForm.reset();
+                            document.getElementById('stream-test-result').innerHTML = '';
+                        } else {
+                            throw new Error(data.message || '启动流媒体失败');
+                        }
+                    })
+                    .catch(error => {
+                        alert('错误: ' + error.message);
+                    });
+                });
+            }
+        }
+        
+        // 加载流媒体管理列表
+        window.loadStreamsManagementList = function() {
+            const streamsList = document.getElementById('streams-list');
+            if (!streamsList) return;
+            
+            fetch(`${API_URL}/streaming/list`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.streams) {
+                        const streams = Object.entries(data.streams);
+                        if (streams.length === 0) {
+                            streamsList.innerHTML = '<div class="alert alert-info">暂无流媒体</div>';
+                        } else {
+                            let html = '<div class="list-group">';
+                            streams.forEach(([streamId, streamInfo]) => {
+                                const statusBadge = streamInfo.is_running ? 
+                                    '<span class="badge bg-success">运行中</span>' : 
+                                    '<span class="badge bg-secondary">已停止</span>';
+                                
+                                html += `
+                                    <div class="list-group-item d-flex justify-content-between align-items-center">
+                                        <div>
+                                            <strong>${streamInfo.source}</strong><br>
+                                            <small class="text-muted">类型: ${streamInfo.type} | ID: ${streamId}</small>
+                                        </div>
+                                        <div>
+                                            ${statusBadge}
+                                            ${streamInfo.is_running ? 
+                                                `<button class="btn btn-sm btn-outline-danger ms-2" onclick="stopStream('${streamId}')">\u505c\u6b62</button>` :
+                                                `<button class="btn btn-sm btn-outline-success ms-2" onclick="startStream('${streamId}')">\u542f\u52a8</button>`
+                                            }
+                                            <button class="btn btn-sm btn-outline-secondary ms-1" onclick="deleteStream('${streamId}')">\u5220\u9664</button>
+                                        </div>
+                                    </div>
+                                `;
+                            });
+                            html += '</div>';
+                            streamsList.innerHTML = html;
+                        }
+                    } else {
+                        streamsList.innerHTML = '<div class="alert alert-danger">加载失败</div>';
+                    }
+                })
+                .catch(error => {
+                    console.error('加载流媒体列表失败:', error);
+                    streamsList.innerHTML = '<div class="alert alert-danger">加载失败</div>';
+                });
+        }
+
+        // 开始流媒体检测
+        function startStreamDetection(modelId, streamId) {
+            isDetecting = true;
+            startDetectionBtn.style.display = 'none';
+            stopDetectionBtn.style.display = 'inline-block';
+
+            // 更新检测状态
+            document.getElementById('detection-status').innerHTML =
+                `<span class="badge bg-warning">正在连接流媒体...</span>`;
+
+            // 获取阈值
+            const confThreshold = parseFloat(document.getElementById('rt-conf-threshold').value);
+            const iouThreshold = parseFloat(document.getElementById('rt-iou-threshold').value);
+
+            // 定义流媒体检测函数
+            function detectStreamFrame(timestamp) {
+                if (!isDetecting) return;
+
+                // 计算FPS
+                if (lastFrameTime) {
+                    fps = 1000 / (timestamp - lastFrameTime);
+                    fpsCounter.textContent = fps.toFixed(1);
+                }
+                lastFrameTime = timestamp;
+
+                // 从流媒体获取当前帧
+                fetch(`${API_URL}/streaming/frame/${streamId}`)
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('无法获取流媒体帧');
+                        }
+                        return response.blob();
+                    })
+                    .then(blob => {
+                        // 在画布上显示当前帧
+                        const img = new Image();
+                        img.onload = function() {
+                            const ctx = detectionCanvas.getContext('2d');
+                            detectionCanvas.width = img.width;
+                            detectionCanvas.height = img.height;
+                            ctx.drawImage(img, 0, 0);
+                            
+                            // 同时在视频元素上显示（如果需要）
+                            if (videoElement) {
+                                const videoCtx = videoElement.getContext ? videoElement.getContext('2d') : null;
+                                if (videoCtx) {
+                                    videoElement.width = img.width;
+                                    videoElement.height = img.height;
+                                    videoCtx.drawImage(img, 0, 0);
+                                }
+                            }
+                        };
+                        img.src = URL.createObjectURL(blob);
+
+                        // 创建一个有正确扩展名的文件
+                        const fileName = `stream_frame_${Date.now()}.jpg`;
+                        const imageFile = new File([blob], fileName, { type: 'image/jpeg' });
+
+                        const formData = new FormData();
+                        formData.append('file', imageFile);
+                        formData.append('model_id', modelId);
+                        formData.append('conf_thres', confThreshold);
+                        formData.append('iou_thres', iouThreshold);
+
+                        // 发送检测请求
+                        return fetch(`${API_URL}/detection/`, {
+                            method: 'POST',
+                            body: formData
+                        });
+                    })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.text().then(text => {
+                                try {
+                                    const json = JSON.parse(text);
+                                    throw new Error(json.detail || '检测失败');
+                                } catch (e) {
+                                    throw new Error(text || '检测失败');
+                                }
+                            });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data && data.id) {
+                            // 获取检测结果
+                            return fetch(`${API_URL}/detection/${data.id}/result`);
+                        }
+                    })
+                    .then(response => response ? response.json() : null)
+                    .then(resultData => {
+                        if (resultData && resultData.status === 'completed' && resultData.results && resultData.results.length > 0) {
+                            // 获取第一个结果的检测内容
+                            const detections = resultData.results[0].detections || [];
+
+                            // 更新检测到的目标数量
+                            detectedObjects = detections.length;
+                            objectsCounter.textContent = detectedObjects;
+
+                            // 更新检测状态
+                            document.getElementById('detection-status').innerHTML =
+                                `<span class="badge bg-success">正在检测</span>`;
+
+                            // 在画布上绘制检测结果
+                            drawDetections(detections);
+
+                            // 更新检测结果表格
+                            updateDetectionTable(detections);
+
+                            // 处理报警逻辑
+                            handleAlerts(detections);
+                        }
+                    })
+                    .catch(error => {
+                        console.error('流媒体检测错误:', error);
+                        if (isDetecting) {
+                            document.getElementById('detection-status').innerHTML =
+                                `<span class="badge bg-danger">检测错误</span>`;
+                        }
+                    });
+
+                // 继续下一帧
+                if (isDetecting) {
+                    animationFrameId = requestAnimationFrame(detectStreamFrame);
+                }
+            }
+
+            // 开始检测循环
+            animationFrameId = requestAnimationFrame(detectStreamFrame);
+        }
+
         // 开始实时检测
         function startRealTimeDetection(modelId) {
             isDetecting = true;
@@ -6736,6 +7228,68 @@ function bindVideoEventHandlers() {
             animationFrameId = requestAnimationFrame(detectFrame);
         }
 
+        // 绘制检测结果
+        function drawDetections(detections) {
+            const ctx = detectionCanvas.getContext('2d');
+            
+            detections.forEach(detection => {
+                const { bbox, class_name, confidence } = detection;
+                const [x, y, width, height] = bbox;
+                
+                // 绘制边界框
+                ctx.strokeStyle = '#00ff00';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x, y, width, height);
+                
+                // 绘制标签
+                ctx.fillStyle = '#00ff00';
+                ctx.font = '16px Arial';
+                const label = `${class_name} ${(confidence * 100).toFixed(1)}%`;
+                const textWidth = ctx.measureText(label).width;
+                
+                // 绘制标签背景
+                ctx.fillRect(x, y - 25, textWidth + 10, 25);
+                
+                // 绘制文本
+                ctx.fillStyle = '#000000';
+                ctx.fillText(label, x + 5, y - 5);
+            });
+        }
+        
+        // 更新检测结果表格
+        function updateDetectionTable(detections) {
+            const tableBody = document.getElementById('detection-results-table');
+            if (!tableBody) return;
+            
+            if (detections.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="3" class="text-center">暂无检测结果</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            detections.forEach(detection => {
+                const { class_name, confidence, bbox } = detection;
+                const [x, y, width, height] = bbox;
+                const position = `(${Math.round(x)}, ${Math.round(y)}, ${Math.round(width)}, ${Math.round(height)})`;
+                
+                html += `
+                    <tr>
+                        <td>${class_name}</td>
+                        <td>${(confidence * 100).toFixed(1)}%</td>
+                        <td>${position}</td>
+                    </tr>
+                `;
+            });
+            
+            tableBody.innerHTML = html;
+        }
+        
+        // 处理报警逻辑
+        function handleAlerts(detections) {
+            // 这里可以添加报警逻辑，例如检测到特定目标时发出报警
+            // 目前保持空实现，可以根据需要扩展
+        }
+
         // 停止实时检测
         function stopRealTimeDetection() {
             isDetecting = false;
@@ -6760,6 +7314,7 @@ function bindVideoEventHandlers() {
             videoElement.srcObject = null;
             videoElement.src = '';
             videoElement.pause();
+            videoElement.load(); // 确保清理流媒体连接
 
             // 重置按钮状态
             startDetectionBtn.style.display = 'inline-block';

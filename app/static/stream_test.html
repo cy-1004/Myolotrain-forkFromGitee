@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>流媒体功能测试</title>
+    <link rel="stylesheet" href="libs/bootstrap.min.css">
+</head>
+<body>
+    <div class="container mt-4">
+        <h1>流媒体功能测试</h1>
+        
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>创建流媒体</h5>
+                    </div>
+                    <div class="card-body">
+                        <form id="create-stream-form">
+                            <div class="mb-3">
+                                <label for="stream-source" class="form-label">流媒体地址</label>
+                                <input type="text" class="form-control" id="stream-source" placeholder="rtsp://... 或 0,1,2... (摄像头ID)" required>
+                                <div class="form-text">
+                                    支持格式：
+                                    <ul class="small mt-1">
+                                        <li>RTSP: rtsp://username:password@192.168.1.100:554/stream</li>
+                                        <li>RTMP: rtmp://server/app/stream</li>
+                                        <li>HTTP: http://192.168.1.100:8080/video.mjpg</li>
+                                        <li>摄像头: 0, 1, 2...</li>
+                                    </ul>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label for="stream-type" class="form-label">流类型</label>
+                                <select class="form-select" id="stream-type">
+                                    <option value="auto">自动检测</option>
+                                    <option value="rtsp">RTSP</option>
+                                    <option value="rtmp">RTMP</option>
+                                    <option value="http">HTTP</option>
+                                    <option value="webcam">摄像头</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <button type="button" class="btn btn-outline-secondary" id="test-stream-btn">测试连接</button>
+                                <button type="submit" class="btn btn-primary">创建并启动流媒体</button>
+                            </div>
+                            <div id="stream-test-result" class="mt-2"></div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>流媒体列表</h5>
+                        <button class="btn btn-sm btn-outline-primary float-end" id="refresh-streams">刷新</button>
+                    </div>
+                    <div class="card-body">
+                        <div id="streams-list">
+                            <div class="text-center">
+                                <div class="spinner-border spinner-border-sm" role="status">
+                                    <span class="visually-hidden">加载中...</span>
+                                </div>
+                                加载中...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>流媒体预览</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="preview-stream-select" class="form-label">选择要预览的流媒体</label>
+                            <select class="form-select" id="preview-stream-select">
+                                <option value="">请选择流媒体...</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <button class="btn btn-success" id="start-preview-btn">开始预览</button>
+                            <button class="btn btn-danger" id="stop-preview-btn" style="display: none;">停止预览</button>
+                        </div>
+                        <div id="stream-preview" class="text-center">
+                            <img id="stream-image" style="max-width: 100%; display: none;" alt="流媒体预览">
+                            <div id="preview-status" class="text-muted">请选择流媒体并点击开始预览</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="libs/bootstrap.bundle.min.js"></script>
+    <script>
+        const API_URL = '/api';
+        let previewInterval = null;
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            loadStreamsList();
+            bindEvents();
+        });
+
+        // 绑定事件
+        function bindEvents() {
+            // 测试连接
+            document.getElementById('test-stream-btn').addEventListener('click', testConnection);
+            
+            // 创建流媒体
+            document.getElementById('create-stream-form').addEventListener('submit', createStream);
+            
+            // 刷新列表
+            document.getElementById('refresh-streams').addEventListener('click', loadStreamsList);
+            
+            // 预览控制
+            document.getElementById('start-preview-btn').addEventListener('click', startPreview);
+            document.getElementById('stop-preview-btn').addEventListener('click', stopPreview);
+        }
+
+        // 测试连接
+        async function testConnection() {
+            const source = document.getElementById('stream-source').value;
+            const type = document.getElementById('stream-type').value;
+            const resultDiv = document.getElementById('stream-test-result');
+
+            if (!source) {
+                resultDiv.innerHTML = '<div class="alert alert-warning">请输入流媒体地址</div>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<div class="alert alert-info">正在测试连接...</div>';
+
+            try {
+                const formData = new FormData();
+                formData.append('source', source);
+                formData.append('stream_type', type);
+
+                const response = await fetch(`${API_URL}/streaming/test-connection`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-success">
+                            <strong>连接成功！</strong><br>
+                            ${data.info ? `分辨率: ${data.info.width}x${data.info.height}` : ''}
+                        </div>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<div class="alert alert-danger">连接失败: ${data.message}</div>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<div class="alert alert-danger">测试失败: ${error.message}</div>`;
+            }
+        }
+
+        // 创建流媒体
+        async function createStream(e) {
+            e.preventDefault();
+
+            const source = document.getElementById('stream-source').value;
+            const type = document.getElementById('stream-type').value;
+
+            try {
+                // 创建流媒体
+                const formData = new FormData();
+                formData.append('source', source);
+                formData.append('stream_type', type);
+
+                const createResponse = await fetch(`${API_URL}/streaming/create`, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const createData = await createResponse.json();
+
+                if (createData.success) {
+                    // 启动流媒体
+                    const startResponse = await fetch(`${API_URL}/streaming/start/${createData.stream_id}`, {
+                        method: 'POST'
+                    });
+
+                    const startData = await startResponse.json();
+
+                    if (startData.success) {
+                        alert('流媒体创建并启动成功！');
+                        loadStreamsList();
+                        document.getElementById('create-stream-form').reset();
+                        document.getElementById('stream-test-result').innerHTML = '';
+                    } else {
+                        throw new Error(startData.message || '启动流媒体失败');
+                    }
+                } else {
+                    throw new Error(createData.message || '创建流媒体失败');
+                }
+            } catch (error) {
+                alert('错误: ' + error.message);
+            }
+        }
+
+        // 加载流媒体列表
+        async function loadStreamsList() {
+            const streamsList = document.getElementById('streams-list');
+            const previewSelect = document.getElementById('preview-stream-select');
+
+            try {
+                const response = await fetch(`${API_URL}/streaming/list`);
+                const data = await response.json();
+
+                if (data.success && data.streams) {
+                    const streams = Object.entries(data.streams);
+                    
+                    // 更新列表显示
+                    if (streams.length === 0) {
+                        streamsList.innerHTML = '<div class="alert alert-info">暂无流媒体</div>';
+                    } else {
+                        let html = '<div class="list-group">';
+                        streams.forEach(([streamId, streamInfo]) => {
+                            const statusBadge = streamInfo.is_running ? 
+                                '<span class="badge bg-success">运行中</span>' : 
+                                '<span class="badge bg-secondary">已停止</span>';
+                            
+                            html += `
+                                <div class="list-group-item d-flex justify-content-between align-items-center">
+                                    <div>
+                                        <strong>${streamInfo.source}</strong><br>
+                                        <small class="text-muted">类型: ${streamInfo.type} | ID: ${streamId}</small>
+                                    </div>
+                                    <div>
+                                        ${statusBadge}
+                                        ${streamInfo.is_running ? 
+                                            `<button class="btn btn-sm btn-outline-danger ms-2" onclick="stopStream('${streamId}')">停止</button>` :
+                                            `<button class="btn btn-sm btn-outline-success ms-2" onclick="startStream('${streamId}')">启动</button>`
+                                        }
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        html += '</div>';
+                        streamsList.innerHTML = html;
+                    }
+                    
+                    // 更新预览选择器
+                    previewSelect.innerHTML = '<option value="">请选择流媒体...</option>';
+                    streams.forEach(([streamId, streamInfo]) => {
+                        if (streamInfo.is_running) {
+                            const option = document.createElement('option');
+                            option.value = streamId;
+                            option.textContent = `${streamInfo.source} (${streamInfo.type})`;
+                            previewSelect.appendChild(option);
+                        }
+                    });
+                } else {
+                    streamsList.innerHTML = '<div class="alert alert-danger">加载失败</div>';
+                }
+            } catch (error) {
+                console.error('加载流媒体列表失败:', error);
+                streamsList.innerHTML = '<div class="alert alert-danger">加载失败</div>';
+            }
+        }
+
+        // 启动流媒体
+        async function startStream(streamId) {
+            try {
+                const response = await fetch(`${API_URL}/streaming/start/${streamId}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('流媒体启动成功！');
+                    loadStreamsList();
+                } else {
+                    alert('启动失败: ' + (data.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('启动失败: ' + error.message);
+            }
+        }
+
+        // 停止流媒体
+        async function stopStream(streamId) {
+            try {
+                const response = await fetch(`${API_URL}/streaming/stop/${streamId}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('流媒体停止成功！');
+                    loadStreamsList();
+                } else {
+                    alert('停止失败: ' + (data.message || '未知错误'));
+                }
+            } catch (error) {
+                alert('停止失败: ' + error.message);
+            }
+        }
+
+        // 开始预览
+        function startPreview() {
+            const streamId = document.getElementById('preview-stream-select').value;
+            if (!streamId) {
+                alert('请选择一个流媒体');
+                return;
+            }
+
+            const streamImage = document.getElementById('stream-image');
+            const previewStatus = document.getElementById('preview-status');
+            const startBtn = document.getElementById('start-preview-btn');
+            const stopBtn = document.getElementById('stop-preview-btn');
+
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'inline-block';
+            previewStatus.textContent = '正在加载预览...';
+            streamImage.style.display = 'none';
+
+            // 定期更新图像
+            previewInterval = setInterval(() => {
+                const frameUrl = `${API_URL}/streaming/frame/${streamId}?t=${Date.now()}`;
+                streamImage.src = frameUrl;
+                streamImage.style.display = 'block';
+                previewStatus.textContent = '预览中...';
+            }, 100); // 10fps
+        }
+
+        // 停止预览
+        function stopPreview() {
+            if (previewInterval) {
+                clearInterval(previewInterval);
+                previewInterval = null;
+            }
+
+            const streamImage = document.getElementById('stream-image');
+            const previewStatus = document.getElementById('preview-status');
+            const startBtn = document.getElementById('start-preview-btn');
+            const stopBtn = document.getElementById('stop-preview-btn');
+
+            startBtn.style.display = 'inline-block';
+            stopBtn.style.display = 'none';
+            streamImage.style.display = 'none';
+            previewStatus.textContent = '预览已停止';
+        }
+
+        // 全局函数供HTML调用
+        window.startStream = startStream;
+        window.stopStream = stopStream;
+    </script>
+</body>
+</html>
