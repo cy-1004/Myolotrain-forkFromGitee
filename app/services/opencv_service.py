@@ -4,6 +4,9 @@ OpenCV 服务模块 - 提供图像处理和计算机视觉功能
 import os
 import cv2
 import numpy as np
+import math
+import shutil
+import yaml
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 import logging

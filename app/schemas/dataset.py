@@ -8,7 +8,9 @@ class DatasetBase(BaseModel):
     description: Optional[str] = None
 
 class DatasetCreate(DatasetBase):
-    pass
+    path: str
+    classes: List[str]
+    image_count: int = 0
 
 class DatasetUpdate(DatasetBase):
     name: Optional[str] = None

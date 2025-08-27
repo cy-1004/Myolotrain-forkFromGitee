@@ -30,7 +30,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # 创建必要的目录
-RUN mkdir -p app/static/uploads app/static/datasets app/static/models app/static/results logs/tensorboard
+RUN mkdir -p app/static/uploads app/static/datasets app/static/models app/static/results app/static/annotations logs/tensorboard
 
 # 暴露端口
 EXPOSE 8000 6006

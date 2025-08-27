@@ -61,3 +61,33 @@ def delete_model(
     Delete a model
     """
     return model_service.delete_model(db, model_id=model_id)
+
+@router.get("/{model_id}/classes")
+def get_model_classes(
+    model_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get model classes
+    """
+    from ultralytics import YOLO
+    from app.crud.crud_model import model
+    
+    # 获取模型信息
+    db_model = model.get(db, id=model_id)
+    if not db_model:
+        raise HTTPException(status_code=404, detail="模型未找到")
+    
+    try:
+        # 加载模型获取类别
+        yolo_model = YOLO(db_model.path)
+        classes = list(yolo_model.names.values())
+        
+        return {
+            "success": True,
+            "classes": classes,
+            "class_count": len(classes)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取模型类别失败: {str(e)}")

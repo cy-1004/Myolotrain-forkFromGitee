@@ -179,6 +179,345 @@ document.addEventListener('DOMContentLoaded', function() {
     }, 5000);
 });
 
+// ==================== 标注页面 ====================
+
+// 加载标注页面
+function loadAnnotationPage() {
+    console.log('Loading annotation page...');
+    loadAnnotationProjects();
+}
+
+// 绑定标注页面事件
+function bindAnnotationEvents() {
+    // 创建标注项目按钮
+    const createProjectBtn = document.getElementById('create-annotation-project-btn');
+    if (createProjectBtn) {
+        createProjectBtn.addEventListener('click', showCreateAnnotationProjectModal);
+    }
+}
+
+// 加载标注项目列表
+function loadAnnotationProjects() {
+    fetch(`${API_URL}/annotation/projects/`)
+        .then(response => response.json())
+        .then(data => {
+            const tableBody = document.getElementById('annotation-projects-table-body');
+            if (!tableBody) return;
+            
+            tableBody.innerHTML = '';
+            
+            if (data.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="text-center">暂无标注项目</td></tr>';
+                return;
+            }
+            
+            data.forEach(project => {
+                const row = document.createElement('tr');
+                const progressPercent = project.total_images > 0 ? 
+                    Math.round((project.completed_images / project.total_images) * 100) : 0;
+                
+                row.innerHTML = `
+                    <td>${project.name}</td>
+                    <td>${project.description || '-'}</td>
+                    <td>${project.classes.length}</td>
+                    <td>${project.total_images || 0}</td>
+                    <td>${project.completed_images || 0}</td>
+                    <td>
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar" role="progressbar" style="width: ${progressPercent}%">
+                                ${progressPercent}%
+                            </div>
+                        </div>
+                    </td>
+                    <td>
+                        <span class="badge ${project.status === 'active' ? 'bg-success' : 'bg-secondary'}">
+                            ${project.status === 'active' ? '进行中' : '已完成'}
+                        </span>
+                    </td>
+                    <td>
+                        <div class="btn-group btn-group-sm">
+                            <button class="btn btn-primary" onclick="openAnnotationTool('${project.id}')">
+                                <i class="fas fa-edit"></i> 标注
+                            </button>
+                            <button class="btn btn-info" onclick="viewProjectStats('${project.id}')">
+                                <i class="fas fa-chart-bar"></i> 统计
+                            </button>
+                            <button class="btn btn-success" onclick="exportProject('${project.id}')">
+                                <i class="fas fa-download"></i> 导出
+                            </button>
+                            <button class="btn btn-danger" onclick="deleteAnnotationProject('${project.id}')">
+                                <i class="fas fa-trash"></i> 删除
+                            </button>
+                        </div>
+                    </td>
+                `;
+                tableBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            console.error('加载标注项目失败:', error);
+            const tableBody = document.getElementById('annotation-projects-table-body');
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">加载失败</td></tr>';
+            }
+        });
+}
+
+// 显示创建标注项目模态框
+function showCreateAnnotationProjectModal() {
+    const template = document.getElementById('create-annotation-project-template');
+    if (!template) {
+        console.error('创建标注项目模板未找到');
+        return;
+    }
+    
+    const modalTitle = document.querySelector('#mainModal .modal-title');
+    const modalBody = document.querySelector('#mainModal .modal-body');
+    const modalSubmit = document.getElementById('modalSubmit');
+    
+    modalTitle.textContent = '创建标注项目';
+    modalBody.innerHTML = template.innerHTML;
+    modalSubmit.textContent = '创建项目';
+    
+    // 加载数据集列表
+    loadDatasetsForAnnotation();
+    
+    // 绑定事件
+    bindCreateAnnotationProjectEvents();
+    
+    // 显示模态框
+    modal.show();
+}
+
+// 加载数据集列表用于标注项目
+function loadDatasetsForAnnotation() {
+    fetch(`${API_URL}/datasets`)
+        .then(response => response.json())
+        .then(data => {
+            const datasetSelect = document.getElementById('annotation-dataset-id');
+            if (datasetSelect) {
+                datasetSelect.innerHTML = '<option value="">选择数据集</option>';
+                data.forEach(dataset => {
+                    const option = document.createElement('option');
+                    option.value = dataset.id;
+                    option.textContent = `${dataset.name} (${dataset.classes.length}类)`;
+                    datasetSelect.appendChild(option);
+                });
+            }
+        })
+        .catch(error => {
+            console.error('加载数据集失败:', error);
+        });
+}
+
+// 绑定创建标注项目事件
+function bindCreateAnnotationProjectEvents() {
+    // 图片来源选择事件
+    const imageSourceRadios = document.querySelectorAll('input[name="image-source"]');
+    imageSourceRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            // 隐藏所有容器
+            document.getElementById('dataset-source-container').style.display = 'none';
+            document.getElementById('directory-source-container').style.display = 'none';
+            document.getElementById('upload-source-container').style.display = 'none';
+            document.getElementById('folder-source-container').style.display = 'none';
+            
+            // 显示选中的容器
+            switch(this.value) {
+                case 'dataset':
+                    document.getElementById('dataset-source-container').style.display = 'block';
+                    break;
+                case 'directory':
+                    document.getElementById('directory-source-container').style.display = 'block';
+                    break;
+                case 'upload':
+                    document.getElementById('upload-source-container').style.display = 'block';
+                    break;
+                case 'folder':
+                    document.getElementById('folder-source-container').style.display = 'block';
+                    break;
+            }
+        });
+    });
+    
+    // 提交按钮事件
+    const modalSubmit = document.getElementById('modalSubmit');
+    modalSubmit.onclick = createAnnotationProject;
+}
+
+// 创建标注项目
+function createAnnotationProject() {
+    const form = document.getElementById('create-annotation-project-form');
+    const formData = new FormData(form);
+    
+    const name = document.getElementById('annotation-project-name').value;
+    const description = document.getElementById('annotation-project-description').value;
+    const classes = document.getElementById('annotation-classes').value.split('\n').filter(c => c.trim());
+    const imageSource = document.querySelector('input[name="image-source"]:checked').value;
+    
+    if (!name || classes.length === 0) {
+        alert('请填写项目名称和类别列表');
+        return;
+    }
+    
+    let requestData = {
+        name: name,
+        description: description,
+        classes: classes
+    };
+    
+    let apiUrl = `${API_URL}/annotation/projects/`;
+    let requestMethod = 'POST';
+    let requestBody;
+    
+    switch(imageSource) {
+        case 'dataset':
+            const datasetId = document.getElementById('annotation-dataset-id').value;
+            if (!datasetId) {
+                alert('请选择数据集');
+                return;
+            }
+            requestData.dataset_id = datasetId;
+            requestBody = JSON.stringify(requestData);
+            break;
+            
+        case 'directory':
+            const directory = document.getElementById('annotation-image-directory').value;
+            if (!directory) {
+                alert('请选择图片目录');
+                return;
+            }
+            requestData.image_directory = directory;
+            requestBody = JSON.stringify(requestData);
+            break;
+            
+        case 'upload':
+            const zipFile = document.getElementById('annotation-images-zip').files[0];
+            if (!zipFile) {
+                alert('请选择ZIP文件');
+                return;
+            }
+            apiUrl = `${API_URL}/annotation/projects/upload`;
+            const uploadFormData = new FormData();
+            uploadFormData.append('name', name);
+            uploadFormData.append('description', description);
+            uploadFormData.append('classes', JSON.stringify(classes));
+            uploadFormData.append('images_zip', zipFile);
+            requestBody = uploadFormData;
+            break;
+            
+        case 'folder':
+            const folderFiles = document.getElementById('annotation-images-folder').files;
+            if (folderFiles.length === 0) {
+                alert('请选择图片文件夹');
+                return;
+            }
+            apiUrl = `${API_URL}/annotation/projects/upload-folder`;
+            const folderFormData = new FormData();
+            folderFormData.append('name', name);
+            folderFormData.append('description', description);
+            folderFormData.append('classes', JSON.stringify(classes));
+            for (let file of folderFiles) {
+                folderFormData.append('images', file);
+            }
+            requestBody = folderFormData;
+            break;
+    }
+    
+    const headers = {};
+    if (imageSource === 'dataset' || imageSource === 'directory') {
+        headers['Content-Type'] = 'application/json';
+    }
+    
+    fetch(apiUrl, {
+        method: requestMethod,
+        headers: headers,
+        body: requestBody
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.id) {
+            alert('标注项目创建成功！');
+            modal.hide();
+            loadAnnotationProjects();
+        } else {
+            alert('创建失败: ' + (data.detail || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('创建标注项目失败:', error);
+        alert('创建失败: ' + error.message);
+    });
+}
+
+// 打开标注工具
+function openAnnotationTool(projectId) {
+    window.open(`/static/annotation.html?project_id=${projectId}`, '_blank');
+}
+
+// 查看项目统计
+function viewProjectStats(projectId) {
+    fetch(`${API_URL}/annotation/projects/${projectId}/stats`)
+        .then(response => response.json())
+        .then(data => {
+            alert(`项目统计:\n总图片: ${data.total_images}\n已完成: ${data.completed_images}\n进度: ${data.progress_percentage}%`);
+        })
+        .catch(error => {
+            console.error('获取项目统计失败:', error);
+            alert('获取统计信息失败');
+        });
+}
+
+// 导出项目
+function exportProject(projectId) {
+    const exportData = {
+        format: 'yolo',
+        split_data: true,
+        include_images: true,
+        train_ratio: 0.7,
+        val_ratio: 0.2,
+        test_ratio: 0.1
+    };
+    
+    fetch(`${API_URL}/annotation/projects/${projectId}/export`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(exportData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.export_path) {
+            alert('导出成功！文件路径: ' + data.export_path);
+        } else {
+            alert('导出失败: ' + (data.detail || '未知错误'));
+        }
+    })
+    .catch(error => {
+        console.error('导出项目失败:', error);
+        alert('导出失败: ' + error.message);
+    });
+}
+
+// 删除标注项目
+function deleteAnnotationProject(projectId) {
+    if (confirm('确定要删除这个标注项目吗？此操作不可撤销。')) {
+        fetch(`${API_URL}/annotation/projects/${projectId}`, {
+            method: 'DELETE'
+        })
+        .then(response => response.json())
+        .then(data => {
+            alert('项目删除成功！');
+            loadAnnotationProjects();
+        })
+        .catch(error => {
+            console.error('删除项目失败:', error);
+            alert('删除失败: ' + error.message);
+        });
+    }
+}
+
 // 加载页面内容
 function loadPage(page) {
     if (currentPage === page) return;
@@ -229,6 +568,10 @@ function loadPage(page) {
             break;
         case 'tracking':
             initTrackingPage();
+            break;
+        case 'annotation':
+            loadAnnotationPage();
+            bindAnnotationEvents();
             break;
     }
 }
@@ -5029,6 +5372,550 @@ function getSourceText(source) {
     }
 }
 
+// ==================== 在线标注功能 ====================
+
+// 加载标注页面
+function loadAnnotationPage() {
+    console.log('Loading annotation page...');
+    
+    // 加载标注项目列表
+    loadAnnotationProjects();
+    
+    // 绑定标注页面事件
+    bindAnnotationEvents();
+}
+
+// 加载标注项目列表
+function loadAnnotationProjects() {
+    fetch(`${API_URL}/annotation/projects/`)
+        .then(response => response.json())
+        .then(projects => {
+            const tableBody = document.getElementById('annotation-projects-table-body');
+            if (!tableBody) {
+                console.error('annotation-projects-table-body element not found');
+                return;
+            }
+
+            tableBody.innerHTML = '';
+
+            if (projects.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="text-center">暂无标注项目</td></tr>';
+                return;
+            }
+
+            projects.forEach(project => {
+                const row = document.createElement('tr');
+                
+                // 获取项目统计信息
+                fetch(`${API_URL}/annotation/projects/${project.id}/stats`)
+                    .then(response => response.json())
+                    .then(stats => {
+                        const progressPercentage = stats.progress_percentage || 0;
+                        
+                        row.innerHTML = `
+                            <td>${project.name}</td>
+                            <td>${project.description || '-'}</td>
+                            <td>${project.classes.length}</td>
+                            <td>${stats.total_images || 0}</td>
+                            <td>${stats.completed_images || 0}</td>
+                            <td>
+                                <div class="progress" style="width: 100px;">
+                                    <div class="progress-bar" role="progressbar" style="width: ${progressPercentage}%" aria-valuenow="${progressPercentage}" aria-valuemin="0" aria-valuemax="100">
+                                        ${Math.round(progressPercentage)}%
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span class="badge ${getStatusBadgeClass(project.status)}">${getStatusText(project.status)}</span></td>
+                            <td>
+                                <div class="btn-group">
+                                    <a href="/static/annotation.html?project_id=${project.id}" target="_blank" class="btn btn-sm btn-primary">开始标注</a>
+                                    <button class="btn btn-sm btn-info" onclick="scanProjectImages('${project.id}')">扫描图片</button>
+                                    <button class="btn btn-sm btn-success" onclick="exportAnnotations('${project.id}')">导出标注</button>
+                                    <button class="btn btn-sm btn-warning" onclick="exportToDataset('${project.id}')">导出为数据集</button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteAnnotationProject('${project.id}')">删除</button>
+                                </div>
+                            </td>
+                        `;
+                    })
+                    .catch(error => {
+                        console.error('Error loading project stats:', error);
+                        row.innerHTML = `
+                            <td>${project.name}</td>
+                            <td>${project.description || '-'}</td>
+                            <td>${project.classes.length}</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td>-</td>
+                            <td><span class="badge bg-secondary">未知</span></td>
+                            <td>
+                                <div class="btn-group">
+                                    <a href="/static/annotation.html?project_id=${project.id}" target="_blank" class="btn btn-sm btn-primary">开始标注</a>
+                                    <button class="btn btn-sm btn-info" onclick="scanProjectImages('${project.id}')">扫描图片</button>
+                                    <button class="btn btn-sm btn-success" onclick="exportAnnotations('${project.id}')">导出</button>
+                                    <button class="btn btn-sm btn-warning" onclick="exportToDataset('${project.id}')">导出为数据集</button>
+                                    <button class="btn btn-sm btn-danger" onclick="deleteAnnotationProject('${project.id}')">删除</button>
+                                </div>
+                            </td>
+                        `;
+                    });
+                
+                tableBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            console.error('Error loading annotation projects:', error);
+            const tableBody = document.getElementById('annotation-projects-table-body');
+            if (tableBody) {
+                tableBody.innerHTML = '<tr><td colspan="8" class="text-center text-danger">加载标注项目失败</td></tr>';
+            }
+        });
+}
+
+// 绑定标注页面事件
+function bindAnnotationEvents() {
+    const createProjectBtn = document.getElementById('create-annotation-project-btn');
+    if (createProjectBtn) {
+        createProjectBtn.addEventListener('click', showCreateAnnotationProjectModal);
+    }
+    
+    const projectSelect = document.getElementById('annotation-project-select');
+    if (projectSelect) {
+        projectSelect.addEventListener('change', function() {
+            if (this.value) {
+                loadAnnotationProject(this.value);
+            }
+        });
+    }
+}
+
+// 显示创建标注项目模态框
+function showCreateAnnotationProjectModal() {
+    const modalTitle = document.querySelector('.modal-title');
+    const modalBody = document.querySelector('.modal-body');
+    const modalSubmit = document.getElementById('modalSubmit');
+
+    modalTitle.textContent = '创建标注项目';
+
+    // 获取模板内容
+    const template = document.getElementById('create-annotation-project-template');
+    if (!template) {
+        console.error('create-annotation-project-template not found');
+        return;
+    }
+
+    modalBody.innerHTML = template.innerHTML;
+
+    // 加载数据集选项
+    loadDatasetOptionsForAnnotation();
+    
+    // 绑定图片来源选择事件
+    bindImageSourceEvents();
+
+    modal.show();
+
+    modalSubmit.onclick = function() {
+        submitCreateAnnotationProject();
+    };
+}
+
+// 绑定图片来源选择事件
+function bindImageSourceEvents() {
+    const imageSourceRadios = document.querySelectorAll('input[name="image-source"]');
+    const datasetContainer = document.getElementById('dataset-source-container');
+    const directoryContainer = document.getElementById('directory-source-container');
+    const uploadContainer = document.getElementById('upload-source-container');
+    
+    imageSourceRadios.forEach(radio => {
+        radio.addEventListener('change', function() {
+            // 隐藏所有容器
+            datasetContainer.style.display = 'none';
+            directoryContainer.style.display = 'none';
+            uploadContainer.style.display = 'none';
+            
+            // 显示选中的容器
+            if (this.value === 'dataset') {
+                datasetContainer.style.display = 'block';
+            } else if (this.value === 'directory') {
+                directoryContainer.style.display = 'block';
+                // 绑定目录浏览按钮
+                bindDirectoryBrowseButton();
+            } else if (this.value === 'upload') {
+                uploadContainer.style.display = 'block';
+            }
+        });
+    });
+    
+    // 默认显示上传容器
+    uploadContainer.style.display = 'block';
+}
+
+// 绑定目录浏览按钮
+function bindDirectoryBrowseButton() {
+    const browseBtn = document.getElementById('browse-image-directory-btn');
+    const directoryInput = document.getElementById('annotation-image-directory');
+    const scanResultDiv = document.getElementById('directory-scan-result');
+    const imageCountSpan = document.getElementById('directory-image-count');
+    
+    if (browseBtn && !browseBtn.hasAttribute('data-bound')) {
+        browseBtn.setAttribute('data-bound', 'true');
+        browseBtn.addEventListener('click', function() {
+            if (window.directoryBrowser) {
+                window.directoryBrowser.show(function(selectedPath) {
+                    directoryInput.value = selectedPath;
+                    
+                    // 扫描选中目录的图片
+                    fetch(`/api/annotation/scan-directory-images?directory_path=${encodeURIComponent(selectedPath)}`)
+                        .then(response => response.json())
+                        .then(data => {
+                            imageCountSpan.textContent = data.image_count;
+                            scanResultDiv.style.display = 'block';
+                            
+                            if (data.is_valid) {
+                                scanResultDiv.querySelector('.alert').className = 'alert alert-success';
+                            } else {
+                                scanResultDiv.querySelector('.alert').className = 'alert alert-warning';
+                            }
+                        })
+                        .catch(error => {
+                            console.error('扫描图片失败:', error);
+                            scanResultDiv.style.display = 'none';
+                        });
+                });
+            } else {
+                alert('目录浏览器未加载，请刷新页面重试');
+            }
+        });
+    }
+}
+
+// 提交创建标注项目
+function submitCreateAnnotationProject() {
+    const name = document.getElementById('annotation-project-name').value;
+    const description = document.getElementById('annotation-project-description').value;
+    const classesText = document.getElementById('annotation-classes').value;
+    const imageSource = document.querySelector('input[name="image-source"]:checked').value;
+    
+    if (!name || !classesText) {
+        alert('请填写项目名称和类别列表');
+        return;
+    }
+    
+    const classes = classesText.split('\n').filter(c => c.trim()).map(c => c.trim());
+    
+    if (imageSource === 'upload') {
+        const zipFile = document.getElementById('annotation-images-zip').files[0];
+        if (!zipFile) {
+            alert('请选择图片ZIP文件');
+            return;
+        }
+        createProjectWithImageUpload(name, description, classes, zipFile);
+    } else {
+        createProjectWithExistingImages(name, description, classes, imageSource);
+    }
+}
+
+// 使用上传图片创建项目
+function createProjectWithImageUpload(name, description, classes, zipFile) {
+    const progressContainer = document.getElementById('annotation-upload-progress');
+    const progressBar = document.getElementById('annotation-progress-bar');
+    const statusDiv = document.getElementById('annotation-upload-status');
+    const modalSubmit = document.getElementById('modalSubmit');
+    
+    // 显示进度
+    progressContainer.style.display = 'block';
+    modalSubmit.disabled = true;
+    modalSubmit.textContent = '创建中...';
+    
+    const formData = new FormData();
+    formData.append('name', name);
+    formData.append('description', description);
+    formData.append('classes', JSON.stringify(classes));
+    formData.append('images_zip', zipFile);
+    
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${API_URL}/annotation/projects/upload`, true);
+    
+    xhr.upload.onprogress = function(e) {
+        if (e.lengthComputable) {
+            const percentComplete = (e.loaded / e.total) * 100;
+            progressBar.style.width = percentComplete + '%';
+            progressBar.textContent = Math.round(percentComplete) + '%';
+            statusDiv.textContent = '上传中...';
+        }
+    };
+    
+    xhr.onload = function() {
+        if (xhr.status === 200 || xhr.status === 201) {
+            statusDiv.textContent = '创建成功！';
+            setTimeout(() => {
+                modal.hide();
+                loadAnnotationProjects();
+                alert('标注项目创建成功！');
+            }, 1000);
+        } else {
+            try {
+                const response = JSON.parse(xhr.responseText);
+                alert('创建失败: ' + (response.detail || '未知错误'));
+            } catch (e) {
+                alert('创建失败: ' + xhr.statusText);
+            }
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '确定';
+            progressContainer.style.display = 'none';
+        }
+    };
+    
+    xhr.onerror = function() {
+        alert('上传失败，请检查网络连接');
+        modalSubmit.disabled = false;
+        modalSubmit.textContent = '确定';
+        progressContainer.style.display = 'none';
+    };
+    
+    xhr.send(formData);
+}
+
+// 使用现有图片创建项目
+function createProjectWithExistingImages(name, description, classes, imageSource) {
+    const requestData = {
+        name: name,
+        description: description,
+        classes: classes
+    };
+    
+    let apiEndpoint = `${API_URL}/annotation/projects/`;
+    
+    if (imageSource === 'dataset') {
+        const datasetId = document.getElementById('annotation-dataset-id').value;
+        if (!datasetId) {
+            alert('请选择数据集');
+            return;
+        }
+        requestData.dataset_id = datasetId;
+    } else if (imageSource === 'directory') {
+        const imageDirectory = document.getElementById('annotation-image-directory').value;
+        if (!imageDirectory) {
+            alert('请选择图片目录');
+            return;
+        }
+        requestData.image_directory = imageDirectory;
+        apiEndpoint = `${API_URL}/annotation/projects/from-directory`;
+    }
+    
+    fetch(apiEndpoint, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.detail || '创建项目失败'); });
+        }
+        return response.json();
+    })
+    .then(data => {
+        modal.hide();
+        loadAnnotationProjects();
+        alert('标注项目创建成功！');
+    })
+    .catch(error => {
+        console.error('Error creating annotation project:', error);
+        alert('创建标注项目失败: ' + error.message);
+    });
+}
+
+// 加载数据集选项用于标注项目
+function loadDatasetOptionsForAnnotation() {
+    fetch(`${API_URL}/datasets`)
+        .then(response => response.json())
+        .then(datasets => {
+            const select = document.getElementById('annotation-dataset-id');
+            if (!select) return;
+            
+            // 清空现有选项（保留第一个默认选项）
+            while (select.options.length > 1) {
+                select.remove(1);
+            }
+            
+            datasets.forEach(dataset => {
+                if (dataset.status === 'available') {
+                    const option = document.createElement('option');
+                    option.value = dataset.id;
+                    option.textContent = dataset.name;
+                    select.appendChild(option);
+                }
+            });
+            
+            // 绑定数据集选择事件
+            select.addEventListener('change', function() {
+                if (this.value) {
+                    // 根据选择的数据集自动填充信息
+                    const selectedDataset = datasets.find(d => d.id === this.value);
+                    if (selectedDataset) {
+                        // 自动填充类别
+                        const classesTextarea = document.getElementById('annotation-classes');
+                        if (classesTextarea && selectedDataset.classes) {
+                            classesTextarea.value = selectedDataset.classes.join('\n');
+                        }
+                        
+                        // 自动填充图片目录
+                        const imageDirectoryInput = document.getElementById('annotation-image-directory');
+                        if (imageDirectoryInput) {
+                            imageDirectoryInput.value = `datasets/${selectedDataset.name}/train/images`;
+                        }
+                    }
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error loading datasets for annotation:', error);
+        });
+}
+
+// 扫描项目图片
+function scanProjectImages(projectId) {
+    if (!confirm('确定要扫描项目图片吗？这将重新扫描图片目录并更新图片列表，此操作将清空所有标注请谨慎操作！！。')) {
+        return;
+    }
+    
+    fetch(`${API_URL}/annotation/projects/${projectId}/scan`, {
+        method: 'POST'
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.detail || '扫描失败'); });
+        }
+        return response.json();
+    })
+    .then(data => {
+        alert(data.message || '图片扫描完成');
+        loadAnnotationProjects(); // 刷新项目列表
+    })
+    .catch(error => {
+        console.error('Error scanning project images:', error);
+        alert('扫描项目图片失败: ' + error.message);
+    });
+}
+
+// 导出标注数据
+function exportAnnotations(projectId) {
+    const exportRequest = {
+        format: 'yolo',
+        include_images: true,
+        split_data: false
+    };
+    
+    fetch(`${API_URL}/annotation/projects/${projectId}/export`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(exportRequest)
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.text().then(text => {
+                try {
+                    const err = JSON.parse(text);
+                    throw new Error(err.detail || '导出失败');
+                } catch (e) {
+                    throw new Error('导出失败: ' + response.statusText);
+                }
+            });
+        }
+        
+        // 检查响应类型
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/zip')) {
+            // 处理ZIP文件下载
+            return response.blob().then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `annotations_project_${projectId}.zip`;
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+                return { message: '标注数据导出成功，文件已下载' };
+            });
+        } else {
+            // 处理JSON响应
+            return response.json();
+        }
+    })
+    .then(data => {
+        alert(data.message || '标注数据导出成功');
+        if (data.export_path) {
+            console.log('Export path:', data.export_path);
+        }
+    })
+    .catch(error => {
+        console.error('Error exporting annotations:', error);
+        alert('导出标注数据失败: ' + error.message);
+    });
+}
+
+// 删除标注项目
+function deleteAnnotationProject(projectId) {
+    if (!confirm('确定要删除这个标注项目吗？这将删除所有相关的标注数据。')) {
+        return;
+    }
+    
+    fetch(`${API_URL}/annotation/projects/${projectId}`, {
+        method: 'DELETE'
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.detail || '删除失败'); });
+        }
+        return response.json();
+    })
+    .then(data => {
+        alert(data.message || '标注项目删除成功');
+        loadAnnotationProjects(); // 刷新项目列表
+    })
+    .catch(error => {
+        console.error('Error deleting annotation project:', error);
+        alert('删除标注项目失败: ' + error.message);
+    });
+}
+
+// 导出为数据集
+function exportToDataset(projectId) {
+    const datasetName = prompt('请输入数据集名称:');
+    if (!datasetName) {
+        return;
+    }
+    
+    const datasetDescription = prompt('请输入数据集描述(可选):') || '';
+    
+    const formData = new FormData();
+    formData.append('dataset_name', datasetName);
+    formData.append('dataset_description', datasetDescription);
+    
+    fetch(`${API_URL}/annotation/projects/${projectId}/export-to-dataset`, {
+        method: 'POST',
+        body: formData
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => { throw new Error(err.detail || '导出失败'); });
+        }
+        return response.json();
+    })
+    .then(data => {
+        alert(data.message || '导出为数据集成功');
+        console.log('Dataset ID:', data.dataset_id);
+    })
+    .catch(error => {
+        console.error('Error exporting to dataset:', error);
+        alert('导出为数据集失败: ' + error.message);
+    });
+}
+
 // ==================== 已删除外部数据集注册功能 ====================
 
 // 显示文件浏览器模态框
@@ -5318,6 +6205,18 @@ function bindVideoEvents() {
 
 // 实际绑定视频处理事件处理程序
 function bindVideoEventHandlers() {
+    console.log('开始绑定视频处理事件处理程序...');
+    
+    // 检查关键DOM元素是否存在
+    const extractFramesForm = document.getElementById('extract-frames-form');
+    const videoUpload = document.getElementById('video-upload');
+    const interval = document.getElementById('interval');
+    
+    console.log('DOM元素检查:');
+    console.log('extract-frames-form:', extractFramesForm);
+    console.log('video-upload:', videoUpload);
+    console.log('interval:', interval);
+    
     // 提取帧相关事件
     const resizeFramesCheck = document.getElementById('resize-frames-check');
     const resizeFramesOptions = document.getElementById('resize-frames-options');
@@ -5325,11 +6224,14 @@ function bindVideoEventHandlers() {
         resizeFramesCheck.addEventListener('change', function() {
             resizeFramesOptions.style.display = this.checked ? 'block' : 'none';
         });
+        console.log('调整帧大小事件已绑定');
+    } else {
+        console.log('调整帧大小元素未找到:', {resizeFramesCheck, resizeFramesOptions});
     }
 
     // 提取帧表单提交
-    const extractFramesForm = document.getElementById('extract-frames-form');
     if (extractFramesForm) {
+        console.log('找到提取帧表单，开始绑定提交事件...');
         extractFramesForm.addEventListener('submit', function(e) {
             e.preventDefault();
 
@@ -5339,9 +6241,11 @@ function bindVideoEventHandlers() {
                 return;
             }
 
-            // 加载覆盖层已禁用
-            // document.getElementById('video-loading-overlay').style.display = 'flex';
-            // document.getElementById('video-loading-text').textContent = '正在提取视频帧...';
+            // 启用加载覆盖层
+            const loadingOverlay = document.getElementById('video-loading-overlay');
+            const loadingText = document.getElementById('video-loading-text');
+            if (loadingOverlay) loadingOverlay.style.display = 'flex';
+            if (loadingText) loadingText.textContent = '正在提取视频帧...';
 
             // 创建表单数据
             const formData = new FormData();
@@ -5372,10 +6276,18 @@ function bindVideoEventHandlers() {
             }
 
             // 发送请求
-            fetch(`${API_URL}/video/extract-frames`, {
-                method: 'POST',
-                body: formData
-            })
+            // 显示加载状态
+                if (window.loadingOverlay === undefined) {
+                    window.loadingOverlay = document.getElementById('video-loading-overlay');
+                    window.loadingText = document.getElementById('video-loading-text');
+                }
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'flex';
+                if (window.loadingText) window.loadingText.textContent = '正在提取视频帧，请在\app\static\video_frames目录查看';
+
+                fetch(`${API_URL}/video/extract-frames`, {
+                    method: 'POST',
+                    body: formData
+                })
             .then(response => {
                 if (!response.ok) {
                     return response.json().then(err => { throw new Error(err.detail || '提取帧失败'); });
@@ -5383,92 +6295,125 @@ function bindVideoEventHandlers() {
                 return response.json();
             })
             .then(data => {
-                // 加载覆盖层已禁用
-                // document.getElementById('video-loading-overlay').style.display = 'none';
+                // 关闭加载覆盖层
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'none';
+                if (window.loadingText) window.loadingText.textContent = '提取完成';
 
                 // 显示提取结果
                 if (data && data.extraction_id) {
+                    console.log('提取帧成功，提取ID:', data.extraction_id);
                     document.getElementById('extraction-id').textContent = data.extraction_id;
+                    
+                    // 显示提取进度（暂时关闭）
+                    // const progressElement = document.getElementById('extraction-progress');
+                    // if (progressElement) progressElement.textContent = `共提取了 ${data.extracted_frames || 0} 帧`;
 
                     // 显示结果区域
-                    document.getElementById('extract-frames-result').style.display = 'block';
+                    // const resultArea = document.getElementById('extract-frames-result');
+                    // if (resultArea) resultArea.style.display = 'block';
 
                     // 显示提取结果
-                    if (data.result) {
-                        document.getElementById('extracted-frames-count').textContent = data.result.extracted_frames || 0;
+                    // if (data.result) {
+                    //     console.log('提取到帧数:', data.result.extracted_frames || 0);
+                    //     document.getElementById('extracted-frames-count').textContent = data.result.extracted_frames || 0;
+                        
+                        // 确保下载按钮可见并启用
+                    //     const downloadAllBtn = document.getElementById('download-all-frames');
+                    //     if (downloadAllBtn) {
+                    //        downloadAllBtn.style.display = 'block';
+                    //        downloadAllBtn.disabled = false;
+                            
+                            // 绑定下载事件
+                    //        downloadAllBtn.onclick = function() {
+                    //            window.location.href = `${API_URL}/video/download-frames/${data.extraction_id}`;
+                    //        };
+                    //    }
 
                         // 显示帧图像
-                        const framesGallery = document.getElementById('frames-gallery');
-                        framesGallery.innerHTML = '';
+                    //    const framesGallery = document.getElementById('frames-gallery');
+                    //    framesGallery.innerHTML = '';
 
                         // 检查帧数据是否存在
-                        const frames = data.result.frames || [];
+                    //    const frames = data.result.frames || [];
 
-                        if (frames.length === 0) {
-                            framesGallery.innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">未提取到帧</div></div>';
-                        } else {
+                    //    if (frames.length === 0) {
+                    //        framesGallery.innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">未提取到帧</div></div>';
+                    //    } else {
                             // 只显示前20帧，避免页面过长
-                            const framesToShow = frames.slice(0, 20);
-                            framesToShow.forEach(frame => {
-                                const col = document.createElement('div');
-                                col.className = 'col-md-3 mb-3';
+                        //    const framesToShow = frames.slice(0, 20);
+                        //    framesToShow.forEach(frame => {
+                        //        const col = document.createElement('div');
+                        //        col.className = 'col-md-3 mb-3';
 
-                                const card = document.createElement('div');
-                                card.className = 'card';
+                        //        const card = document.createElement('div');
+                        //        card.className = 'card';
 
-                                const img = document.createElement('img');
-                                img.className = 'card-img-top';
-                                img.src = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
-                                img.alt = `Frame ${frame}`;
+                        //        const img = document.createElement('img');
+                        //        img.className = 'card-img-top';
+                        //        img.src = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
+                        //        img.alt = `Frame ${frame}`;
 
-                                const cardBody = document.createElement('div');
-                                cardBody.className = 'card-body';
+                        //        const cardBody = document.createElement('div');
+                        //        cardBody.className = 'card-body';
 
-                                const cardText = document.createElement('p');
-                                cardText.className = 'card-text';
-                                cardText.textContent = `帧 ${frame}`;
+                        //        const cardText = document.createElement('p');
+                        //        cardText.className = 'card-text';
+                        //        cardText.textContent = `帧 ${frame}`;
 
-                                const downloadBtn = document.createElement('a');
-                                downloadBtn.className = 'btn btn-sm btn-primary';
-                                downloadBtn.href = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
-                                downloadBtn.download = frame;
-                                downloadBtn.textContent = '下载';
+                        //        const downloadBtn = document.createElement('a');
+                        //        downloadBtn.className = 'btn btn-sm btn-primary';
+                        //        downloadBtn.href = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
+                        //        downloadBtn.download = frame;
+                        //        downloadBtn.textContent = '下载';
 
-                                cardBody.appendChild(cardText);
-                                cardBody.appendChild(downloadBtn);
-                                card.appendChild(img);
-                                card.appendChild(cardBody);
-                                col.appendChild(card);
-                                framesGallery.appendChild(col);
-                            });
+                        //        cardBody.appendChild(cardText);
+                        //        cardBody.appendChild(downloadBtn);
+                        //        card.appendChild(img);
+                        //        card.appendChild(cardBody);
+                        //        col.appendChild(card);
+                        //        framesGallery.appendChild(col);
+                        //    });
 
                             // 如果有更多帧，显示提示
-                            if (frames.length > 20) {
-                                const moreFrames = document.createElement('div');
-                                moreFrames.className = 'col-12 text-center mt-3';
-                                moreFrames.innerHTML = `<div class="alert alert-info">还有 ${frames.length - 20} 帧未显示</div>`;
-                                framesGallery.appendChild(moreFrames);
-                            }
+                        //    if (frames.length > 20) {
+                        //        const moreFrames = document.createElement('div');
+                        //        moreFrames.className = 'col-12 text-center mt-3';
+                        //        moreFrames.innerHTML = `<div class="alert alert-info">还有 ${frames.length - 20} 帧未显示</div>`;
+                        //        framesGallery.appendChild(moreFrames);
+                        //    }
 
                             // 绑定下载所有帧按钮事件
-                            const downloadAllBtn = document.getElementById('download-all-frames');
-                            if (downloadAllBtn) {
-                                downloadAllBtn.onclick = function() {
-                                    window.open(`${API_URL}/video/download-frames/${data.extraction_id}`, '_blank');
-                                };
-                            }
-                        }
-                    } else {
-                        document.getElementById('extracted-frames-count').textContent = '处理中...';
-                        document.getElementById('frames-gallery').innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">正在处理中，请稍候...</div></div>';
-                    }
-                } else {
-                    console.error('提取帧响应数据格式错误:', data);
+                        //    const downloadAllBtn = document.getElementById('download-all-frames');
+                        //    if (downloadAllBtn) {
+                        //        downloadAllBtn.style.display = 'block';
+                        //        downloadAllBtn.onclick = function() {
+                                    // 显示下载中状态
+                        //            const originalText = downloadAllBtn.textContent;
+                        //            downloadAllBtn.disabled = true;
+                        //            downloadAllBtn.textContent = '下载中...';
+                                    
+                        //            window.open(`${API_URL}/video/download-frames/${data.extraction_id}`, '_blank');
+                                    
+                                    // 3秒后恢复按钮状态
+                        //            setTimeout(() => {
+                        //                downloadAllBtn.disabled = false;
+                        //                downloadAllBtn.textContent = originalText;
+                        //            }, 3000);
+                        //        };
+                        //    }
+                    //    }
+                    //} else {
+                    //    document.getElementById('extracted-frames-count').textContent = '处理中...';
+                    //    document.getElementById('frames-gallery').innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">正在处理中，请稍候...</div></div>';
+                //    }
+            //    } else {
+            //        console.error('提取帧响应数据格式错误:', data);
                 }
             })
             .catch(error => {
-                // 加载覆盖层已禁用
-                // document.getElementById('video-loading-overlay').style.display = 'none';
+                // 关闭加载覆盖层
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'none';
+                if (window.loadingText) window.loadingText.textContent = '提取完成';
                 alert('错误: ' + error.message);
             });
         });
@@ -5514,8 +6459,9 @@ function bindVideoEventHandlers() {
                 return response.json();
             })
             .then(data => {
-                // 加载覆盖层已禁用
-                // document.getElementById('video-loading-overlay').style.display = 'none';
+                // 关闭加载覆盖层
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'none';
+                if (window.loadingText) window.loadingText.textContent = '提取完成';
 
                 // 显示任务信息
                 if (data && data.task_id) {
@@ -5601,8 +6547,9 @@ function bindVideoEventHandlers() {
                 }
             })
             .catch(error => {
-                // 加载覆盖层已禁用
-                // document.getElementById('video-loading-overlay').style.display = 'none';
+                // 关闭加载覆盖层
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'none';
+                if (window.loadingText) window.loadingText.textContent = '提取完成';
                 alert('错误: ' + error.message);
             });
         });
@@ -5648,8 +6595,9 @@ function bindVideoEventHandlers() {
                 return response.json();
             })
             .then(data => {
-                // 加载覆盖层已禁用
-                // document.getElementById('video-loading-overlay').style.display = 'none';
+                // 关闭加载覆盖层
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'none';
+                if (window.loadingText) window.loadingText.textContent = '提取完成';
 
                 // 显示任务信息
                 if (data && data.task_id) {
@@ -5744,8 +6692,9 @@ function bindVideoEventHandlers() {
                 }
             })
             .catch(error => {
-                // 加载覆盖层已禁用
-                // document.getElementById('video-loading-overlay').style.display = 'none';
+                // 关闭加载覆盖层
+                if (window.loadingOverlay) window.loadingOverlay.style.display = 'none';
+                if (window.loadingText) window.loadingText.textContent = '提取完成';
                 alert('错误: ' + error.message);
             });
         });

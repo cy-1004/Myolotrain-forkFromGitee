@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>在线标注工具 - Myolotrain</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .annotation-canvas {
+            border: 2px solid #dee2e6;
+            cursor: crosshair;
+            max-width: 100%;
+            height: auto;
+        }
+        .class-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .annotation-item {
+            padding: 5px;
+            margin: 2px 0;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .annotation-item:hover {
+            background-color: #f8f9fa;
+        }
+        .annotation-item.selected {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        .toolbar {
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .image-navigation {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+        .progress-info {
+            background-color: #e8f5e8;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container-fluid">
+        <div class="row">
+            <!-- 左侧工具栏 -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-project-diagram"></i> 项目信息</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="project-info">
+                            <p><strong>项目名称：</strong><span id="project-name">-</span></p>
+                            <p><strong>类别数量：</strong><span id="class-count">-</span></p>
+                            <p><strong>图片总数：</strong><span id="total-images">-</span></p>
+                        </div>
+                        
+                        <div class="progress-info">
+                            <div class="d-flex justify-content-between">
+                                <span>标注进度</span>
+                                <span id="progress-text">0/0</span>
+                            </div>
+                            <div class="progress mt-2">
+                                <div id="progress-bar" class="progress-bar" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-tags"></i> 类别列表</h5>
+                        <button class="btn btn-sm btn-outline-primary" id="edit-classes-btn">
+                            <i class="fas fa-edit"></i> 编辑
+                        </button>
+                    </div>
+                    <div class="card-body">
+                        <div id="class-list" class="class-list">
+                            <!-- 类别列表将在这里动态生成 -->
+                        </div>
+                        <div class="mt-3">
+                            <label>当前选中类别：</label>
+                            <span id="selected-class" class="badge bg-primary">无</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5><i class="fas fa-list"></i> 当前标注</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="annotation-list">
+                            <!-- 标注列表将在这里显示 -->
+                        </div>
+                        <button id="clear-all" class="btn btn-warning btn-sm mt-2">
+                            <i class="fas fa-trash"></i> 清除所有
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 中间图片区域 -->
+            <div class="col-md-6">
+                <div class="toolbar">
+                    <div class="row align-items-center">
+                        <div class="col-md-6">
+                            <h4 id="current-image-name">请选择图片</h4>
+                        </div>
+                        <div class="col-md-6 text-end">
+                            <button id="ai-auto-annotate" class="btn btn-warning me-2">
+                                <i class="fas fa-robot"></i> AI自动标注
+                            </button>
+                            <button id="stop-auto-annotate" class="btn btn-danger me-2" style="display: none;">
+                                <i class="fas fa-stop"></i> 停止标注
+                            </button>
+                            <button id="save-annotation" class="btn btn-success">
+                                <i class="fas fa-save"></i> 保存标注
+                            </button>
+                            <button id="mark-completed" class="btn btn-info">
+                                <i class="fas fa-check"></i> 标记完成
+                            </button>
+                            <button id="mark-all-completed" class="btn btn-success">
+                                <i class="fas fa-check-double"></i> 一键全部完成
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-center">
+                    <div id="canvas-container" style="position: relative; display: inline-block;">
+                        <canvas id="annotation-canvas" class="annotation-canvas"></canvas>
+                    </div>
+                </div>
+
+                <div class="mt-3 text-center">
+                    <div class="btn-group">
+                        <button id="zoom-in" class="btn btn-outline-secondary">
+                            <i class="fas fa-search-plus"></i> 放大
+                        </button>
+                        <button id="zoom-out" class="btn btn-outline-secondary">
+                            <i class="fas fa-search-minus"></i> 缩小
+                        </button>
+                        <button id="zoom-reset" class="btn btn-outline-secondary">
+                            <i class="fas fa-expand-arrows-alt"></i> 重置
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧图片列表 -->
+            <div class="col-md-3">
+                <div class="card">
+                    <div class="card-header">
+                        <h5><i class="fas fa-images"></i> 图片列表</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <input type="text" id="image-search" class="form-control" placeholder="搜索图片...">
+                        </div>
+                        <div id="image-list" style="max-height: 600px; overflow-y: auto;">
+                            <!-- 图片列表将在这里显示 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 图片导航按钮 -->
+    <div class="image-navigation">
+        <div class="btn-group-vertical">
+            <button id="prev-image" class="btn btn-primary">
+                <i class="fas fa-chevron-up"></i>
+            </button>
+            <button id="next-image" class="btn btn-primary">
+                <i class="fas fa-chevron-down"></i>
+            </button>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="js/annotation.js"></script>
+</body>
+</html>

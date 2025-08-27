@@ -6,7 +6,7 @@ from app.db.session import Base, engine
 from app.core.config import settings
 
 # 导入所有模型以确保它们被注册
-from app.models import Dataset, Model, TrainingTask, DetectionTask
+from app.models import Dataset, Model, TrainingTask, DetectionTask, AnnotationProject, ImageAnnotation
 
 logger = logging.getLogger(__name__)
 

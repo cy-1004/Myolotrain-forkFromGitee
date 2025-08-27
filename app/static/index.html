@@ -20,6 +20,9 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav">
                     <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="annotation">在线标注</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="#" data-page="datasets">数据集管理</a>
                     </li>
                     <li class="nav-item">
@@ -36,9 +39,6 @@
                     </li>
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-page="video">视频处理</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#" data-page="tracking">目标追踪</a>
                     </li>
                 </ul>
             </div>
@@ -774,7 +774,7 @@
                                 <input type="number" class="form-control" id="end-time" name="end_time" min="0" step="0.1">
                             </div>
 
-                            <button type="submit" class="btn btn-primary" id="extract-frames-btn">提取帧</button>
+                            <button type="submit" class="btn btn-primary" id="extract-frames-btn">提取帧（保存位置\app\static\video_frames）</button>
                         </form>
 
                         <div class="mt-4" id="extract-frames-result" style="display: none;">
@@ -1852,6 +1852,70 @@
         </form>
     </template>
 
+    <!-- 在线标注页面 -->
+    <template id="annotation-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>在线标注</h2>
+                <p class="lead">创建和管理标注项目，进行图像标注</p>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary" id="create-annotation-project-btn">创建标注项目</button>
+            </div>
+        </div>
+
+        <div class="table-responsive mb-4">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>项目名称</th>
+                        <th>描述</th>
+                        <th>类别数</th>
+                        <th>图片总数</th>
+                        <th>已完成</th>
+                        <th>进度</th>
+                        <th>状态</th>
+                        <th>操作</th>
+                    </tr>
+                </thead>
+                <tbody id="annotation-projects-table-body">
+                    <!-- 标注项目列表将通过JavaScript动态加载 -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h5>功能说明</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>标注功能特点</h6>
+                        <ul>
+                            <li>支持矩形框标注</li>
+                            <li>多类别标注支持</li>
+                            <li>快捷键操作</li>
+                            <li>实时保存</li>
+                            <li>导出YOLO格式</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>快捷键说明</h6>
+                        <ul>
+                            <li><kbd>A/D</kbd> - 切换图片</li>
+                            <li><kbd>W/S</kbd> - 切换类别</li>
+                            <li><kbd>1-9</kbd> - 选择类别</li>
+                            <li><kbd>拖拽</kbd> - 绘制标注框</li>
+                            <li><kbd>Delete</kbd> - 删除所有框</li>
+                            <li><kbd>Ctrl+S</kbd> - 手动保存</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
     <!-- 目标追踪页面 -->
     <template id="tracking-template">
         <div class="row mb-4">
@@ -1964,6 +2028,94 @@
         </div>
     </template>
 
+    <!-- 创建标注项目模态框内容 -->
+    <template id="create-annotation-project-template">
+        <form id="create-annotation-project-form">
+            <div class="mb-3">
+                <label for="annotation-project-name" class="form-label">项目名称</label>
+                <input type="text" class="form-control" id="annotation-project-name" required>
+            </div>
+            <div class="mb-3">
+                <label for="annotation-project-description" class="form-label">项目描述</label>
+                <textarea class="form-control" id="annotation-project-description" rows="3"></textarea>
+            </div>
+            <div class="mb-3">
+                <label for="annotation-classes" class="form-label">类别列表</label>
+                <textarea class="form-control" id="annotation-classes" rows="4" placeholder="每行一个类别名称，例如：\ncar\nperson\nbike" required></textarea>
+                <div class="form-text">每行输入一个类别名称</div>
+            </div>
+            
+            <!-- 图片来源选择 -->
+            <div class="mb-3">
+                <label class="form-label">图片来源</label>
+                <div class="card">
+                    <div class="card-body">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="image-source" id="image-source-dataset" value="dataset">
+                            <label class="form-check-label" for="image-source-dataset">关联现有数据集</label>
+                        </div>
+                        <div id="dataset-source-container" class="mb-3" style="display: none;">
+                            <select class="form-select" id="annotation-dataset-id">
+                                <option value="">选择数据集</option>
+                            </select>
+                            <div class="form-text">选择已有数据集可自动填充类别和图片目录</div>
+                        </div>
+                        
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="image-source" id="image-source-directory" value="directory">
+                            <label class="form-check-label" for="image-source-directory">选择服务器目录</label>
+                        </div>
+                        <div id="directory-source-container" class="mb-3" style="display: none;">
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="annotation-image-directory" placeholder="请选择图片目录" readonly>
+                                <button class="btn btn-outline-secondary" type="button" id="browse-image-directory-btn">
+                                    <i class="bi bi-folder"></i> 浏览目录
+                                </button>
+                            </div>
+                            <div class="form-text">选择包含图片的服务器目录</div>
+                            <div id="directory-scan-result" class="mt-2" style="display: none;">
+                                <div class="alert alert-info">
+                                    <strong>扫描结果：</strong> 找到 <span id="directory-image-count">0</span> 张图片
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="image-source" id="image-source-upload" value="upload" checked>
+                            <label class="form-check-label" for="image-source-upload">上传图片ZIP包</label>
+                        </div>
+                        <div id="upload-source-container" class="mb-3">
+                            <input class="form-control" type="file" id="annotation-images-zip" accept=".zip">
+                            <div class="form-text">上传包含图片的ZIP文件，支持jpg、png、bmp、webp格式</div>
+                        </div>
+                        
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="radio" name="image-source" id="image-source-folder" value="folder">
+                            <label class="form-check-label" for="image-source-folder">选择本地目录</label>
+                        </div>
+                        <div id="folder-source-container" class="mb-3" style="display: none;">
+                            <input class="form-control" type="file" id="annotation-images-folder" webkitdirectory directory multiple>
+                            <div class="form-text">选择包含图片的本地目录，支持jpg、png、bmp、webp格式</div>
+                            <div id="folder-scan-result" class="mt-2" style="display: none;">
+                                <div class="alert alert-info">
+                                    <strong>扫描结果：</strong> 找到 <span id="folder-image-count">0</span> 张图片
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 上传进度 -->
+            <div id="annotation-upload-progress" class="mb-3" style="display: none;">
+                <div class="progress mb-2">
+                    <div id="annotation-progress-bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%">0%</div>
+                </div>
+                <div id="annotation-upload-status" class="text-muted">准备上传...</div>
+            </div>
+        </form>
+    </template>
+
     <!-- 使用本地JavaScript资源 -->
     <script src="static/libs/bootstrap.bundle.min.js"></script>
     <!-- Chart.js 图表库 -->
@@ -1982,6 +2134,8 @@
     <script src="static/js/attention_tracker.js"></script>
     <!-- 流媒体功能 -->
     <script src="static/js/streaming.js"></script>
+    <!-- 目录浏览器 -->
+    <script src="static/js/directory-browser.js"></script>
     <script src="static/js/main.js"></script>
 
     <!-- 引入模态框 -->

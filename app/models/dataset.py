@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, Boolean
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
 
 from app.db.session import Base
 
@@ -18,3 +19,6 @@ class Dataset(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     status = Column(String, default="processing")  # processing, available, error
     is_external = Column(Boolean, default=False)  # 是否为外部数据集
+    
+    # 关联关系
+    annotation_projects = relationship("AnnotationProject", back_populates="dataset")
