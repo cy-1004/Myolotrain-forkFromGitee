@@ -52,10 +52,13 @@ class CRUDAnnotationProject(CRUDBase[AnnotationProject, AnnotationProjectCreate,
         )
 
 class CRUDImageAnnotation(CRUDBase[ImageAnnotation, ImageAnnotationCreate, ImageAnnotationUpdate]):
-    def get_by_project_id(self, db: Session, *, project_id: UUID, skip: int = 0, limit: int = 100) -> List[ImageAnnotation]:
-        return db.query(ImageAnnotation).filter(
+    def get_by_project_id(self, db: Session, *, project_id: UUID, skip: int = 0, limit: Optional[int] = None) -> List[ImageAnnotation]:
+        query = db.query(ImageAnnotation).filter(
             ImageAnnotation.project_id == project_id
-        ).offset(skip).limit(limit).all()
+        ).offset(skip)
+        if limit is not None:
+            query = query.limit(limit)
+        return query.all()
     
     def get_by_image_path(self, db: Session, *, project_id: UUID, image_path: str) -> Optional[ImageAnnotation]:
         return db.query(ImageAnnotation).filter(
