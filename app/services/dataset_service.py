@@ -179,20 +179,30 @@ def move_image_and_label(img_path: Path, target_img_dir: Path, target_label_dir:
 
         # 移动对应的标签
         src_label_dir = img_path.parent.parent / "labels"
-        label_path = (src_label_dir / img_path.stem).with_suffix(".txt")
+        label_path = None
 
-        if label_path.exists():
-            target_label_path = target_label_dir / label_path.name
+        # 直接匹配与图像文件同名的.txt或.TXT文件（忽略文件名中的任何中间部分）
+        label_name = img_path.stem + '.txt'  # 保持原始文件名，仅替换扩展名
+        label_path = src_label_dir / label_name
+        if not label_path.exists():
+            # 尝试匹配.TXT后缀
+            label_path = src_label_dir / (img_path.stem + '.TXT')
+
+        if label_path:
+            # 统一使用小写文件名处理（避免Windows大小写问题）
+            target_label_path = target_label_dir / label_path.name.lower().replace('.txt', '.txt')
+            print(f"Copying label from {label_path} to {target_label_path}")
             shutil.copy2(str(label_path), str(target_label_path))
 
             # 只有在成功复制后才删除源文件
             if target_label_path.exists():
                 try:
-                    os.remove(label_path)
+                    # 确保删除操作使用原始路径（兼容大小写）
+                    os.remove(str(label_path))
                 except Exception as e:
                     print(f"Warning: Could not remove source label {label_path}: {e}")
         else:
-            print(f"Warning: No label file found for {img_path}")
+            print(f"Warning: No label file found for {img_path} in {src_label_dir}")
 
         return True  # 返回成功标志
     except Exception as e:
@@ -359,16 +369,34 @@ def split_dataset(
                 temp_img_path = temp_images_dir / img_path.name
                 shutil.copy2(str(img_path), str(temp_img_path))
 
-                # 复制标签到临时目录
+                # 复制标签到临时目录（文件名与图像严格匹配，仅替换后缀为 .txt）
                 src_label_dir = img_path.parent.parent / "labels"
-                label_path = (src_label_dir / img_path.stem).with_suffix(".txt")
+                label_name = img_path.name.replace(img_path.suffix, '.txt')
+                label_path = src_label_dir / label_name
                 if label_path.exists():
-                    temp_label_path = temp_labels_dir / label_path.name
+                    temp_label_path = temp_labels_dir / label_name
                     shutil.copy2(str(label_path), str(temp_label_path))
+                else:
+                    # 兼容大小写不敏感的标签文件（如 .TXT）
+                    for ext in [".txt", ".TXT"]:
+                        label_path = (src_label_dir / img_path.stem).with_suffix(ext)
+                        if label_path.exists():
+                            temp_label_path = temp_labels_dir / label_path.name
+                            shutil.copy2(str(label_path), str(temp_label_path))
+                            break
+                    else:
+                        print(f"Warning: Label file not found: {src_label_dir / label_name}")
             except Exception as e:
                 print(f"Error copying to temp directory: {e}")
 
-        # 清空现有目录
+        # 检查临时目录中的文件是否完整
+        temp_files = list(temp_images_dir.glob("*.*"))
+        temp_labels = list(temp_labels_dir.glob("*.*"))
+        if not temp_files:
+            print("Error: No files found in temp directory. Aborting redistribution.")
+            return {"train": 0, "val": 0, "test": 0, "total": 0}
+
+        # 清空现有目录（仅在临时文件验证通过后执行）
         for dir_path in [train_images_dir, train_labels_dir, val_images_dir, val_labels_dir, test_images_dir, test_labels_dir]:
             try:
                 for file_path in dir_path.glob("*.*"):
@@ -376,8 +404,9 @@ def split_dataset(
                         os.remove(file_path)
             except Exception as e:
                 print(f"Error clearing directory {dir_path}: {e}")
+                # 不中断流程，但记录错误
 
-        # 从临时目录移动图像到目标目录
+        # 从临时目录移动图像和标签到目标目录
         train_success = 0
         for img_path, _ in new_train:
             temp_img_path = temp_images_dir / img_path.name
@@ -387,11 +416,14 @@ def split_dataset(
                     target_img_path = train_images_dir / img_path.name
                     shutil.copy2(str(temp_img_path), str(target_img_path))
 
-                    # 复制标签
-                    temp_label_path = (temp_labels_dir / img_path.stem).with_suffix(".txt")
+                    # 复制标签（使用原始文件名匹配）
+                    label_name = img_path.name.replace(img_path.suffix, '.txt')
+                    temp_label_path = temp_labels_dir / label_name
                     if temp_label_path.exists():
-                        target_label_path = train_labels_dir / temp_label_path.name
+                        target_label_path = train_labels_dir / label_name
                         shutil.copy2(str(temp_label_path), str(target_label_path))
+                    else:
+                        print(f"Warning: Label file not found in temp directory: {temp_label_path}")
 
                     train_success += 1
                 except Exception as e:
@@ -406,11 +438,15 @@ def split_dataset(
                     target_img_path = val_images_dir / img_path.name
                     shutil.copy2(str(temp_img_path), str(target_img_path))
 
-                    # 复制标签
-                    temp_label_path = (temp_labels_dir / img_path.stem).with_suffix(".txt")
+                    # 复制标签（使用原始文件名匹配）
+                    label_name = img_path.name.replace(img_path.suffix, '.txt')
+                    temp_label_path = temp_labels_dir / label_name
                     if temp_label_path.exists():
-                        target_label_path = val_labels_dir / temp_label_path.name
+                        target_label_path = val_labels_dir / label_name
                         shutil.copy2(str(temp_label_path), str(target_label_path))
+                        print(f"Copied label: {temp_label_path} -> {target_label_path}")
+                    else:
+                        print(f"Warning: Label file not found in temp directory: {temp_label_path}")
 
                     val_success += 1
                 except Exception as e:
@@ -425,11 +461,15 @@ def split_dataset(
                     target_img_path = test_images_dir / img_path.name
                     shutil.copy2(str(temp_img_path), str(target_img_path))
 
-                    # 复制标签
-                    temp_label_path = (temp_labels_dir / img_path.stem).with_suffix(".txt")
+                    # 复制标签（使用原始文件名匹配）
+                    label_name = img_path.name.replace(img_path.suffix, '.txt')
+                    temp_label_path = temp_labels_dir / label_name
                     if temp_label_path.exists():
-                        target_label_path = test_labels_dir / temp_label_path.name
+                        target_label_path = test_labels_dir / label_name
                         shutil.copy2(str(temp_label_path), str(target_label_path))
+                        print(f"Copied label to test: {temp_label_path} -> {target_label_path}")
+                    else:
+                        print(f"Warning: Test label file not found in temp directory: {temp_label_path}")
 
                     test_success += 1
                 except Exception as e:
