@@ -4814,6 +4814,14 @@ function viewTrainingLogs(taskId) {
                     stopBtn.style.display = 'inline-block';
                 } else {
                     stopBtn.style.display = 'none';
+                    
+                    // 如果任务已完成，停止轮询
+                    if (taskData.status === 'completed') {
+                        clearInterval(autoRefresh);
+                        if (typeof PollingManager !== 'undefined') {
+                            PollingManager.removePoll(`training_logs_${taskId}`);
+                        }
+                    }
                 }
             })
             .catch(error => {

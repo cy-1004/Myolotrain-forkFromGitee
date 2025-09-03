@@ -19,6 +19,9 @@ from app.models.training_task import TrainingTask
 from app.schemas.training_task import TrainingTaskCreate, TrainingTaskUpdate
 from app.services.ascend_service import AscendDeviceManager
 
+# 设置TensorBoard为True
+subprocess.run(['yolo', 'settings', 'tensorboard=true'], check=True)
+
 # 导入可能需要的PyTorch和Ultralytics模型类
 try:
     # 导入PyTorch核心类
@@ -1103,10 +1106,10 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
         "tensorboard_path": tensorboard_dir
     })
 
-    # 创建日志文件
-    log_file_path = os.path.join(tensorboard_dir, "resume_training_log.txt")
-    # 使用gbk编码写入日志文件，以确保中文显示正确
-    log_file = open(log_file_path, "w", encoding="gbk", errors="replace")
+    # 使用与start_training相同的日志文件路径
+    log_file_path = os.path.join(tensorboard_dir, "training_log.txt")
+    # 使用gbk编码以追加模式打开日志文件，以确保中文显示正确
+    log_file = open(log_file_path, "a", encoding="gbk", errors="replace")
 
     # 启动训练进程
     print(f"\n=== 等待继续训练进程启动... ===")
