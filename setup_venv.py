@@ -56,10 +56,11 @@ def create_venv():
     # 升级pip
     print("\n升级pip...")
     try:
-        subprocess.run([pip_path, "install", "--upgrade", "pip"], check=True)
+        # 使用python -m pip的方式升级pip，避免权限问题
+        subprocess.run([python_path, "-m", "pip", "install", "--upgrade", "pip", "--no-cache-dir"], check=True)
     except subprocess.CalledProcessError:
-        print("升级pip失败")
-        sys.exit(1)
+        print("警告: 升级pip失败，但将继续执行安装过程")
+        #sys.exit(1)
     
     # 安装依赖
     print("\n安装项目依赖...")
