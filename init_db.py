@@ -42,7 +42,7 @@ def init_database():
 
         # 创建新数据库
         logger.info("创建yolov8_platform数据库...")
-        cursor.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier('yolov8_platform')))
+        cursor.execute(sql.SQL("CREATE DATABASE {} WITH ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0").format(sql.Identifier('yolov8_platform')))
 
         # 关闭连接
         cursor.close()

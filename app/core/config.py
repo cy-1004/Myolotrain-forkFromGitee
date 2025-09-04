@@ -35,6 +35,7 @@ class Settings(BaseSettings):
             password=values["POSTGRES_PASSWORD"],
             host=values["POSTGRES_SERVER"],
             path=f"{values['POSTGRES_DB'] or ''}",
+            query="client_encoding=utf8"
         )
 
     # Paths

@@ -1,7 +1,7 @@
 import logging
 import uvicorn
 from app.db.init_db import init_db
-from app.services.tensorboard_service import tensorboard_manager
+# from app.services.tensorboard_service import tensorboard_manager
 
 # 配置日志
 logging.basicConfig(
@@ -17,12 +17,12 @@ if __name__ == "__main__":
         init_db()
         logger.info("Database initialization completed successfully")
 
-        # Start TensorBoard service
-        logger.info("Starting TensorBoard service...")
-        if tensorboard_manager.start():
-            logger.info(f"TensorBoard service started successfully at {tensorboard_manager.get_url()}")
-        else:
-            logger.warning("Failed to start TensorBoard service")
+        # # Start TensorBoard service
+        # logger.info("Starting TensorBoard service...")
+        # if tensorboard_manager.start():
+        #     logger.info(f"TensorBoard service started successfully at {tensorboard_manager.get_url()}")
+        # else:
+        #     logger.warning("Failed to start TensorBoard service")
 
         # Start server
         logger.info("Starting server...")

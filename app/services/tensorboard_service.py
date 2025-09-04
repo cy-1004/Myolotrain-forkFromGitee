@@ -7,6 +7,7 @@ import subprocess
 import threading
 import time
 import logging
+import socket
 from pathlib import Path
 from typing import Optional, Dict
 
@@ -26,6 +27,45 @@ class TensorBoardManager:
         self.models_dir = settings.MODELS_DIR
         self.port = settings.TENSORBOARD_PORT
 
+    def _is_port_available(self, port: int) -> bool:
+        """
+        检查端口是否可用
+        
+        参数:
+            port: 端口号
+            
+        返回:
+            bool: 端口是否可用
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', port))
+                return True
+        except socket.error:
+            return False
+
+    def _find_available_port(self, start_port: int = None, max_attempts: int = 10) -> int:
+        """
+        查找可用的端口
+        
+        参数:
+            start_port: 起始端口，默认使用配置的端口
+            max_attempts: 最大尝试次数
+            
+        返回:
+            int: 可用的端口号
+        """
+        if start_port is None:
+            start_port = self.port
+            
+        for i in range(max_attempts):
+            port_to_try = start_port + i
+            if self._is_port_available(port_to_try):
+                return port_to_try
+                
+        # 如果都不可用，返回默认端口
+        return start_port
+
     def start(self) -> bool:
         """
         启动TensorBoard服务
@@ -42,6 +82,12 @@ class TensorBoardManager:
             # 确保日志目录存在
             os.makedirs(self.log_dir, exist_ok=True)
 
+            # 查找可用端口
+            available_port = self._find_available_port()
+            if available_port != self.port:
+                logger.info(f"端口 {self.port} 已被占用，使用端口 {available_port}")
+                self.port = available_port
+
             try:
                 # 启动TensorBoard进程，直接监控包含TensorBoard事件文件的目录
                 # YOLOv8在训练时会将TensorBoard日志写入到模型输出目录下的exp目录中
@@ -51,6 +97,7 @@ class TensorBoardManager:
                 logdir = str(self.models_dir)
 
                 print(f"TensorBoard监控目录: {logdir}")
+                print(f"TensorBoard使用端口: {self.port}")
 
                 self.tensorboard_process = subprocess.Popen(
                     [sys.executable, "-m", "tensorboard.main", "--logdir", logdir,
