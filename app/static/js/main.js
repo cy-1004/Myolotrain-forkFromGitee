@@ -80,7 +80,7 @@ function testApiEndpoints() {
     console.log('Testing API endpoints...');
 
     // 测试数据集列表API
-    fetch(`${API_URL}/datasets`)
+    fetch(`${API_URL}/datasets/`)
         .then(response => {
             console.log('Datasets API status:', response.status);
             return response.json();
@@ -291,7 +291,7 @@ function showCreateAnnotationProjectModal() {
 
 // 加载数据集列表用于标注项目
 function loadDatasetsForAnnotation() {
-    fetch(`${API_URL}/datasets`)
+    fetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(data => {
             const datasetSelect = document.getElementById('annotation-dataset-id');
@@ -599,7 +599,7 @@ function loadOpenCVPage() {
     });
 
     // 加载数据集列表（用于数据增强功能）
-    fetch(`${API_URL}/datasets`)
+    fetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(data => {
             console.log('Loaded datasets for OpenCV:', data.length);
@@ -826,10 +826,21 @@ function bindOpenCVEventHandlers() {
                 const processedImage = document.getElementById('processed-image');
                 const downloadLink = document.getElementById('download-processed');
 
-                const url = URL.createObjectURL(blob);
+                const url = window.memoryManager.createObjectURL(blob);
                 processedImage.src = url;
                 downloadLink.href = url;
                 downloadLink.download = 'processed_' + imageFile.name;
+                
+                // 在图像加载完成后释放旧URL（如果有）
+                processedImage.onload = function() {
+                    // 延迟释放，确保图像已加载
+                    setTimeout(() => {
+                        if (processedImage.dataset.oldUrl) {
+                            window.memoryManager.revokeObjectURL(processedImage.dataset.oldUrl);
+                        }
+                        processedImage.dataset.oldUrl = url;
+                    }, 1000);
+                };
 
                 // 显示结果区域
                 document.getElementById('preprocess-result').style.display = 'block';
@@ -892,10 +903,21 @@ function bindOpenCVEventHandlers() {
                 const segmentedImage = document.getElementById('segmented-image');
                 const downloadLink = document.getElementById('download-segmented');
 
-                const url = URL.createObjectURL(blob);
+                const url = window.memoryManager.createObjectURL(blob);
                 segmentedImage.src = url;
                 downloadLink.href = url;
                 downloadLink.download = 'segmented_' + imageFile.name;
+                
+                // 在图像加载完成后释放旧URL（如果有）
+                segmentedImage.onload = function() {
+                    // 延迟释放，确保图像已加载
+                    setTimeout(() => {
+                        if (segmentedImage.dataset.oldUrl) {
+                            window.memoryManager.revokeObjectURL(segmentedImage.dataset.oldUrl);
+                        }
+                        segmentedImage.dataset.oldUrl = url;
+                    }, 1000);
+                };
 
                 // 显示结果区域
                 document.getElementById('segmentation-result').style.display = 'block';
@@ -1086,7 +1108,7 @@ function bindOpenCVEventHandlers() {
 
                 // 开始轮询任务状态
                 const augmentationId = data.augmentation_id;
-                const statusInterval = setInterval(() => {
+                const statusInterval = window.memoryManager.setInterval(() => {
                     fetch(`${API_URL}/opencv/augmentation-status/${augmentationId}`)
                     .then(response => response.json())
                     .then(statusData => {
@@ -1094,7 +1116,7 @@ function bindOpenCVEventHandlers() {
                             document.getElementById('augment-status-text').textContent = statusData.status || '未知';
 
                             if (statusData.status === 'completed' && statusData.stats) {
-                                clearInterval(statusInterval);
+                                window.memoryManager.clearInterval(statusInterval);
                                 document.getElementById('augment-progress').style.width = '100%';
 
                                 // 显示统计信息
@@ -1116,7 +1138,7 @@ function bindOpenCVEventHandlers() {
 
                                 document.getElementById('augment-stats').style.display = 'block';
                             } else if (statusData.status === 'failed') {
-                                clearInterval(statusInterval);
+                                window.memoryManager.clearInterval(statusInterval);
                                 document.getElementById('augment-progress').style.width = '100%';
                                 document.getElementById('augment-progress').classList.remove('bg-info');
                                 document.getElementById('augment-progress').classList.add('bg-danger');
@@ -1129,6 +1151,8 @@ function bindOpenCVEventHandlers() {
                     })
                     .catch(error => {
                         console.error('获取任务状态失败:', error);
+                        // 在多次失败后停止轮询
+                        window.memoryManager.clearInterval(statusInterval);
                     });
                 }, 2000);
             })
@@ -1470,7 +1494,7 @@ function loadDatasets() {
         console.log('Dataset table has', columnCount, 'columns');
     }
 
-    fetch(`${API_URL}/datasets`)
+    fetch(`${API_URL}/datasets/`)
         .then(response => {
             console.log('Datasets response status:', response.status);
             return response.json();
@@ -1739,7 +1763,7 @@ async function submitAddDataset() {
 
         // 创建XMLHttpRequest对象以支持上传进度
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${API_URL}/datasets`, true);
+        xhr.open('POST', `${API_URL}/datasets/`, true);
 
         // 上传进度事件
         xhr.upload.onprogress = function(e) {
@@ -1762,11 +1786,11 @@ async function submitAddDataset() {
         xhr.onload = function() {
             if (xhr.status === 200 || xhr.status === 201) {
                 // 上传成功，开始轮询处理状态
-                statusCheckInterval = setInterval(async () => {
+                statusCheckInterval = window.memoryManager.setInterval(async () => {
                     try {
                         const statusResponse = await fetch(`${API_URL}/datasets/upload-status/${fileId}`);
                         if (!statusResponse.ok) {
-                            clearInterval(statusCheckInterval);
+                            window.memoryManager.clearInterval(statusCheckInterval);
                             throw new Error('获取上传状态失败');
                         }
 
@@ -1816,17 +1840,19 @@ async function submitAddDataset() {
                                 <small class="text-muted">正在处理文件名和生成配置文件</small>
                             `;
                         } else if (statusData.status === 'completed') {
-                            clearInterval(statusCheckInterval);
+                            window.memoryManager.clearInterval(statusCheckInterval);
                             modal.hide();
                             loadDatasets();
                         } else if (statusData.status === 'failed') {
-                            clearInterval(statusCheckInterval);
+                            window.memoryManager.clearInterval(statusCheckInterval);
                             progressStatus.textContent = '上传失败';
                             progressDetails.innerHTML = `错误: ${statusData.error || '未知错误'}`;
                             alert('上传数据集失败: ' + (statusData.error || '未知错误'));
                         }
                     } catch (error) {
                         console.error('Error checking upload status:', error);
+                        // 在错误情况下停止轮询
+                        window.memoryManager.clearInterval(statusCheckInterval);
                     }
                 }, 1000); // 每秒检查一次状态
             } else {
@@ -1848,7 +1874,7 @@ async function submitAddDataset() {
             cancelButton.onclick = function() {
                 xhr.abort();
                 if (statusCheckInterval) {
-                    clearInterval(statusCheckInterval);
+                    window.memoryManager.clearInterval(statusCheckInterval);
                 }
                 progressStatus.textContent = '上传已取消';
                 progressDetails.innerHTML = '';
@@ -3228,7 +3254,7 @@ function deleteDataset(datasetId) {
 
 // 加载模型列表
 function loadModels() {
-    fetch(`${API_URL}/models`)
+    fetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             const tableBody = document.getElementById('models-table-body');
@@ -3348,7 +3374,7 @@ function submitAddModel() {
 
     // 创建XMLHttpRequest对象以支持上传进度
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${API_URL}/models`, true);
+    xhr.open('POST', `${API_URL}/models/`, true);
 
     // 上传进度事件
     xhr.upload.onprogress = function(e) {
@@ -3900,7 +3926,7 @@ function showAddTrainingModal() {
 
 // 加载数据集选项
 function loadDatasetOptions() {
-    fetch(`${API_URL}/datasets`)
+    fetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(datasets => {
             const select = document.getElementById('training-dataset');
@@ -3965,7 +3991,7 @@ function loadDatasetOptions() {
 
 // 加载模型选项
 function loadModelOptions() {
-    fetch(`${API_URL}/models`)
+    fetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             const select = document.getElementById('training-model');
@@ -4876,7 +4902,7 @@ function viewTrainingLogs(taskId) {
     fetchLogs();
 
     // 每 5 秒自动刷新一次日志
-    const autoRefresh = setInterval(fetchLogs, 5000);
+    const autoRefresh = window.memoryManager.setInterval(fetchLogs, 5000);
 
     // 将定时器添加到轮询管理器
     if (typeof PollingManager !== 'undefined') {
@@ -4887,7 +4913,7 @@ function viewTrainingLogs(taskId) {
 
     // 当模态框关闭时清除定时器
     modal.addEventListener('remove', function() {
-        clearInterval(autoRefresh);
+        window.memoryManager.clearInterval(autoRefresh);
 
         // 从轮询管理器中移除
         if (typeof PollingManager !== 'undefined') {
@@ -4899,7 +4925,7 @@ function viewTrainingLogs(taskId) {
     window.onclick = function(event) {
         if (event.target === modal) {
             document.body.removeChild(modal);
-            clearInterval(autoRefresh);
+            window.memoryManager.clearInterval(autoRefresh);
 
             // 从轮询管理器中移除
             if (typeof PollingManager !== 'undefined') {
@@ -5094,7 +5120,7 @@ function viewTrainingDetails(taskId) {
             // 如果训练正在进行，每5秒刷新一次状态
             if (task.status === 'training' || task.status === 'running' ||
                 task.status === 'pending' || task.status === 'downloading_model') {
-                const statusRefresh = setInterval(() => {
+                const statusRefresh = window.memoryManager.setInterval(() => {
                     fetch(`${API_URL}/training/${taskId}`)
                         .then(response => response.json())
                         .then(updatedTask => {
@@ -5116,25 +5142,27 @@ function viewTrainingDetails(taskId) {
                             // 如果状态变为非运行状态，停止刷新并隐藏停止按钮
                             if (updatedTask.status !== 'training' && updatedTask.status !== 'running' &&
                                 updatedTask.status !== 'pending' && updatedTask.status !== 'downloading_model') {
-                                clearInterval(statusRefresh);
+                                window.memoryManager.clearInterval(statusRefresh);
                                 stopBtn.style.display = 'none';
                             }
                         })
                         .catch(error => {
                             console.error('Error updating task status:', error);
+                            // 在错误情况下停止刷新
+                            window.memoryManager.clearInterval(statusRefresh);
                         });
                 }, 5000);
 
                 // 当模态框关闭时清除定时器
                 modal.addEventListener('remove', function() {
-                    clearInterval(statusRefresh);
+                    window.memoryManager.clearInterval(statusRefresh);
                 });
 
                 // 点击模态框外部关闭时清除定时器
                 window.onclick = function(event) {
                     if (event.target === modal) {
                         document.body.removeChild(modal);
-                        clearInterval(statusRefresh);
+                        window.memoryManager.clearInterval(statusRefresh);
                     }
                 };
             }
@@ -5150,7 +5178,7 @@ function viewTrainingDetails(taskId) {
 // 加载检测表单
 function loadDetectionForm() {
     // 加载模型选项
-    fetch(`${API_URL}/models`)
+    fetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             const select = document.getElementById('model-select');
@@ -5736,7 +5764,7 @@ function createProjectWithExistingImages(name, description, classes, imageSource
 
 // 加载数据集选项用于标注项目
 function loadDatasetOptionsForAnnotation() {
-    fetch(`${API_URL}/datasets`)
+    fetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(datasets => {
             const select = document.getElementById('annotation-dataset-id');
@@ -6151,7 +6179,7 @@ function loadVideoPage() {
     });
 
     // 加载模型列表（用于实时检测功能）
-    fetch(`${API_URL}/models`)
+    fetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             console.log('Loaded models for video detection:', models.length);
@@ -6772,7 +6800,7 @@ function bindVideoEventHandlers() {
 
     if (startDetectionBtn && stopDetectionBtn && rtModelSelect) {
         // 加载模型列表
-        fetch(`${API_URL}/models?type=detection`)
+        fetch(`${API_URL}/models/?type=detection`)
             .then(response => response.json())
             .then(models => {
                 rtModelSelect.innerHTML = '<option value="">\u8bf7\u9009\u62e9\u6a21\u578b</option>';

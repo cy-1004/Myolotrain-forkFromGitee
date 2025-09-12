@@ -440,7 +440,7 @@
         });
         
         // 加载数据集列表
-        fetch('/api/datasets')
+        fetch('/api/datasets/')
         .then(response => response.json())
         .then(data => {
             const datasetSelect = document.getElementById('dataset-path');

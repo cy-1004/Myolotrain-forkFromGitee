@@ -360,14 +360,18 @@ class AnnotationManager {
             
             if (response.ok) {
                 const blob = await response.blob();
-                const url = window.URL.createObjectURL(blob);
+                const url = window.memoryManager.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
                 a.download = `${this.currentProject.name}_export.zip`;
                 document.body.appendChild(a);
                 a.click();
-                window.URL.revokeObjectURL(url);
                 document.body.removeChild(a);
+                
+                // 延迟释放URL，确保下载完成
+                window.memoryManager.setTimeout(() => {
+                    window.memoryManager.revokeObjectURL(url);
+                }, 2000);
                 
                 // 关闭模态框
                 const modal = bootstrap.Modal.getInstance(document.getElementById('exportModal'));

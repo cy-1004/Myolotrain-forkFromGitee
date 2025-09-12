@@ -31,7 +31,7 @@ nvitop>=1.0.0
 
 # API and Web Framework
 fastapi>=0.115.0
-uvicorn>=0.34.0
+uvicorn>=0.33.0
 python-multipart>=0.0.5
 
 # Database
@@ -46,6 +46,5 @@ pydantic-settings>=2.0.0
 # File handling
 aiofiles>=23.0
 
-# Monitoring and Logging
-tensorboard>=2.15.0
+
 

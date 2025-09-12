@@ -83,7 +83,7 @@ function initTrackingPage() {
  * 加载模型列表
  */
 function loadModelsForTracking() {
-    fetch(`${API_URL}/models`)
+    fetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             // 填充摄像头追踪模型选择器

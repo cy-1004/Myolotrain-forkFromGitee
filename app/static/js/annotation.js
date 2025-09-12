@@ -573,7 +573,7 @@ class AnnotationTool {
     // 加载可用模型列表
     async loadAvailableModels() {
         try {
-            const response = await fetch('/api/models');
+            const response = await fetch('/api/models/');
             this.availableModels = await response.json();
         } catch (error) {
             console.error('加载模型列表失败:', error);

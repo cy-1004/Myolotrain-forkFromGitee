@@ -466,7 +466,7 @@ function exportAlertData() {
     
     // 创建下载链接
     const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
+    const url = window.memoryManager.createObjectURL(blob);
     
     // 设置下载属性
     link.setAttribute('href', url);
@@ -479,6 +479,10 @@ function exportAlertData() {
     
     // 清理
     document.body.removeChild(link);
+    // 延迟释放URL，确保下载完成
+    window.memoryManager.setTimeout(() => {
+        window.memoryManager.revokeObjectURL(url);
+    }, 2000);
 }
 
 // 在页面加载时加载报警记录

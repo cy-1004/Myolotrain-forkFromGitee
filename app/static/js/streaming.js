@@ -255,7 +255,7 @@ class StreamDetector {
         this.currentStreamId = null;
 
         if (this.detectionInterval) {
-            clearInterval(this.detectionInterval);
+            window.memoryManager.clearInterval(this.detectionInterval);
             this.detectionInterval = null;
         }
 
@@ -317,7 +317,7 @@ class StreamDetector {
         };
 
         // 设置检测间隔（约30fps）
-        this.detectionInterval = setInterval(detectFrame, 33);
+        this.detectionInterval = window.memoryManager.setInterval(detectFrame, 33);
     }
 
     /**
