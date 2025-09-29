@@ -2,6 +2,42 @@
 const API_URL = '/api';  // API路径
 let currentPage = '';
 let modal;
+let DEBUG_MODE = false;  // 全局DEBUG模式开关
+
+// 从localStorage加载DEBUG模式设置
+function loadDebugMode() {
+    const savedDebugMode = localStorage.getItem('debugMode');
+    DEBUG_MODE = savedDebugMode === 'true';
+    console.log(`DEBUG模式已${DEBUG_MODE ? '启用' : '禁用'}`);
+}
+
+// 保存DEBUG模式设置到localStorage
+function saveDebugMode(debugMode) {
+    DEBUG_MODE = debugMode;
+    localStorage.setItem('debugMode', debugMode);
+    console.log(`DEBUG模式已${DEBUG_MODE ? '启用' : '禁用'}`);
+}
+
+// 包装console.log，只在DEBUG模式下输出
+function log() {
+    if (DEBUG_MODE) {
+        console.log.apply(console, arguments);
+    }
+}
+
+// 包装console.error，只在DEBUG模式下输出
+function error() {
+    if (DEBUG_MODE) {
+        console.error.apply(console, arguments);
+    }
+}
+
+// 包装console.warn，只在DEBUG模式下输出
+function warn() {
+    if (DEBUG_MODE) {
+        console.warn.apply(console, arguments);
+    }
+}
 
 // 流媒体管理全局函数
 window.startStream = function(streamId) {
@@ -77,62 +113,65 @@ window.deleteStream = function(streamId) {
 
 // 测试API端点
 function testApiEndpoints() {
-    console.log('Testing API endpoints...');
+    log('Testing API endpoints...');
 
     // 测试数据集列表API
     fetch(`${API_URL}/datasets/`)
         .then(response => {
-            console.log('Datasets API status:', response.status);
+            log('Datasets API status:', response.status);
             return response.json();
         })
         .then(data => {
-            console.log('Datasets API response:', data);
+            log('Datasets API response:', data);
             if (data.length > 0) {
-                console.log('First dataset structure:', JSON.stringify(data[0], null, 2));
-                console.log('Has train_count:', 'train_count' in data[0]);
-                console.log('Has val_count:', 'val_count' in data[0]);
-                console.log('Has test_count:', 'test_count' in data[0]);
+                log('First dataset structure:', JSON.stringify(data[0], null, 2));
+                log('Has train_count:', 'train_count' in data[0]);
+                log('Has val_count:', 'val_count' in data[0]);
+                log('Has test_count:', 'test_count' in data[0]);
             }
         })
         .catch(error => {
-            console.error('Datasets API error:', error);
+            error('Datasets API error:', error);
         });
 
     // 测试本地目录API
     fetch(`${API_URL}/datasets/local-available`)
         .then(response => {
-            console.log('Local directories API status:', response.status);
+            log('Local directories API status:', response.status);
             return response.json();
         })
         .then(data => {
-            console.log('Local directories API response:', data);
+            log('Local directories API response:', data);
         })
         .catch(error => {
-            console.error('Local directories API error:', error);
+            error('Local directories API error:', error);
         });
 }
 
 // 页面加载完成后执行
 document.addEventListener('DOMContentLoaded', function() {
+    // 加载DEBUG模式设置
+    loadDebugMode();
+    
     // 初始化Bootstrap模态框
     try {
         if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
             modal = new bootstrap.Modal(document.getElementById('mainModal'));
-            console.log('Bootstrap模态框初始化成功');
+            log('Bootstrap模态框初始化成功');
         } else {
-            console.warn('Bootstrap未加载，跳过模态框初始化');
+            warn('Bootstrap未加载，跳过模态框初始化');
             // 创建一个空对象，避免后续代码出错
             modal = {
-                show: function() { console.warn('模态框功能不可用'); },
-                hide: function() { console.warn('模态框功能不可用'); }
+                show: function() { warn('模态框功能不可用'); },
+                hide: function() { warn('模态框功能不可用'); }
             };
         }
     } catch (error) {
-        console.error('初始化Bootstrap模态框失败:', error);
+        error('初始化Bootstrap模态框失败:', error);
         // 创建一个空对象，避免后续代码出错
         modal = {
-            show: function() { console.warn('模态框功能不可用'); },
-            hide: function() { console.warn('模态框功能不可用'); }
+            show: function() { warn('模态框功能不可用'); },
+            hide: function() { warn('模态框功能不可用'); }
         };
     }
 
@@ -150,18 +189,23 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 默认加载数据集页面
     loadPage('datasets');
+    
+    // 获取后端DEBUG模式状态
+    getBackendDebugMode();
+
+    // 已在导航栏中配置为data-page="settings"，由loadPage处理
 
     // 添加调试代码 - 5秒后检查COCO按钮是否存在并强制绑定事件
     setTimeout(function() {
-        console.log('DEBUG: 检查COCO按钮并强制绑定事件');
+        log('DEBUG: 检查COCO按钮并强制绑定事件');
         const cocoButton = document.getElementById('import-coco-dataset-btn');
         if (cocoButton) {
-            console.log('DEBUG: 找到COCO按钮:', cocoButton);
-            console.log('DEBUG: COCO按钮当前onclick:', cocoButton.onclick);
+            log('DEBUG: 找到COCO按钮:', cocoButton);
+            log('DEBUG: COCO按钮当前onclick:', cocoButton.onclick);
 
             // 直接绑定全局函数
             window.showCocoModal = function() {
-                console.log('DEBUG: 通过全局函数调用showImportCocoDatasetModal');
+                log('DEBUG: 通过全局函数调用showImportCocoDatasetModal');
                 showImportCocoDatasetModal();
                 return false;
             };
@@ -172,9 +216,9 @@ document.addEventListener('DOMContentLoaded', function() {
             // 添加内联事件处理
             cocoButton.setAttribute('onclick', 'return window.showCocoModal();');
 
-            console.log('DEBUG: COCO按钮事件已强制重新绑定');
+            log('DEBUG: COCO按钮事件已强制重新绑定');
         } else {
-            console.error('DEBUG: 5秒后仍未找到COCO按钮');
+            error('DEBUG: 5秒后仍未找到COCO按钮');
         }
     }, 5000);
 });
@@ -183,7 +227,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // 加载标注页面
 function loadAnnotationPage() {
-    console.log('Loading annotation page...');
+    log('Loading annotation page...');
     loadAnnotationProjects();
 }
 
@@ -193,6 +237,31 @@ function bindAnnotationEvents() {
     const createProjectBtn = document.getElementById('create-annotation-project-btn');
     if (createProjectBtn) {
         createProjectBtn.addEventListener('click', showCreateAnnotationProjectModal);
+    }
+}
+
+// 从后端获取DEBUG模式状态
+function getBackendDebugMode() {
+    if (DEBUG_MODE) {
+        fetch(`${API_URL}/settings/debug-mode`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    log(`后端DEBUG模式状态: ${data.debug_mode}`);
+                }
+            })
+            .catch(err => {
+                error('获取后端DEBUG模式状态失败:', err);
+            });
+    }
+}
+
+// 加载设置页面
+function loadSettingsPage() {
+    // 设置当前DEBUG模式状态
+    const debugModeToggle = document.getElementById('debugModeToggle');
+    if (debugModeToggle) {
+        debugModeToggle.checked = DEBUG_MODE;
     }
 }
 
@@ -573,6 +642,45 @@ function loadPage(page) {
             loadAnnotationPage();
             bindAnnotationEvents();
             break;
+        case 'settings':
+            loadSettingsPage();
+            bindSettingsEvents();
+            break;
+    }
+}
+
+// ==================== 设置页面 ====================
+
+// 绑定设置页面事件
+function bindSettingsEvents() {
+    // 保存设置按钮事件
+    const saveBtn = document.getElementById('saveSettingsBtn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', function() {
+            const debugModeToggle = document.getElementById('debugModeToggle');
+            if (debugModeToggle) {
+                const newDebugMode = debugModeToggle.checked;
+                saveDebugMode(newDebugMode);
+                
+                // 显示保存成功消息
+                showSettingsSaveMessage(`DEBUG模式已${newDebugMode ? '启用' : '禁用'}`);
+            }
+        });
+    }
+}
+
+// 显示设置保存消息
+function showSettingsSaveMessage(message) {
+    const messageElement = document.getElementById('settings-save-message');
+    if (messageElement) {
+        messageElement.textContent = message;
+        messageElement.className = 'mt-2 alert alert-success';
+        messageElement.style.display = 'block';
+        
+        // 3秒后隐藏消息
+        setTimeout(function() {
+            messageElement.style.display = 'none';
+        }, 3000);
     }
 }
 
@@ -3277,8 +3385,17 @@ function loadModels() {
                     <td>${getTaskText(model.task)}</td>
                     <td>${getSourceText(model.source)}</td>
                     <td>${new Date(model.created_at).toLocaleString()}</td>
+                    <td style="display: none;">${model.path}</td><!-- 路径列默认隐藏，可通过DEBUG模式开启显示 -->
                     <td>
-                        <button class="btn btn-sm btn-danger delete-model" data-id="${model.id}">删除</button>
+                        <div class="btn-group" role="group">
+                            <button class="btn btn-sm btn-primary download-model-pt" data-id="${model.id}" title="下载PT格式模型">
+                                <i class="bi bi-download"></i> PT
+                            </button>
+                            <button class="btn btn-sm btn-secondary download-model-onnx" data-id="${model.id}" title="转换并下载ONNX格式模型">
+                                <i class="bi bi-exchange"></i> ONNX
+                            </button>
+                            <button class="btn btn-sm btn-danger delete-model" data-id="${model.id}">删除</button>
+                        </div>
                     </td>
                 `;
                 tableBody.appendChild(row);
@@ -3289,6 +3406,37 @@ function loadModels() {
                 button.addEventListener('click', function() {
                     const modelId = this.getAttribute('data-id');
                     deleteModel(modelId);
+                });
+            });
+
+            // 绑定PT模型下载按钮事件
+            document.querySelectorAll('.download-model-pt').forEach(button => {
+                button.addEventListener('click', function() {
+                    const modelId = this.getAttribute('data-id');
+                    const downloadUrl = `${API_URL}/models/${modelId}/download/pt`;
+                    console.log('PT模型下载URL:', downloadUrl);
+                    window.location.href = downloadUrl;
+                });
+            });
+
+            // 绑定ONNX模型下载按钮事件
+            document.querySelectorAll('.download-model-onnx').forEach(button => {
+                button.addEventListener('click', function() {
+                    const modelId = this.getAttribute('data-id');
+                    const downloadUrl = `${API_URL}/models/${modelId}/download/onnx`;
+                    console.log('ONNX模型下载URL:', downloadUrl);
+                    // 显示加载指示器
+                    this.innerHTML = '<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm"></i> 转换中...';
+                    this.disabled = true;
+                    
+                    // 开始下载
+                    window.location.href = downloadUrl;
+                    
+                    // 设置一个超时，恢复按钮状态（即使下载中断）
+                    setTimeout(() => {
+                        this.innerHTML = '<i class="bi bi-exchange"></i> ONNX';
+                        this.disabled = false;
+                    }, 30000); // 30秒超时
                 });
             });
         })
@@ -3303,6 +3451,110 @@ function bindModelEvents() {
     const addButton = document.getElementById('add-model-btn');
     if (addButton) {
         addButton.addEventListener('click', showAddModelModal);
+    }
+    
+    const loadDefaultModelsButton = document.getElementById('load-default-models-btn');
+    if (loadDefaultModelsButton) {
+        loadDefaultModelsButton.addEventListener('click', loadDefaultModels);
+    }
+}
+
+// 加载预置模型
+function loadDefaultModels() {
+    if (confirm('确定要加载预置模型吗？这将会导入models目录和项目根目录下的.pt模型文件到系统中。\n注意：已存在的模型将被跳过。')) {
+        // 显示加载中提示
+        showLoadingOverlay('正在加载预置模型，请稍候...');
+        
+        fetch(`${API_URL}/models/import-default`, {
+            method: 'POST'
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => {
+                    throw new Error(err.detail || '加载预置模型失败');
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            // 隐藏加载中提示
+            hideLoadingOverlay();
+            
+            // 显示成功消息
+            if (data.success) {
+                const message = `加载预置模型成功！\n共找到 ${data.total} 个模型文件，导入了 ${data.imported} 个新模型。`;
+                alert(message);
+                // 重新加载模型列表
+                loadModels();
+            } else {
+                alert('加载预置模型失败：' + (data.message || '未知错误'));
+            }
+        })
+        .catch(error => {
+            // 隐藏加载中提示
+            hideLoadingOverlay();
+            alert('加载预置模型失败：' + error.message);
+        });
+    }
+}
+
+// 显示加载中覆盖层
+function showLoadingOverlay(message) {
+    // 检查是否已存在加载覆盖层
+    let overlay = document.getElementById('loading-overlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'loading-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            flex-direction: column;
+        `;
+        
+        const spinner = document.createElement('div');
+        spinner.className = 'spinner-border text-primary';
+        spinner.style.width = '3rem';
+        spinner.style.height = '3rem';
+        spinner.role = 'status';
+        
+        const span = document.createElement('span');
+        span.className = 'sr-only';
+        span.textContent = '加载中...';
+        
+        const text = document.createElement('div');
+        text.id = 'loading-text';
+        text.style.color = 'white';
+        text.style.marginTop = '1rem';
+        text.style.fontSize = '1.2rem';
+        
+        spinner.appendChild(span);
+        overlay.appendChild(spinner);
+        overlay.appendChild(text);
+        document.body.appendChild(overlay);
+    }
+    
+    // 设置加载文本
+    const loadingText = document.getElementById('loading-text');
+    if (loadingText) {
+        loadingText.textContent = message || '加载中...';
+    }
+    
+    overlay.style.display = 'flex';
+}
+
+// 隐藏加载中覆盖层
+function hideLoadingOverlay() {
+    const overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+        overlay.style.display = 'none';
     }
 }
 
@@ -3472,6 +3724,13 @@ function loadTrainingTasks() {
         .then(response => response.json())
         .then(tasks => {
             const tableBody = document.getElementById('training-table-body');
+            
+            // 检查元素是否存在，避免在不相关页面调用时出错
+            if (!tableBody) {
+                console.log('训练任务表格元素不存在，跳过更新');
+                return;
+            }
+            
             tableBody.innerHTML = '';
 
             if (tasks.length === 0) {
@@ -3560,8 +3819,33 @@ function loadTrainingTasks() {
         });
 }
 
+// 训练任务列表的自动刷新定时器
+let trainingTasksRefreshInterval = null;
+
+// 启动训练任务列表的自动刷新
+function startTrainingTasksAutoRefresh() {
+    // 清除已有定时器
+    if (trainingTasksRefreshInterval) {
+        clearInterval(trainingTasksRefreshInterval);
+    }
+    
+    // 每10秒自动刷新一次
+    trainingTasksRefreshInterval = setInterval(loadTrainingTasks, 10000);
+}
+
+// 停止训练任务列表的自动刷新
+function stopTrainingTasksAutoRefresh() {
+    if (trainingTasksRefreshInterval) {
+        clearInterval(trainingTasksRefreshInterval);
+        trainingTasksRefreshInterval = null;
+    }
+}
+
 // 绑定训练页面事件
 function bindTrainingEvents() {
+    // 启动自动刷新
+    startTrainingTasksAutoRefresh();
+    
     const addButton = document.getElementById('add-training-btn');
     if (addButton) {
         addButton.addEventListener('click', showAddTrainingModal);
@@ -5345,9 +5629,11 @@ function getStatusText(status) {
         case 'error':
             return '错误';
         case 'pending':
-            return '等待中';
+            return '未训练';
         case 'running':
             return '运行中';
+        case 'training':
+            return '训练中';
         case 'completed':
             return '已完成';
         case 'failed':
@@ -5372,6 +5658,7 @@ function getStatusBadgeClass(status) {
         case 'failed':
             return 'bg-danger';
         case 'running':
+        case 'training':
             return 'bg-primary';
         case 'cancelled':
             return 'bg-secondary';
@@ -6889,7 +7176,10 @@ function bindVideoEventHandlers() {
                     }
                 })
                 .catch(error => {
-                    console.error('获取摄像头列表失败:', error);
+                    // 仅在DEBUG模式启用且当前页面需要摄像头功能时才显示错误日志
+                    if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE && typeof currentPage !== 'undefined' && currentPage === 'video') {
+                        console.error('获取摄像头列表失败:', error);
+                    }
                     webcamSelect.innerHTML = '<option value="">\u83b7\u53d6\u6444\u50cf\u5934\u5931\u8d25</option>';
 
                     // 添加一个默认选项，即使获取失败也可以尝试使用默认摄像头

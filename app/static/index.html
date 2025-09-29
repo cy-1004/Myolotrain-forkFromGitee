@@ -40,6 +40,11 @@
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-page="video">视频处理</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="settings">
+                            <i class="bi bi-gear"></i> 设置
+                        </a>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -72,6 +77,46 @@
             </div>
         </div>
     </div>
+
+    <!-- 设置页面模板 -->
+    <template id="settings-template">
+        <div class="row mb-4">
+            <div class="col">
+                <div class="card">
+                    <div class="card-header">
+                        <h4><i class="bi bi-gear"></i> 系统设置</h4>
+                    </div>
+                    <div class="card-body">
+                        
+                        <!-- 调试设置部分 -->
+                        <div class="mb-5">
+                            <h5 class="mb-3">调试设置</h5>
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" id="debugModeToggle">
+                                <label class="form-check-label" for="debugModeToggle">启用调试模式</label>
+                            </div>
+                            <p class="text-muted small">
+                                启用调试模式后，浏览器控制台将显示更多详细信息，有助于排查问题。
+                                在生产环境中建议关闭此选项以获得更好的性能。
+                            </p>
+                        </div>
+                        
+                        <!-- 更多设置可以在这里添加 -->
+                        <div class="mb-5">
+                            <h5 class="mb-3">其他设置</h5>
+                            <p class="text-muted">后续将添加更多设置选项</p>
+                        </div>
+                        
+                        <!-- 保存按钮 -->
+                        <div class="mt-4">
+                            <button type="button" class="btn btn-primary" id="saveSettingsBtn">保存设置</button>
+                            <div id="settings-save-message" class="mt-2" style="display: none;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
 
     <!-- 页面模板 -->
     <!-- 数据集管理页面 -->
@@ -122,7 +167,10 @@
                 <h2>模型管理</h2>
             </div>
             <div class="col-auto">
-                <button class="btn btn-primary" id="add-model-btn">添加模型</button>
+                <div class="btn-group" role="group">
+                    <button class="btn btn-primary" id="add-model-btn">添加模型</button>
+                    <button class="btn btn-success" id="load-default-models-btn">加载预置模型</button>
+                </div>
             </div>
         </div>
         <div class="table-responsive">
@@ -135,6 +183,7 @@
                         <th>任务</th>
                         <th>来源</th>
                         <th>创建时间</th>
+                        <th style="display: none;">路径</th><!-- 路径列默认隐藏，可通过DEBUG模式开启显示 -->
                         <th>操作</th>
                     </tr>
                 </thead>

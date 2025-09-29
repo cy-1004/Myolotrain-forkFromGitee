@@ -46,5 +46,9 @@ pydantic-settings>=2.0.0
 # File handling
 aiofiles>=23.0
 
+# ONNX support
+onnx>=1.16.0
+onnxruntime>=1.18.0
+
 
 

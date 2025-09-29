@@ -1084,9 +1084,10 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
         output_dir_abs,
         model_file_abs
     )
-    # 修改脚本内容，添加resume=True参数
+    # 修改脚本内容，添加resume=True参数和device参数
+    device_param = 'cpu'  # 默认使用CPU以避免CUDA相关问题
     script_content = script_content.replace("'workers': 0,  # 禁用多进程数据加载，避免多进程问题", "'workers': 0,  # 禁用多进程数据加载，避免多进程问题")
-    script_content = script_content.replace("'amp': False  # 禁用自动混合精度，避免下载额外模型", "'amp': False,  # 禁用自动混合精度，避免下载额外模型\n            'resume': True  # 启用恢复训练")
+    script_content = script_content.replace("'amp': False  # 禁用自动混合精度，避免下载额外模型", "'amp': False,  # 禁用自动混合精度，避免下载额外模型\n            'resume': True,  # 启用恢复训练\n            'device': '" + device_param + "'  # 明确指定使用的设备，避免CUDA相关问题")
     # 修改双花括号为单花括号，因为在这里我们不需要转义
     script_content = script_content.replace("train_args = {{", "train_args = {")
     script_content = script_content.replace("}}", "}")
@@ -1227,29 +1228,11 @@ def get_training_logs(db: Session, task_id: str) -> Dict[str, Any]:
     else:
         # 读取日志文件
         try:
-            # 尝试使用utf-8-sig编码读取，这样可以正确处理BOM
-            with open(log_path, "r", encoding="utf-8-sig", errors="replace") as f:
-                log_output = f.read()
+            # 使用编码工具读取日志文件，支持跨平台编码兼容性
+            from app.utils.encoding_utils import read_log_with_auto_encoding
+            log_output = read_log_with_auto_encoding(log_path)
         except Exception as e:
-            # 如果出错，尝试使用其他编码
-            try:
-                with open(log_path, "r", encoding="gbk", errors="replace") as f:
-                    log_output = f.read()
-            except Exception:
-                try:
-                    with open(log_path, "rb") as f:
-                        # 二进制读取并尝试不同编码
-                        content = f.read()
-                        for encoding in ['utf-8-sig', 'utf-8', 'gbk', 'gb2312', 'ascii']:
-                            try:
-                                log_output = content.decode(encoding)
-                                break
-                            except:
-                                continue
-                        else:
-                            log_output = content.decode('utf-8', errors='replace')
-                except Exception as e3:
-                    log_output = f"读取日志文件时出错 {e3}"
+            log_output = f"读取日志文件时出错: {e}"
 
     # 检查训练脚本输出（作为备用）
     script_path = tensorboard_dir / "train_script.py"

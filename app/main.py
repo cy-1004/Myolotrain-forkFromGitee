@@ -14,11 +14,13 @@ from app.services.upload_service import start_cleanup
 from app.patches.torch_load_patch import apply_patch
 
 # 配置日志
+logging_level = logging.DEBUG if settings.DEBUG else logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging_level,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+logger.info(f"应用启动模式: {'DEBUG' if settings.DEBUG else 'PRODUCTION'}")
 
 # 检查必要的目录
 import os

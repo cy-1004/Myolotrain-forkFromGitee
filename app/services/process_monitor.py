@@ -64,11 +64,78 @@ class ProcessMonitor:
 
                                 if status == "completed":
                                     # 日志中发现成功标记，训练成功
-                                    training_task.update(db, db_obj=task, obj_in={
-                                        "status": "completed",
-                                        "end_time": datetime.datetime.now()
-                                    })
-                                    print(f"训练任务 {task.id} 已完成")
+                                    print(f"训练任务 {task.id} 已完成，正在注册输出模型")
+                                    
+                                    # 查找并注册输出模型
+                                    try:
+                                        # 获取输出目录
+                                        output_dir = task.parameters.get("output_dir") if task.parameters else None
+                                        if output_dir:
+                                            # 查找最佳模型文件
+                                            best_model_path = None
+                                            possible_weights_paths = [
+                                                os.path.join(output_dir, "exp", "weights", "best.pt"),  # 标准路径
+                                                os.path.join(output_dir, "weights", "best.pt"),          # 另一种可能的路径
+                                                os.path.join(output_dir, "best.pt")                        # 直接在输出目录下
+                                            ]
+
+                                            # 尝试每个可能的路径
+                                            for model_path in possible_weights_paths:
+                                                if os.path.exists(model_path):
+                                                    best_model_path = model_path
+                                                    print(f"找到最佳模型文件: {best_model_path}")
+                                                    break
+
+                                            # 如果找到模型文件，注册到数据库
+                                            if best_model_path:
+                                                # 导入必要的模块
+                                                from app.crud import model
+                                                from app.schemas.model import ModelCreate
+                                                
+                                                # 获取模型名称和类型
+                                                model_name = f"{task.name}_best"
+                                                model_filename = os.path.basename(best_model_path)
+                                                
+                                                # 确定模型类型和任务类型
+                                                model_type = "yolov8"  # 默认为yolov8
+                                                model_task = "detection"  # 默认为检测任务
+                                                
+                                                # 创建模型记录
+                                                model_in = ModelCreate(
+                                                    name=model_name,
+                                                    description=f"{task.name} 训练生成的最佳模型",
+                                                    type=model_type,
+                                                    task=model_task,
+                                                    path=best_model_path,
+                                                    source="training"
+                                                )
+                                                
+                                                # 添加到数据库
+                                                db_model = model.create(db, obj_in=model_in)
+                                                print(f"成功注册模型: {model_name} (ID: {db_model.id})")
+                                                
+                                                # 更新训练任务，关联输出模型
+                                                training_task.update(db, db_obj=task, obj_in={
+                                                    "status": "completed",
+                                                    "end_time": datetime.datetime.now(),
+                                                    "output_model_id": db_model.id
+                                                })
+                                            else:
+                                                print(f"警告: 未找到训练输出的模型文件")
+                                                # 即使没有找到模型文件，也更新任务状态
+                                                training_task.update(db, db_obj=task, obj_in={
+                                                    "status": "completed",
+                                                    "end_time": datetime.datetime.now()
+                                                })
+                                    except Exception as e:
+                                        print(f"注册输出模型时出错: {e}")
+                                        # 即使注册模型失败，也更新任务状态
+                                        training_task.update(db, db_obj=task, obj_in={
+                                            "status": "completed",
+                                            "end_time": datetime.datetime.now()
+                                        })
+                                    
+                                    print(f"训练任务 {task.id} 处理完成")
                                 elif status == "failed":
                                     # 日志中发现失败标记，训练失败
                                     training_task.update(db, db_obj=task, obj_in={
@@ -126,17 +193,9 @@ class ProcessMonitor:
             return "unknown"
 
         try:
-            # 尝试使用不同编码读取日志文件
-            try:
-                with open(log_path, "r", encoding="utf-8-sig", errors="replace") as f:
-                    log_content = f.read()
-            except:
-                try:
-                    with open(log_path, "r", encoding="gbk", errors="replace") as f:
-                        log_content = f.read()
-                except:
-                    with open(log_path, "rb") as f:
-                        log_content = f.read().decode("utf-8", errors="replace")
+            # 使用编码工具读取日志文件，支持跨平台编码兼容性
+            from app.utils.encoding_utils import read_log_with_auto_encoding
+            log_content = read_log_with_auto_encoding(log_path)
 
             # 检查成功标记
             success_markers = [
@@ -145,7 +204,9 @@ class ProcessMonitor:
                 "Training completed",
                 "training completed",
                 "Results saved to",
-                "results saved to"
+                "results saved to",
+                "results_dict",  # 新增：训练结果字典输出
+                "save_dir"        # 新增：保存目录输出
             ]
             for marker in success_markers:
                 if marker in log_content:

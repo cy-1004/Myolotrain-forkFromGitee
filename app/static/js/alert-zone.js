@@ -27,7 +27,14 @@ document.addEventListener('DOMContentLoaded', function() {
             startDrawingZone();
         });
     } else {
-        console.error('未找到绘制区域按钮');
+        // 只在DEBUG模式下显示错误日志，并且当前页面需要报警区域功能
+        // 检查是否存在全局DEBUG_MODE变量和currentPage变量
+        if (typeof DEBUG_MODE !== 'undefined' && DEBUG_MODE) {
+            // 假设需要报警区域功能的页面是'detection'或'streaming'等
+            if (typeof currentPage !== 'undefined' && (currentPage === 'detection' || currentPage === 'streaming')) {
+                console.error('未找到绘制区域按钮');
+            }
+        }
     }
 
     // 获取清除区域按钮

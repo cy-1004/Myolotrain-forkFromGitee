@@ -8,6 +8,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     PROJECT_NAME: str = "YOLOv8 Training Platform"
     API_V1_STR: str = "/api/v1"
+    DEBUG: bool = False  # 全局DEBUG模式开关
 
     # Database
     POSTGRES_SERVER: str = "localhost"  # 本地环境使用 localhost
