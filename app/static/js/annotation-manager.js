@@ -113,11 +113,40 @@ class AnnotationManager {
             // 更新进度
             await this.updateProgress();
             
+            // 更新项目状态显示
+            this.updateProjectStatus();
+            
             this.updateStatus(`已加载项目: ${this.currentProject.name}`);
         } catch (error) {
             console.error('加载项目失败:', error);
             this.showError('加载项目失败');
         }
+    }
+    
+    // 更新项目状态显示
+    updateProjectStatus() {
+        if (!this.currentProject) return;
+        
+        const statusElement = document.getElementById('projectStatus');
+        if (!statusElement) return;
+        
+        // 根据项目完成状态设置状态标签
+        let statusClass = 'bg-secondary';
+        let statusText = '未开始';
+        
+        // 检查是否有已完成的图片
+        const completedImages = this.images.filter(img => img.is_completed);
+        
+        if (completedImages.length === this.images.length) {
+            statusClass = 'bg-success';
+            statusText = '已完成';
+        } else if (completedImages.length > 0) {
+            statusClass = 'bg-warning';
+            statusText = '进行中';
+        }
+        
+        statusElement.className = `badge ${statusClass}`;
+        statusElement.textContent = statusText;
     }
     
     updateClassSelect() {
@@ -151,13 +180,13 @@ class AnnotationManager {
             const badgeSpan = document.createElement('span');
             if (image.is_completed) {
                 badgeSpan.className = 'badge bg-success';
-                badgeSpan.textContent = '✓';
+                badgeSpan.textContent = '已完成';
             } else if (image.annotations && image.annotations.length > 0) {
                 badgeSpan.className = 'badge bg-warning';
-                badgeSpan.textContent = image.annotations.length;
+                badgeSpan.textContent = `部分标注(${image.annotations.length})`;
             } else {
                 badgeSpan.className = 'badge bg-secondary';
-                badgeSpan.textContent = '';
+                badgeSpan.textContent = '未标注';
             }
             
             item.appendChild(nameSpan);
@@ -237,8 +266,46 @@ class AnnotationManager {
             const stats = await response.json();
             
             const progressBar = document.getElementById('progressBar');
+            const progressContainer = document.getElementById('progressContainer');
+            const progressText = document.getElementById('progressText');
+            
+            // 更新进度条宽度和文本
             progressBar.style.width = `${stats.progress_percentage}%`;
-            progressBar.textContent = `${stats.progress_percentage}%`;
+            
+            // 添加进度文本元素（如果不存在）
+            if (!progressText) {
+                const textElement = document.createElement('div');
+                textElement.id = 'progressText';
+                textElement.className = 'progress-text';
+                textElement.style.position = 'absolute';
+                textElement.style.top = '45%';  // 稍微向上调整位置
+                textElement.style.left = '50%';
+                textElement.style.transform = 'translate(-50%, -50%)';
+                textElement.style.fontWeight = 'bold';
+                textElement.style.textShadow = '0 0 2px rgba(0,0,0,0.5)';
+                textElement.style.zIndex = '10';
+                progressContainer.appendChild(textElement);
+            }
+            
+            // 更新进度文本
+            document.getElementById('progressText').textContent = `${stats.progress_percentage}%`;
+            
+            // 设置进度条容器样式，确保对齐
+            if (progressContainer) {
+                progressContainer.style.position = 'relative';
+                progressContainer.style.margin = '0';
+                progressContainer.style.padding = '0';
+                progressContainer.style.height = '24px';  // 固定高度
+                progressContainer.style.overflow = 'hidden';
+            }
+            
+            // 设置进度条样式
+            progressBar.style.display = 'flex';
+            progressBar.style.alignItems = 'center';
+            progressBar.style.justifyContent = 'center';
+            progressBar.style.color = 'white';
+            progressBar.style.overflow = 'visible';
+            progressBar.style.height = '100%';  // 充满容器高度
         } catch (error) {
             console.error('更新进度失败:', error);
         }

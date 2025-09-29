@@ -47,6 +47,7 @@ class AnnotationTool {
         document.getElementById('zoom-reset').addEventListener('click', this.resetZoom.bind(this));
         document.getElementById('ai-auto-annotate').addEventListener('click', this.showAutoAnnotateModal.bind(this));
         document.getElementById('stop-auto-annotate').addEventListener('click', this.stopAutoAnnotate.bind(this));
+        document.getElementById('delete-image').addEventListener('click', this.deleteCurrentImage.bind(this));
         
         // 键盘快捷键 - 确保事件能够正确捕获
         document.addEventListener('keydown', this.handleKeyboard.bind(this), true);
@@ -81,9 +82,51 @@ class AnnotationTool {
             await this.loadProjectStats();
             await this.loadAvailableModels();
             
+            // 验证并修复标注状态
+            this.verifyAndFixAnnotationStatus();
+            
         } catch (error) {
             console.error('加载项目失败:', error);
             alert('加载项目失败');
+        }
+    }
+    
+    // 验证并修复标注状态：确保无标注的图片不会显示为已完成
+    async verifyAndFixAnnotationStatus() {
+        try {
+            const imagesToFix = [];
+            
+            // 检查所有图片的状态
+            this.imageList.forEach(imageData => {
+                if (imageData.is_completed && (!imageData.annotations || imageData.annotations.length === 0)) {
+                    imagesToFix.push(imageData.id);
+                }
+            });
+            
+            if (imagesToFix.length > 0) {
+                // 一次性修复所有有问题的图片
+                const response = await fetch(`/api/annotation/projects/${this.projectId}/fix-annotation-status`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ image_ids: imagesToFix })
+                });
+                
+                if (response.ok) {
+                    // 更新本地数据
+                    this.imageList.forEach(imageData => {
+                        if (imagesToFix.includes(imageData.id)) {
+                            imageData.is_completed = false;
+                        }
+                    });
+                    this.updateImageList();
+                    await this.loadProjectStats();
+                    console.log(`已自动修复 ${imagesToFix.length} 张图片的标注状态`);
+                }
+            }
+        } catch (error) {
+            console.error('验证并修复标注状态失败:', error);
         }
     }
     
@@ -112,6 +155,54 @@ class AnnotationTool {
         // 默认选择第一个类别
         if (this.projectData.classes.length > 0) {
             this.selectClass(0, this.projectData.classes[0]);
+        }
+    }
+    
+    // 删除当前选中的图片
+    async deleteCurrentImage() {
+        if (!this.currentImageData) return;
+        
+        if (!confirm(`确定要删除图片 "${this.currentImageData.image_name}" 吗？\n此操作不可恢复！`)) {
+            return;
+        }
+        
+        try {
+            const response = await fetch(`/api/annotation/images/${this.currentImageData.id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (response.ok) {
+                const currentIndex = this.currentImageIndex;
+                
+                // 从列表中移除
+                this.imageList.splice(currentIndex, 1);
+                
+                if (this.imageList.length > 0) {
+                    // 如果删除的是最后一张图片，则加载前一张；否则加载当前索引的图片
+                    const nextIndex = currentIndex >= this.imageList.length ? currentIndex - 1 : currentIndex;
+                    await this.loadImage(nextIndex);
+                } else {
+                    // 如果没有图片了，清空当前显示
+                    this.currentImage = null;
+                    this.currentImageData = null;
+                    this.annotations = [];
+                    document.getElementById('current-image-name').textContent = '没有图片';
+                    this.updateAnnotationList();
+                    this.redraw();
+                }
+                
+                this.updateImageList();
+                await this.loadProjectStats();
+                this.showMessage('图片删除成功', 'success');
+            } else {
+                this.showMessage('删除失败', 'error');
+            }
+        } catch (error) {
+            console.error('删除图片失败:', error);
+            this.showMessage('删除失败: ' + error.message, 'error');
         }
     }
     
@@ -167,8 +258,48 @@ class AnnotationTool {
     async loadImage(index) {
         if (index < 0 || index >= this.imageList.length) return;
         
+        // 保存上一张图片的数据引用
+        const previousImageData = this.currentImageData;
+        const previousImageIndex = this.currentImageIndex;
+        
+        // 更新当前图片索引和数据
         this.currentImageIndex = index;
         this.currentImageData = this.imageList[index];
+        
+        // 检查并自动标记上一张图片（如果有标注且未完成）
+        if (previousImageData && 
+            previousImageData.annotations && 
+            previousImageData.annotations.length > 0 && 
+            !previousImageData.is_completed) {
+            // 创建临时函数来标记上一张图片
+            const markPreviousCompleted = async () => {
+                try {
+                    const response = await fetch(`/api/annotation/images/${previousImageData.id}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            is_completed: true
+                        })
+                    });
+                    
+                    if (response.ok) {
+                        // 更新本地数据
+                        previousImageData.is_completed = true;
+                        if (this.imageList && this.imageList[previousImageIndex] !== undefined) {
+                            this.imageList[previousImageIndex].is_completed = true;
+                        }
+                        this.updateImageList();
+                    }
+                } catch (error) {
+                    console.error('自动标记完成失败:', error);
+                }
+            };
+            
+            // 这里不等待完成，避免影响用户体验
+            markPreviousCompleted();
+        }
         
         // 更新图片列表选中状态
         document.querySelectorAll('#image-list .annotation-item').forEach((item, i) => {
@@ -210,7 +341,9 @@ class AnnotationTool {
         
         this.canvas.width = width;
         this.canvas.height = height;
-        this.scale = width / this.currentImage.width;
+        // 重置缩放比例为1，使用CSS transform进行缩放
+        this.scale = 1;
+        this.canvas.style.transform = 'scale(1)';
     }
     
     loadAnnotations() {
@@ -397,6 +530,10 @@ class AnnotationTool {
             
             if (response.ok) {
                 this.currentImageData.is_completed = true;
+                // 同步更新imageList中的状态
+                if (this.imageList && this.imageList[this.currentImageIndex]) {
+                    this.imageList[this.currentImageIndex].is_completed = true;
+                }
                 this.updateImageList();
                 this.showMessage('标记完成成功', 'success');
                 await this.loadProjectStats();

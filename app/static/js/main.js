@@ -3394,6 +3394,9 @@ function loadModels() {
                             <button class="btn btn-sm btn-secondary download-model-onnx" data-id="${model.id}" title="转换并下载ONNX格式模型">
                                 <i class="bi bi-exchange"></i> ONNX
                             </button>
+                            <button class="btn btn-sm btn-warning release-model" data-id="${model.id}" title="释放模型以便删除">
+                                <i class="bi bi-unlink"></i> 释放
+                            </button>
                             <button class="btn btn-sm btn-danger delete-model" data-id="${model.id}">删除</button>
                         </div>
                     </td>
@@ -3406,6 +3409,14 @@ function loadModels() {
                 button.addEventListener('click', function() {
                     const modelId = this.getAttribute('data-id');
                     deleteModel(modelId);
+                });
+            });
+
+            // 绑定释放模型按钮事件
+            document.querySelectorAll('.release-model').forEach(button => {
+                button.addEventListener('click', function() {
+                    const modelId = this.getAttribute('data-id');
+                    releaseModel(modelId);
                 });
             });
 
@@ -3680,6 +3691,52 @@ function submitAddModel() {
     xhr.send(formData);
 }
 
+// 释放模型
+function releaseModel(modelId) {
+    if (!confirm('确定要释放这个模型吗？这将解除模型与所有检测任务的关联，使其可以被删除。')) {
+        return;
+    }
+
+    // 显示加载中提示
+    const originalText = this.innerHTML;
+    this.innerHTML = '<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm"></i> 处理中...';
+    this.disabled = true;
+    const self = this;
+
+    fetch(`${API_URL}/tools/release-model`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ model_id: modelId })
+    })
+    .then(response => {
+        if (!response.ok) {
+            return response.json().then(err => {
+                throw new Error(err.detail || '释放模型失败');
+            });
+        }
+        return response.json();
+    })
+    .then(data => {
+        // 恢复按钮状态
+        self.innerHTML = originalText;
+        self.disabled = false;
+        
+        if (data.success) {
+            alert('模型释放成功！现在可以删除该模型了。');
+        } else {
+            alert('释放模型失败：' + (data.message || '未知错误'));
+        }
+    })
+    .catch(error => {
+        // 恢复按钮状态
+        self.innerHTML = originalText;
+        self.disabled = false;
+        alert('释放模型失败：' + error.message);
+    });
+}
+
 // 删除模型
 function deleteModel(modelId) {
     if (!confirm('确定要删除这个模型吗？此操作不可恢复。')) {
@@ -3701,7 +3758,9 @@ function deleteModel(modelId) {
             });
         })
         .catch(error => {
-            console.error('Error deleting model:', error);
+            if (DEBUG_MODE) {
+                console.error('Error deleting model:', error);
+            }
 
             // 显示更友好的错误提示
             if (error.message.includes('being used by training tasks')) {
@@ -5640,6 +5699,10 @@ function getStatusText(status) {
             return '失败';
         case 'cancelled':
             return '已取消';
+        case 'active':
+            return '进行中';
+        case 'inactive':
+            return '已完成';
         default:
             return status;
     }
@@ -5653,12 +5716,14 @@ function getStatusBadgeClass(status) {
             return 'bg-warning';
         case 'available':
         case 'completed':
+        case 'inactive':
             return 'bg-success';
         case 'error':
         case 'failed':
             return 'bg-danger';
         case 'running':
         case 'training':
+        case 'active':
             return 'bg-primary';
         case 'cancelled':
             return 'bg-secondary';
@@ -5741,7 +5806,7 @@ function loadAnnotationProjects() {
                             <td>${project.classes.length}</td>
                             <td>${stats.total_images || 0}</td>
                             <td>${stats.completed_images || 0}</td>
-                            <td>
+                            <td style="padding-top: 2px;">
                                 <div class="progress" style="width: 100px;">
                                     <div class="progress-bar" role="progressbar" style="width: ${progressPercentage}%" aria-valuenow="${progressPercentage}" aria-valuemin="0" aria-valuemax="100">
                                         ${Math.round(progressPercentage)}%

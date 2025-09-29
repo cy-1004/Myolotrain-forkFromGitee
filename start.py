@@ -20,9 +20,7 @@ if __name__ == "__main__":
     # 确保在虚拟环境中运行
     if sys.prefix == sys.base_prefix:
         print("警告: 当前不在Python虚拟环境中运行")
-        response = input("是否继续? [y/n]: ")
-        if response.lower() not in ['y', 'yes']:
-            sys.exit(0)
+        print("继续运行应用程序...")
     
     # 启动应用
     start_app()

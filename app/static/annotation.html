@@ -33,9 +33,45 @@
         }
         .toolbar {
             background-color: #f8f9fa;
-            padding: 10px;
+            padding: 15px;
             border-radius: 8px;
             margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* 按钮组样式优化 */
+        .btn-group {
+            transition: all 0.2s ease;
+        }
+        
+        .btn-group:hover {
+            transform: translateY(-1px);
+        }
+        
+        /* 主操作按钮样式强化 */
+        .btn-primary, .btn-success {
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        /* 辅助操作按钮样式 */
+        .btn-info, .btn-warning {
+            box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+        }
+        
+        /* 危险操作按钮样式 */
+        .btn-danger {
+            box-shadow: 0 1px 3px rgba(220,53,69,0.3);
+        }
+        
+        /* 所有按钮添加悬停效果 */
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+        
+        /* 按钮点击效果 */
+        .btn:active {
+            transform: translateY(0);
         }
         .image-navigation {
             position: fixed;
@@ -110,6 +146,26 @@
                         </button>
                     </div>
                 </div>
+
+                <!-- 批量操作区域 -->
+                <div class="card mt-3">
+                    <div class="card-header">
+                        <h5><i class="fas fa-tasks"></i> 批量操作</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="btn-group-vertical w-100 gap-2">
+                            <button id="ai-auto-annotate" class="btn btn-warning">
+                                <i class="fas fa-robot"></i> AI自动标注
+                            </button>
+                            <button id="stop-auto-annotate" class="btn btn-danger" style="display: none;">
+                                <i class="fas fa-stop"></i> 停止标注
+                            </button>
+                            <button id="mark-all-completed" class="btn btn-primary">
+                                <i class="fas fa-check-double"></i> 一键全部完成
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- 中间图片区域 -->
@@ -120,21 +176,18 @@
                             <h4 id="current-image-name">请选择图片</h4>
                         </div>
                         <div class="col-md-6 text-end">
-                            <button id="ai-auto-annotate" class="btn btn-warning me-2">
-                                <i class="fas fa-robot"></i> AI自动标注
-                            </button>
-                            <button id="stop-auto-annotate" class="btn btn-danger me-2" style="display: none;">
-                                <i class="fas fa-stop"></i> 停止标注
-                            </button>
-                            <button id="save-annotation" class="btn btn-success">
-                                <i class="fas fa-save"></i> 保存标注
-                            </button>
-                            <button id="mark-completed" class="btn btn-info">
-                                <i class="fas fa-check"></i> 标记完成
-                            </button>
-                            <button id="mark-all-completed" class="btn btn-success">
-                                <i class="fas fa-check-double"></i> 一键全部完成
-                            </button>
+                            <!-- 当前图片操作按钮组 -->
+                            <div class="btn-group">
+                                <button id="save-annotation" class="btn btn-success me-2">
+                                    <i class="fas fa-save"></i> 保存标注
+                                </button>
+                                <button id="mark-completed" class="btn btn-info me-2">
+                                    <i class="fas fa-check"></i> 标记完成
+                                </button>
+                                <button id="delete-image" class="btn btn-danger">
+                                    <i class="fas fa-trash-alt"></i> 删除图片
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>

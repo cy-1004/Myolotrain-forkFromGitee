@@ -149,6 +149,18 @@ def update_image_annotation(
         raise HTTPException(status_code=404, detail="图片未找到")
     return image_annotation.update(db, db_obj=image, obj_in=annotation_update)
 
+@router.delete("/images/{image_id}")
+def delete_image_annotation(
+    image_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """删除图片"""
+    image = image_annotation.get(db, id=image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="图片未找到")
+    image_annotation.remove(db, id=image_id)
+    return {"message": "图片删除成功"}
+
 @router.post("/projects/{project_id}/export")
 def export_annotations(
     project_id: UUID,
