@@ -1,4 +1,4 @@
-FROM registry.cn-hangzhou.aliyuncs.com/library/python:3.9-slim
+FROM python:3.9-slim
 
 # 配置apt使用国内镜像源
 RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
