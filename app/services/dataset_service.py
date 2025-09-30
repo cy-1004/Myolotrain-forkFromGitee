@@ -605,9 +605,93 @@ async def create_dataset(
                     # 更新进度条
                     upload_manager.update_progress(file_id, int(file.size * (progress / 100)))
 
+ 
+        # --- 新增的核心逻辑：处理冗余的顶层目录 ---
+        print(f"Post-extraction check for redundant top-level directory in {dataset_dir}")
+
+        # 获取 dataset_dir 下的所有顶级条目
+        extracted_items_at_root = list(dataset_dir.iterdir())
+
+        # 过滤出可能是冗余目录的项：
+        # 1. 必须是目录
+        # 2. 不是预期的 'train', 'val', 'test' 目录名（这些是数据集的核心结构）
+        # 3. 排除 '__MACOSX' 这种操作系统生成的隐藏目录
+        potential_redundant_dirs = [
+            item for item in extracted_items_at_root
+            if item.is_dir()
+            and item.name not in ["train", "val", "test", "test_images", "train_images", "val_images"] # 额外排除一些常见的图片目录名
+            and item.name != "__MACOSX"
+            and not item.name.startswith(".") # 排除其他隐藏目录
+        ]
+
+        print(len(potential_redundant_dirs))
+        # 如果正好有一个潜在的冗余目录被检测到
+        if len(potential_redundant_dirs) == 1:
+            redundant_top_dir = potential_redundant_dirs[0]
+            print(f"Found a single potential redundant top-level directory: {redundant_top_dir.name}. Attempting to move its contents up.")
+
+            # 为了避免文件覆盖冲突（例如 dataset_dir 根部和 redundant_top_dir 内部都有 classes.txt）
+            # 我们先将 redundant_top_dir 中的内容移动到 dataset_dir 的临时子目录
+            # 然后清空 dataset_dir 根部，再将临时子目录内容移回 dataset_dir
+            # 这种方法更安全，确保嵌套层的数据优先
+            temp_move_dir = dataset_dir / f"temp_move_{uuid.uuid4().hex}"
+            os.makedirs(temp_move_dir)
+
+            # 将 redundant_top_dir 的所有内容移动到 temp_move_dir
+            for item_in_redundant in redundant_top_dir.iterdir():
+                try:
+                    shutil.move(str(item_in_redundant), str(temp_move_dir / item_in_redundant.name))
+                    print(f"Moved '{item_in_redundant.name}' from '{redundant_top_dir.name}' to temp.")
+                except Exception as e:
+                    print(f"Error moving '{item_in_redundant.name}' from redundant dir to temp: {e}")
+
+            # 删除空的冗余目录
+            try:
+                shutil.rmtree(redundant_top_dir)
+                print(f"Removed empty redundant directory: {redundant_top_dir.name}")
+            except Exception as e:
+                print(f"Warning: Could not remove redundant directory {redundant_top_dir}: {e}")
+
+            # 清空 dataset_dir 根部可能存在的旧文件和目录（除了 temp_move_dir）
+            for item in dataset_dir.iterdir():
+                if item != temp_move_dir:
+                    if item.is_file():
+                        try:
+                        	os.remove(item)
+                        	print(f"Removed old root file: {item.name}")
+                        except Exception as e:
+                            print(f"Warning: Could not remove old root file {item.name}: {e}")
+                    elif item.is_dir():
+                        try:
+                            shutil.rmtree(item)
+                            print(f"Removed old root directory: {item.name}")
+                        except Exception as e:
+                            print(f"Warning: Could not remove old root directory {item.name}: {e}")
+
+            # 将 temp_move_dir 中的内容移动回 dataset_dir 根部
+            for item_in_temp in temp_move_dir.iterdir():
+                try:
+                    shutil.move(str(item_in_temp), str(dataset_dir / item_in_temp.name))
+                    print(f"Moved '{item_in_temp.name}' from temp to dataset_dir root.")
+                except Exception as e:
+                    print(f"Error moving '{item_in_temp.name}' from temp to root: {e}")
+
+            # 删除临时目录
+            try:
+                shutil.rmtree(temp_move_dir)
+                print(f"Removed temporary directory: {temp_move_dir.name}")
+            except Exception as e:
+                print(f"Warning: Could not remove temporary directory {temp_move_dir}: {e}")
+
+        else:
+            print(f"No single redundant top-level directory detected after extraction. Extracted items at root: {[item.name for item in extracted_items_at_root]}")
+        # --- 核心逻辑结束 ---
+
+
         # 更新状态为验证数据集
         if file_id:
             upload_manager.set_validating(file_id)
+
 
         # 处理数据集中的文件名（重命名过长或包含特殊字符的文件）
         try:
