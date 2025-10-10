@@ -16,7 +16,7 @@ class AnnotationProjectBase(BaseModel):
     name: str
     description: Optional[str] = None
     classes: List[str]
-    image_directory: str
+    image_directory: Optional[str] = None
 
 class AnnotationProjectCreate(AnnotationProjectBase):
     dataset_id: Optional[UUID] = None

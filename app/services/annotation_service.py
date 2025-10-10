@@ -51,13 +51,24 @@ class AnnotationService:
             dataset_path = Path(db_dataset.path)
             image_directory = str(dataset_path / "train" / "images")
             
-            # 更新project_data中的image_directory
-            project_data.image_directory = image_directory
+            # 创建包含image_directory的新对象
+            project_data_dict = project_data.model_dump()
+            project_data_dict['image_directory'] = image_directory
             
             # 如果没有指定类别，使用数据集的类别
             if not project_data.classes:
-                project_data.classes = db_dataset.classes
+                project_data_dict['classes'] = db_dataset.classes
+                
+            # 创建项目数据对象
+            project_data_for_create = AnnotationProjectCreate(**project_data_dict)
         else:
+            # 检查是否提供了图片目录
+            if not project_data.image_directory:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Image directory is required when not associating with a dataset"
+                )
+            
             # 验证图片目录是否存在
             if not os.path.exists(project_data.image_directory):
                 raise HTTPException(
@@ -65,9 +76,10 @@ class AnnotationService:
                     detail="Image directory not found"
                 )
             image_directory = project_data.image_directory
+            project_data_for_create = project_data
 
         # 创建项目
-        project = annotation_project.create(db, obj_in=project_data)
+        project = annotation_project.create(db, obj_in=project_data_for_create)
         
         # 扫描图片目录，创建图片记录
         self._scan_images(db, project, image_directory)
