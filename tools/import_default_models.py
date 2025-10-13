@@ -80,10 +80,9 @@ def import_default_models():
     logger.info("开始导入默认模型...")
     
     # 要搜索的目录
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     search_dirs = [
-        os.path.dirname(os.path.abspath(__file__)),  # 项目根目录
-        os.path.join(os.path.dirname(os.path.abspath(__file__)), "models"),  # models目录
-        settings.MODELS_DIR  # 配置文件中定义的模型目录
+        os.path.join(project_root, "models")  # 仅搜索项目根目录下的models目录
     ]
     
     # 去重目录列表
