@@ -20,7 +20,12 @@ from app.schemas.training_task import TrainingTaskCreate, TrainingTaskUpdate
 from app.services.ascend_service import AscendDeviceManager
 
 # 设置TensorBoard为True
-subprocess.run(['yolo', 'settings', 'tensorboard=true'], check=True)
+# 使用Python解释器运行yolo模块，确保使用虚拟环境中的ultralytics
+try:
+    subprocess.run([sys.executable, '-m', 'ultralytics', 'settings', 'tensorboard=true'], check=True)
+except subprocess.CalledProcessError as e:
+    print(f"警告: 设置TensorBoard时出错: {e}")
+    # 继续执行，即使设置失败
 
 # 导入可能需要的PyTorch和Ultralytics模型类
 try:

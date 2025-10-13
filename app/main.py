@@ -1,10 +1,11 @@
 import logging
 import threading
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.exceptions import RequestValidationError
+from fastapi.security import OAuth2PasswordBearer
 
 from app.api.api import api_router
 from app.core.config import settings
@@ -13,7 +14,10 @@ from app.services.tensorboard_service import tensorboard_manager
 from app.services.upload_service import start_cleanup
 from app.patches.torch_load_patch import apply_patch
 
-# 配置日志
+# 导入认证相关模块
+from app.db.session import get_db
+from app.api.deps import get_current_user
+from app.models.user import User
 logging_level = logging.DEBUG if settings.DEBUG else logging.INFO
 logging.basicConfig(
     level=logging_level,
@@ -195,14 +199,47 @@ async def get_js(file_path: str):
     return RedirectResponse(url=f"/static/js/{file_path}")
 
 @app.get("/", response_class=HTMLResponse)
-async def root():
-    # 返回静态HTML文件
+async def root(request: Request):
+    # 检查请求头中是否有Authorization
+    auth_header = request.headers.get("Authorization")
+    if auth_header:
+        try:
+            # 尝试获取当前用户，如果成功则返回主页面
+            db = next(get_db())
+            user = get_current_user(db=db, token=auth_header.replace("Bearer ", ""))
+            if user:
+                with open("app/static/index.html", "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                return HTMLResponse(content=html_content)
+        except Exception:
+            # 认证失败，重定向到登录页面
+            pass
+    
+    # 检查Cookie中是否有token（备用认证方式）
+    cookies = request.cookies
+    if "access_token" in cookies:
+        try:
+            db = next(get_db())
+            user = get_current_user(db=db, token=cookies["access_token"])
+            if user:
+                with open("app/static/index.html", "r", encoding="utf-8") as f:
+                    html_content = f.read()
+                return HTMLResponse(content=html_content)
+        except Exception:
+            pass
+    
+    # 没有认证信息或认证失败，重定向到登录页面
+    return RedirectResponse(url="/login")
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    # 返回登录页面
     try:
-        with open("app/static/index.html", "r", encoding="utf-8") as f:
+        with open("app/static/login.html", "r", encoding="utf-8") as f:
             html_content = f.read()
         return HTMLResponse(content=html_content)
     except Exception as e:
-        logger.error(f"Error loading index.html: {e}")
-        return HTMLResponse(content="<h1>Error loading page</h1><p>Please check server logs.</p>", status_code=500)
+        logger.error(f"Error loading login.html: {e}")
+        return HTMLResponse(content="<h1>Error loading login page</h1><p>Please check server logs.</p>", status_code=500)
 
 

@@ -3,6 +3,256 @@ const API_URL = '/api';  // API路径
 let currentPage = '';
 let modal;
 let DEBUG_MODE = false;  // 全局DEBUG模式开关
+let currentUser = null; // 当前用户信息
+
+// 全局函数：直接加载用户管理页面
+window.goToUserManagement = function() {
+    console.log('尝试直接进入用户管理页面...');
+    if (currentUser && currentUser.role && currentUser.role.toLowerCase() === 'admin') {
+        loadPage('user-management');
+    } else {
+        alert('您需要管理员权限才能访问用户管理功能');
+    }
+};
+
+
+// 获取认证令牌
+function getAuthToken() {
+    const accessToken = localStorage.getItem('access_token');
+    const tokenType = localStorage.getItem('token_type') || 'bearer';
+    return accessToken ? `${tokenType} ${accessToken}` : null;
+}
+
+// 检查是否已登录
+function isLoggedIn() {
+    const accessToken = localStorage.getItem('access_token');
+    return !!accessToken;
+}
+
+// 退出登录
+function logout() {
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('token_type');
+    // 清除Cookie
+    document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    document.cookie = 'token_type=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+    window.location.href = '/login';
+}
+
+// 获取当前用户信息
+function getCurrentUser() {
+    console.log('获取当前用户信息...');
+    authenticatedFetch(`${API_URL}/auth/users/me`)
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            }
+            throw new Error('获取用户信息失败');
+        })
+        .then(user => {
+            console.log('用户信息:', user);
+            currentUser = user; // 保存当前用户信息
+            // 更新页面上的用户名显示
+            const usernameElement = document.getElementById('current-username');
+            if (usernameElement) {
+                usernameElement.textContent = user.username;
+            }
+            // 打印用户角色信息用于调试
+            console.log('当前用户角色:', user.role);
+            console.log('角色类型:', typeof user.role);
+            
+            // 根据后端模型，role字段是字符串类型
+            let isAdmin = false;
+            if (user.role) {
+                isAdmin = user.role.toLowerCase() === 'admin';
+            }
+            
+            console.log('是否管理员:', isAdmin);
+            
+            // 如果是管理员，显示用户管理菜单项
+            if (isAdmin) {
+                console.log('用户是管理员，准备显示用户管理菜单项');
+                
+                // 只保留右侧用户信息旁边的用户管理按钮
+                // 方案2: 添加到导航栏右侧的快捷访问按钮
+                if (!document.getElementById('admin-user-management-btn')) {
+                    // 找到用户下拉菜单区域
+                    const userDropdownParent = document.querySelector('.navbar-nav.ms-auto');
+                    if (userDropdownParent) {
+                        // 创建快捷访问按钮
+                        const adminBtnLi = document.createElement('li');
+                        adminBtnLi.className = 'nav-item';
+                        adminBtnLi.innerHTML = `
+                            <button id="admin-user-management-btn" class="nav-link btn btn-sm btn-outline-warning" onclick="loadPage('user-management')">
+                                <i class="bi bi-people"></i> 用户管理
+                            </button>
+                        `;
+                        userDropdownParent.insertBefore(adminBtnLi, userDropdownParent.firstChild);
+                        console.log('已添加用户管理快捷按钮');
+                    } else {
+                        // 备用方案：添加到导航栏末尾
+                        const navbar = document.querySelector('.navbar');
+                        if (navbar) {
+                            const adminBtn = document.createElement('button');
+                            adminBtn.id = 'admin-user-management-btn';
+                            adminBtn.className = 'btn btn-outline-warning me-3';
+                            adminBtn.innerHTML = '<i class="bi bi-people"></i> 用户管理';
+                            adminBtn.onclick = function() {
+                                loadPage('user-management');
+                            };
+                            navbar.appendChild(adminBtn);
+                            console.log('已添加备用用户管理按钮到导航栏');
+                        }
+                    }
+                }
+                
+                // 方案3: 确保通过window.goToUserManagement函数可以直接访问
+                window.goToUserManagement = function() {
+                    console.log('直接进入用户管理页面...');
+                    loadPage('user-management');
+                };
+                
+                // 方案4: 添加一个全局的用户管理入口提示
+                if (!document.getElementById('admin-notice')) {
+                    const adminNotice = document.createElement('div');
+                    adminNotice.id = 'admin-notice';
+                    adminNotice.className = 'admin-notice';
+                    adminNotice.style.display = 'none';
+                    adminNotice.innerHTML = `
+                        <div class="alert alert-info p-2 m-2">
+                            <a href="#" onclick="loadPage('user-management'); return false;">管理入口</a>
+                        </div>
+                    `;
+                    document.body.appendChild(adminNotice);
+                    console.log('已添加全局用户管理入口提示');
+                }
+            } else {
+                console.log('用户不是管理员，不显示用户管理菜单项');
+            }
+        })
+        .catch(error => {
+            console.error('获取用户信息失败:', error);
+            // 如果获取失败，可能是会话过期，重定向到登录页面
+            if (error.message === 'Not authenticated' || error.message.includes('401')) {
+                logout();
+            }
+        });
+}
+
+// 显示修改密码模态框
+function showChangePasswordModal() {
+    const modalTitle = document.querySelector('#mainModal .modal-title');
+    const modalBody = document.querySelector('#mainModal .modal-body');
+    const modalSubmit = document.getElementById('modalSubmit');
+    
+    modalTitle.textContent = '修改密码';
+    modalBody.innerHTML = `
+        <form id="change-password-form">
+            <div class="mb-3">
+                <label for="current-password" class="form-label">当前密码</label>
+                <input type="password" class="form-control" id="current-password" required>
+            </div>
+            <div class="mb-3">
+                <label for="new-password" class="form-label">新密码</label>
+                <input type="password" class="form-control" id="new-password" required minlength="6">
+                <div class="form-text">密码长度至少为6个字符</div>
+            </div>
+            <div class="mb-3">
+                <label for="confirm-password" class="form-label">确认新密码</label>
+                <input type="password" class="form-control" id="confirm-password" required>
+            </div>
+        </form>
+    `;
+    modalSubmit.textContent = '确认修改';
+    
+    // 绑定提交事件
+    modalSubmit.onclick = changePassword;
+    
+    // 显示模态框
+    modal.show();
+}
+
+// 修改密码
+function changePassword() {
+    const currentPassword = document.getElementById('current-password').value;
+    const newPassword = document.getElementById('new-password').value;
+    const confirmPassword = document.getElementById('confirm-password').value;
+    
+    // 表单验证
+    if (!currentPassword || !newPassword || !confirmPassword) {
+        alert('请填写所有字段');
+        return;
+    }
+    
+    if (newPassword.length < 6) {
+        alert('新密码长度至少为6个字符');
+        return;
+    }
+    
+    if (newPassword !== confirmPassword) {
+        alert('两次输入的新密码不一致');
+        return;
+    }
+    
+    // 构建请求体，使用新的API格式
+    const requestBody = {
+        current_password: currentPassword,
+        new_password: newPassword
+    };
+    
+    // 直接调用新的修改密码API端点
+    authenticatedFetch(`${API_URL}/auth/users/me/password`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => {
+        if (response.ok) {
+            return response.json();
+        } else if (response.status === 401) {
+            throw new Error('当前密码不正确');
+        }
+        throw new Error('密码修改失败');
+    })
+    .then(() => {
+        alert('密码修改成功，请重新登录');
+        modal.hide();
+        // 修改成功后强制退出登录
+        logout();
+    })
+    .catch(error => {
+        alert('错误: ' + error.message);
+        console.error('修改密码失败:', error);
+    });
+}
+
+// 带认证的fetch请求
+function authenticatedFetch(url, options = {}) {
+    // 添加认证头
+    const headers = options.headers || {};
+    const authToken = getAuthToken();
+    
+    if (authToken) {
+        headers['Authorization'] = authToken;
+    } else {
+        // 没有令牌，重定向到登录页面
+        window.location.href = '/login';
+        return Promise.reject(new Error('Not authenticated'));
+    }
+    
+    options.headers = headers;
+    
+    // 添加错误处理，捕获401错误并重定向到登录页面
+    return fetch(url, options).then(response => {
+        if (response.status === 401) {
+            logout();
+            throw new Error('Authentication failed');
+        }
+        return response;
+    });
+}
 
 // 从localStorage加载DEBUG模式设置
 function loadDebugMode() {
@@ -41,7 +291,7 @@ function warn() {
 
 // 流媒体管理全局函数
 window.startStream = function(streamId) {
-    fetch(`${API_URL}/streaming/start/${streamId}`, {
+    authenticatedFetch(`${API_URL}/streaming/start/${streamId}`, {
         method: 'POST'
     })
     .then(response => response.json())
@@ -65,7 +315,7 @@ window.startStream = function(streamId) {
 };
 
 window.stopStream = function(streamId) {
-    fetch(`${API_URL}/streaming/stop/${streamId}`, {
+    authenticatedFetch(`${API_URL}/streaming/stop/${streamId}`, {
         method: 'POST'
     })
     .then(response => response.json())
@@ -91,7 +341,7 @@ window.stopStream = function(streamId) {
 window.deleteStream = function(streamId) {
     if (confirm('确定要删除这个流媒体吗？')) {
         // 先停止流媒体
-        fetch(`${API_URL}/streaming/stop/${streamId}`, {
+        authenticatedFetch(`${API_URL}/streaming/stop/${streamId}`, {
             method: 'POST'
         })
         .then(() => {
@@ -116,7 +366,7 @@ function testApiEndpoints() {
     log('Testing API endpoints...');
 
     // 测试数据集列表API
-    fetch(`${API_URL}/datasets/`)
+    authenticatedFetch(`${API_URL}/datasets/`)
         .then(response => {
             log('Datasets API status:', response.status);
             return response.json();
@@ -135,7 +385,7 @@ function testApiEndpoints() {
         });
 
     // 测试本地目录API
-    fetch(`${API_URL}/datasets/local-available`)
+    authenticatedFetch(`${API_URL}/datasets/local-available`)
         .then(response => {
             log('Local directories API status:', response.status);
             return response.json();
@@ -152,6 +402,26 @@ function testApiEndpoints() {
 document.addEventListener('DOMContentLoaded', function() {
     // 加载DEBUG模式设置
     loadDebugMode();
+    
+    // 如果用户已登录，获取用户信息
+    if (isLoggedIn()) {
+        getCurrentUser();
+        
+        // 绑定修改密码按钮事件
+        const changePasswordBtn = document.getElementById('change-password-btn');
+        if (changePasswordBtn) {
+            changePasswordBtn.addEventListener('click', showChangePasswordModal);
+        }
+        
+        // 绑定退出登录按钮事件
+        const logoutBtn = document.getElementById('logout-btn');
+        if (logoutBtn) {
+            logoutBtn.addEventListener('click', logout);
+        }
+    } else {
+        // 用户未登录，重定向到登录页面
+        window.location.href = '/login';
+    }
     
     // 初始化Bootstrap模态框
     try {
@@ -243,7 +513,7 @@ function bindAnnotationEvents() {
 // 从后端获取DEBUG模式状态
 function getBackendDebugMode() {
     if (DEBUG_MODE) {
-        fetch(`${API_URL}/settings/debug-mode`)
+        authenticatedFetch(`${API_URL}/settings/debug-mode`)
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
@@ -267,7 +537,7 @@ function loadSettingsPage() {
 
 // 加载标注项目列表
 function loadAnnotationProjects() {
-    fetch(`${API_URL}/annotation/projects/`)
+    authenticatedFetch(`${API_URL}/annotation/projects/`)
         .then(response => response.json())
         .then(data => {
             const tableBody = document.getElementById('annotation-projects-table-body');
@@ -360,7 +630,7 @@ function showCreateAnnotationProjectModal() {
 
 // 加载数据集列表用于标注项目
 function loadDatasetsForAnnotation() {
-    fetch(`${API_URL}/datasets/`)
+    authenticatedFetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(data => {
             const datasetSelect = document.getElementById('annotation-dataset-id');
@@ -493,16 +763,18 @@ function createAnnotationProject() {
             break;
     }
     
-    const headers = {};
+    const options = {
+        method: requestMethod,
+        body: requestBody
+    };
+    
     if (imageSource === 'dataset' || imageSource === 'directory') {
-        headers['Content-Type'] = 'application/json';
+        options.headers = {
+            'Content-Type': 'application/json'
+        };
     }
     
-    fetch(apiUrl, {
-        method: requestMethod,
-        headers: headers,
-        body: requestBody
-    })
+    authenticatedFetch(apiUrl, options)
     .then(response => response.json())
     .then(data => {
         if (data.id) {
@@ -526,7 +798,7 @@ function openAnnotationTool(projectId) {
 
 // 查看项目统计
 function viewProjectStats(projectId) {
-    fetch(`${API_URL}/annotation/projects/${projectId}/stats`)
+    authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/stats`)
         .then(response => response.json())
         .then(data => {
             alert(`项目统计:\n总图片: ${data.total_images}\n已完成: ${data.completed_images}\n进度: ${data.progress_percentage}%`);
@@ -548,7 +820,7 @@ function exportProject(projectId) {
         test_ratio: 0.1
     };
     
-    fetch(`${API_URL}/annotation/projects/${projectId}/export`, {
+    authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/export`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -572,7 +844,7 @@ function exportProject(projectId) {
 // 删除标注项目
 function deleteAnnotationProject(projectId) {
     if (confirm('确定要删除这个标注项目吗？此操作不可撤销。')) {
-        fetch(`${API_URL}/annotation/projects/${projectId}`, {
+        authenticatedFetch(`${API_URL}/annotation/projects/${projectId}`, {
             method: 'DELETE'
         })
         .then(response => response.json())
@@ -590,6 +862,12 @@ function deleteAnnotationProject(projectId) {
 // 加载页面内容
 function loadPage(page) {
     if (currentPage === page) return;
+    
+    // 在切换页面之前清理当前页面的资源
+    if (currentPage === 'training' && typeof stopTrainingTasksAutoRefresh === 'function') {
+        stopTrainingTasksAutoRefresh();
+    }
+    
     currentPage = page;
 
     // 更新导航菜单激活状态
@@ -646,6 +924,37 @@ function loadPage(page) {
             loadSettingsPage();
             bindSettingsEvents();
             break;
+        case 'user-management':
+            // 使用增强的角色检测逻辑来判断是否是管理员
+            let isAdmin = false;
+            if (currentUser && currentUser.role) {
+                if (typeof currentUser.role === 'string') {
+                    isAdmin = currentUser.role.toLowerCase() === 'admin';
+                } else if (typeof currentUser.role === 'object') {
+                    // 如果role是对象，检查它的值
+                    if (currentUser.role.value) {
+                        isAdmin = currentUser.role.value.toLowerCase() === 'admin';
+                    } else if (currentUser.role.name) {
+                        isAdmin = currentUser.role.name.toLowerCase() === 'admin';
+                    }
+                }
+            }
+            
+            console.log('用户管理页面访问检测 - 是否管理员:', isAdmin);
+            
+            if (isAdmin) {
+                loadUserManagementPage();
+                bindUserManagementEvents();
+            } else {
+                const pageContent = document.getElementById('page-content');
+                pageContent.innerHTML = `
+                    <div class="text-center py-5">
+                        <h2>权限不足</h2>
+                        <p class="lead">只有管理员可以访问用户管理页面</p>
+                    </div>
+                `;
+            }
+            break;
     }
 }
 
@@ -684,6 +993,419 @@ function showSettingsSaveMessage(message) {
     }
 }
 
+// ==================== 用户管理功能 ====================
+
+// 排序状态变量
+let currentSortField = '';
+let currentSortDirection = 'asc';
+
+// 加载用户管理页面
+function loadUserManagementPage() {
+    log('加载用户管理页面...');
+    // 加载用户列表
+    loadUsersList();
+}
+
+// 绑定用户管理页面事件
+function bindUserManagementEvents() {
+    log('绑定用户管理页面事件...');
+    // 添加用户按钮事件
+    const addUserBtn = document.getElementById('add-user-btn');
+    if (addUserBtn) {
+        addUserBtn.addEventListener('click', showAddUserModal);
+    }
+    
+    // 绑定排序事件
+    const sortableHeaders = document.querySelectorAll('th.sortable');
+    sortableHeaders.forEach(header => {
+        header.addEventListener('click', function() {
+            const sortField = this.getAttribute('data-sort-field');
+            
+            // 如果点击的是当前排序字段，则切换排序方向
+            if (currentSortField === sortField) {
+                currentSortDirection = currentSortDirection === 'asc' ? 'desc' : 'asc';
+            } else {
+                // 否则设置新的排序字段和默认排序方向
+                currentSortField = sortField;
+                currentSortDirection = 'asc';
+            }
+            
+            // 更新排序图标
+            updateSortIcons();
+            
+            // 重新加载排序后的用户列表
+            loadUsersList();
+        });
+    });
+    
+    // 初始化排序图标
+    updateSortIcons();
+}
+
+// 更新排序图标
+function updateSortIcons() {
+    const sortableHeaders = document.querySelectorAll('th.sortable');
+    sortableHeaders.forEach(header => {
+        const icon = header.querySelector('i');
+        const sortField = header.getAttribute('data-sort-field');
+        
+        // 重置所有图标
+        icon.className = 'bi bi-sort';
+        
+        // 设置当前排序字段的图标
+        if (currentSortField === sortField) {
+            icon.className = currentSortDirection === 'asc' ? 'bi bi-sort-up' : 'bi bi-sort-down';
+        }
+    });
+}
+
+// 加载用户列表
+function loadUsersList() {
+    log('加载用户列表...');
+    authenticatedFetch(`${API_URL}/auth/users`)
+        .then(response => {
+            if (response.ok) {
+                return response.json();
+            }
+            throw new Error('获取用户列表失败');
+        })
+        .then(users => {
+            log('用户列表:', users);
+            const tableBody = document.getElementById('users-table-body');
+            if (!tableBody) return;
+            
+            tableBody.innerHTML = '';
+            
+            if (users.length === 0) {
+                tableBody.innerHTML = '<tr><td colspan="7" class="text-center">暂无用户</td></tr>';
+                return;
+            }
+            
+            // 应用排序
+            if (currentSortField) {
+                users.sort((a, b) => {
+                    let valueA = a[currentSortField];
+                    let valueB = b[currentSortField];
+                    
+                    // 处理日期类型
+                    if (currentSortField === 'created_at' || currentSortField === 'last_login') {
+                        valueA = valueA ? new Date(valueA) : new Date(0);
+                        valueB = valueB ? new Date(valueB) : new Date(0);
+                    }
+                    
+                    // 处理布尔类型
+                    if (currentSortField === 'is_active') {
+                        valueA = valueA ? 1 : 0;
+                        valueB = valueB ? 1 : 0;
+                    }
+                    
+                    // 处理空值
+                    if (valueA === null || valueA === undefined) valueA = '';
+                    if (valueB === null || valueB === undefined) valueB = '';
+                    
+                    // 字符串转小写进行比较
+                    if (typeof valueA === 'string') valueA = valueA.toLowerCase();
+                    if (typeof valueB === 'string') valueB = valueB.toLowerCase();
+                    
+                    if (valueA < valueB) return currentSortDirection === 'asc' ? -1 : 1;
+                    if (valueA > valueB) return currentSortDirection === 'asc' ? 1 : -1;
+                    return 0;
+                });
+            }
+            
+            users.forEach(user => {
+                const row = document.createElement('tr');
+                const isCurrentUser = currentUser && user.id === currentUser.id;
+                
+                // 确保用户ID是字符串格式，以兼容UUID
+                const userIdStr = String(user.id);
+                
+                row.innerHTML = `
+                    <td>${userIdStr}</td>
+                    <td>${user.username}</td>
+                    <td>${user.role}</td>
+                    <td>${user.is_active ? '<span class="badge bg-success">活跃</span>' : '<span class="badge bg-danger">禁用</span>'}</td>
+                    <td>${new Date(user.created_at).toLocaleString()}</td>
+                    <td>${user.last_login ? new Date(user.last_login).toLocaleString() : '-'}</td>
+                    <td>
+                        <button class="btn btn-primary btn-sm me-1" onclick="showEditUserModal('${userIdStr}')" ${isCurrentUser ? 'disabled title="不可编辑当前用户"' : ''}>
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button class="btn btn-danger btn-sm" onclick="confirmDeleteUser('${userIdStr}')" ${isCurrentUser ? 'disabled title="不可删除当前用户"' : ''}>
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </td>
+                `;
+                
+                tableBody.appendChild(row);
+            });
+        })
+        .catch(error => {
+            error('获取用户列表失败:', error);
+            alert('获取用户列表失败: ' + error.message);
+        });
+}
+
+// 显示添加用户模态框
+function showAddUserModal() {
+    const modalTitle = document.querySelector('#mainModal .modal-title');
+    const modalBody = document.querySelector('#mainModal .modal-body');
+    const modalSubmit = document.getElementById('modalSubmit');
+    
+    modalTitle.textContent = '添加用户';
+    modalBody.innerHTML = `
+        <form id="add-user-form">
+            <div class="mb-3">
+                <label for="add-username" class="form-label">用户名</label>
+                <input type="text" class="form-control" id="add-username" required minlength="3">
+            </div>
+            <div class="mb-3">
+                <label for="add-password" class="form-label">密码</label>
+                <input type="password" class="form-control" id="add-password" required minlength="6">
+                <div class="form-text">密码长度至少为6个字符</div>
+            </div>
+            <div class="mb-3">
+                <label for="add-confirm-password" class="form-label">确认密码</label>
+                <input type="password" class="form-control" id="add-confirm-password" required>
+            </div>
+            <div class="mb-3">
+                <label for="add-role" class="form-label">角色</label>
+                <select class="form-control" id="add-role">
+                    <option value="operator">普通用户</option>
+                    <option value="admin">管理员</option>
+                </select>
+            </div>
+        </form>
+    `;
+    modalSubmit.textContent = '添加用户';
+    
+    // 绑定提交事件
+    modalSubmit.onclick = addUser;
+    
+    // 显示模态框
+    modal.show();
+}
+
+// 添加用户
+function addUser() {
+    const username = document.getElementById('add-username').value;
+    const password = document.getElementById('add-password').value;
+    const confirmPassword = document.getElementById('add-confirm-password').value;
+    const role = document.getElementById('add-role').value;
+    
+    // 表单验证
+    if (!username || !password || !confirmPassword) {
+        alert('请填写所有字段');
+        return;
+    }
+    
+    if (username.length < 3) {
+        alert('用户名长度至少为3个字符');
+        return;
+    }
+    
+    if (password.length < 6) {
+        alert('密码长度至少为6个字符');
+        return;
+    }
+    
+    if (password !== confirmPassword) {
+        alert('两次输入的密码不一致');
+        return;
+    }
+    
+    // 构建请求体
+    const requestBody = {
+        username: username,
+        password: password,
+        confirm_password: confirmPassword,
+        role: role
+    };
+    
+    // 调用添加用户API
+    authenticatedFetch(`${API_URL}/auth/users/`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => {
+        if (response.ok) {
+            return response.json();
+        }
+        throw new Error('添加用户失败');
+    })
+    .then(() => {
+        alert('用户添加成功');
+        modal.hide();
+        // 重新加载用户列表
+        loadUsersList();
+    })
+    .catch(error => {
+        alert('错误: ' + error.message);
+        console.error('添加用户失败:', error);
+    });
+}
+
+// 显示编辑用户模态框
+function showEditUserModal(userId) {
+    // 先获取用户信息
+    log('获取用户信息，ID:', userId);
+    authenticatedFetch(`${API_URL}/auth/users/${String(userId)}`)
+        .then(response => {
+            log('获取用户信息响应状态:', response.status);
+            if (response.ok) {
+                return response.json();
+            }
+            throw new Error('获取用户信息失败，状态码: ' + response.status);
+        })
+        .then(user => {
+            const modalTitle = document.querySelector('#mainModal .modal-title');
+            const modalBody = document.querySelector('#mainModal .modal-body');
+            const modalSubmit = document.getElementById('modalSubmit');
+            
+            modalTitle.textContent = '编辑用户';
+            modalBody.innerHTML = `
+                <form id="edit-user-form">
+                    <input type="hidden" id="edit-user-id" value="${user.id}">
+                    <div class="mb-3">
+                        <label for="edit-username" class="form-label">用户名</label>
+                        <input type="text" class="form-control" id="edit-username" value="${user.username}" required minlength="3">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-password" class="form-label">密码（留空表示不修改）</label>
+                        <input type="password" class="form-control" id="edit-password" minlength="6">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-confirm-password" class="form-label">确认密码（留空表示不修改）</label>
+                        <input type="password" class="form-control" id="edit-confirm-password">
+                    </div>
+                    <div class="mb-3">
+                        <label for="edit-role" class="form-label">角色</label>
+                        <select class="form-control" id="edit-role">
+                            <option value="operator" ${user.role === 'operator' ? 'selected' : ''}>普通用户</option>
+                            <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>管理员</option>
+                        </select>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input type="checkbox" class="form-check-input" id="edit-is-active" ${user.is_active ? 'checked' : ''}>
+                        <label class="form-check-label" for="edit-is-active">是否活跃</label>
+                    </div>
+                </form>
+            `;
+            modalSubmit.textContent = '保存修改';
+            
+            // 绑定提交事件
+            modalSubmit.onclick = updateUser;
+            
+            // 显示模态框
+            modal.show();
+        })
+        .catch(error => {
+            alert('错误: ' + error.message);
+            console.error('获取用户信息失败:', error);
+        });
+}
+
+// 更新用户
+function updateUser() {
+    const userId = document.getElementById('edit-user-id').value;
+    const username = document.getElementById('edit-username').value;
+    const password = document.getElementById('edit-password').value;
+    const confirmPassword = document.getElementById('edit-confirm-password').value;
+    const role = document.getElementById('edit-role').value;
+    const isActive = document.getElementById('edit-is-active').checked;
+    
+    // 表单验证
+    if (!username) {
+        alert('请填写用户名');
+        return;
+    }
+    
+    if (username.length < 3) {
+        alert('用户名长度至少为3个字符');
+        return;
+    }
+    
+    if (password || confirmPassword) {
+        if (password !== confirmPassword) {
+            alert('两次输入的密码不一致');
+            return;
+        }
+        if (password.length < 6) {
+            alert('密码长度至少为6个字符');
+            return;
+        }
+    }
+    
+    // 构建请求体
+    const requestBody = {
+        username: username,
+        role: role,
+        is_active: isActive
+    };
+    
+    // 如果填写了密码，则添加密码字段
+    if (password) {
+        requestBody.password = password;
+    }
+    
+    // 调用更新用户API
+    log('更新用户信息，ID:', userId);
+    authenticatedFetch(`${API_URL}/auth/users/${String(userId)}`, {
+        method: 'PUT',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+    })
+    .then(response => {
+        if (response.ok) {
+            return response.json();
+        }
+        throw new Error('更新用户失败');
+    })
+    .then(() => {
+        alert('用户更新成功');
+        modal.hide();
+        // 重新加载用户列表
+        loadUsersList();
+    })
+    .catch(error => {
+        alert('错误: ' + error.message);
+        console.error('更新用户失败:', error);
+    });
+}
+
+// 确认删除用户
+function confirmDeleteUser(userId) {
+    if (confirm('确定要删除这个用户吗？')) {
+        // 调用删除用户API
+        authenticatedFetch(`${API_URL}/auth/users/${String(userId)}`, {
+            method: 'DELETE'
+        })
+        .then(response => {
+            if (response.ok) {
+                alert('用户删除成功');
+                // 重新加载用户列表
+                loadUsersList();
+            } else {
+                throw new Error('删除用户失败');
+            }
+        })
+        .catch(error => {
+            alert('错误: ' + error.message);
+            console.error('删除用户失败:', error);
+        });
+    }
+}
+
+// 全局暴露函数，以便在HTML中直接调用
+window.showAddUserModal = showAddUserModal;
+window.showEditUserModal = showEditUserModal;
+window.confirmDeleteUser = confirmDeleteUser;
+
 // ==================== OpenCV 工具 ====================
 
 // 加载 OpenCV 页面
@@ -707,7 +1429,7 @@ function loadOpenCVPage() {
     });
 
     // 加载数据集列表（用于数据增强功能）
-    fetch(`${API_URL}/datasets/`)
+    authenticatedFetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(data => {
             console.log('Loaded datasets for OpenCV:', data.length);
@@ -919,7 +1641,7 @@ function bindOpenCVEventHandlers() {
             reader.readAsDataURL(imageFile);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/preprocess`, {
+            authenticatedFetch(`${API_URL}/opencv/preprocess`, {
                 method: 'POST',
                 body: formData
             })
@@ -996,7 +1718,7 @@ function bindOpenCVEventHandlers() {
             reader.readAsDataURL(imageFile);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/segment-image`, {
+            authenticatedFetch(`${API_URL}/opencv/segment-image`, {
                 method: 'POST',
                 body: formData
             })
@@ -1057,7 +1779,7 @@ function bindOpenCVEventHandlers() {
             formData.append('max_features', document.getElementById('max-features').value);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/extract-features`, {
+            authenticatedFetch(`${API_URL}/opencv/extract-features`, {
                 method: 'POST',
                 body: formData
             })
@@ -1110,7 +1832,7 @@ function bindOpenCVEventHandlers() {
             formData.append('match_method', document.getElementById('match-method').value);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/match-features`, {
+            authenticatedFetch(`${API_URL}/opencv/match-features`, {
                 method: 'POST',
                 body: formData
             })
@@ -1186,7 +1908,7 @@ function bindOpenCVEventHandlers() {
             // document.getElementById('opencv-loading-details').textContent = '请稍候，正在准备数据集并启动增强任务';
 
             // 发送请求
-            fetch(`${API_URL}/opencv/augment-dataset`, {
+            authenticatedFetch(`${API_URL}/opencv/augment-dataset`, {
                 method: 'POST',
                 body: formData
             })
@@ -1217,7 +1939,7 @@ function bindOpenCVEventHandlers() {
                 // 开始轮询任务状态
                 const augmentationId = data.augmentation_id;
                 const statusInterval = window.memoryManager.setInterval(() => {
-                    fetch(`${API_URL}/opencv/augmentation-status/${augmentationId}`)
+                    authenticatedFetch(`${API_URL}/opencv/augmentation-status/${augmentationId}`)
                     .then(response => response.json())
                     .then(statusData => {
                         if (statusData) {
@@ -1333,7 +2055,7 @@ function bindOpenCVEventHandlers() {
             reader2.readAsDataURL(image2);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+            authenticatedFetch(`${API_URL}/opencv/advanced-augmentation`, {
                 method: 'POST',
                 body: formData
             })
@@ -1387,7 +2109,7 @@ function bindOpenCVEventHandlers() {
             reader2.readAsDataURL(image2);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+            authenticatedFetch(`${API_URL}/opencv/advanced-augmentation`, {
                 method: 'POST',
                 body: formData
             })
@@ -1430,7 +2152,7 @@ function bindOpenCVEventHandlers() {
             }
 
             // 发送请求
-            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+            authenticatedFetch(`${API_URL}/opencv/advanced-augmentation`, {
                 method: 'POST',
                 body: formData
             })
@@ -1477,7 +2199,7 @@ function bindOpenCVEventHandlers() {
             reader.readAsDataURL(image);
 
             // 发送请求
-            fetch(`${API_URL}/opencv/advanced-augmentation`, {
+            authenticatedFetch(`${API_URL}/opencv/advanced-augmentation`, {
                 method: 'POST',
                 body: formData
             })
@@ -1558,7 +2280,7 @@ function submitSplitDataset(datasetId) {
     };
 
     // 发送请求
-    fetch(`${API_URL}/datasets/${datasetId}/split`, {
+    authenticatedFetch(`${API_URL}/datasets/${datasetId}/split`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -1602,7 +2324,7 @@ function loadDatasets() {
         console.log('Dataset table has', columnCount, 'columns');
     }
 
-    fetch(`${API_URL}/datasets/`)
+    authenticatedFetch(`${API_URL}/datasets/`)
         .then(response => {
             console.log('Datasets response status:', response.status);
             return response.json();
@@ -1836,7 +2558,7 @@ async function submitAddDataset() {
         initFormData.append('name', nameInput.value);
         initFormData.append('file', fileInput.files[0]);
 
-        const initResponse = await fetch(`${API_URL}/datasets/upload-init`, {
+        const initResponse = await authenticatedFetch(`${API_URL}/datasets/upload-init`, {
             method: 'POST',
             body: initFormData
         });
@@ -1896,7 +2618,7 @@ async function submitAddDataset() {
                 // 上传成功，开始轮询处理状态
                 statusCheckInterval = window.memoryManager.setInterval(async () => {
                     try {
-                        const statusResponse = await fetch(`${API_URL}/datasets/upload-status/${fileId}`);
+                        const statusResponse = await authenticatedFetch(`${API_URL}/datasets/upload-status/${fileId}`);
                         if (!statusResponse.ok) {
                             window.memoryManager.clearInterval(statusCheckInterval);
                             throw new Error('获取上传状态失败');
@@ -2242,7 +2964,7 @@ function setupBrowseDatasetDirButton() {
         modalSubmit.textContent = '确定';
 
         // 加载目录列表
-        fetch(`${API_URL}/datasets/local-available`)
+        authenticatedFetch(`${API_URL}/datasets/local-available`)
             .then(response => {
                 console.log('API response received:', response.status);
                 return response.json();
@@ -2381,7 +3103,7 @@ function showLocalDatasetInfo(directoryInfo) {
 
             // 从 API 获取目录信息
             console.log(`Fetching directory info for: ${directoryInfo}`);
-            fetch(`${API_URL}/datasets/directory-info?name=${encodeURIComponent(directoryInfo)}`)
+            authenticatedFetch(`${API_URL}/datasets/directory-info?name=${encodeURIComponent(directoryInfo)}`)
                 .then(response => {
                     console.log(`Received response with status: ${response.status}`);
                     if (!response.ok) {
@@ -2641,7 +3363,7 @@ function showConvertCocoModal() {
                 const outputPath = document.getElementById('coco-output-path');
                 if (outputPath && outputPath.value) {
                     // 使用API打开文件夹
-                    fetch(`${API_URL}/datasets/open-folder`, {
+                    authenticatedFetch(`${API_URL}/datasets/open-folder`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -3127,7 +3849,7 @@ function setupValidateDatasetDirButton() {
 
             // 发送验证请求
             console.log(`Sending validation request for directory: ${dirPath}`);
-            fetch(`${API_URL}/datasets/directory-info?name=${encodeURIComponent(dirPath)}`)
+            authenticatedFetch(`${API_URL}/datasets/directory-info?name=${encodeURIComponent(dirPath)}`)
                 .then(response => {
                     console.log(`Received response with status: ${response.status}`);
                     if (!response.ok) {
@@ -3225,7 +3947,7 @@ function submitImportLocalDataset() {
     console.log('Sending import request with data:', data);
 
     // 发送请求
-    fetch(`${API_URL}/datasets/import-local`, {
+    authenticatedFetch(`${API_URL}/datasets/import-local`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -3317,9 +4039,9 @@ function deleteDataset(datasetId) {
         confirmButton.textContent = '删除中...';
 
         // 发送删除请求
-        fetch(`${API_URL}/datasets/${datasetId}`, {
-            method: 'DELETE'
-        })
+                authenticatedFetch(`${API_URL}/datasets/${datasetId}`, {
+                    method: 'DELETE'
+                })
         .then(response => {
             if (response.ok) {
                 // 关闭模态框
@@ -3362,7 +4084,7 @@ function deleteDataset(datasetId) {
 
 // 加载模型列表
 function loadModels() {
-    fetch(`${API_URL}/models/`)
+    authenticatedFetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             const tableBody = document.getElementById('models-table-body');
@@ -3703,7 +4425,7 @@ function releaseModel(modelId) {
     this.disabled = true;
     const self = this;
 
-    fetch(`${API_URL}/tools/release-model`, {
+    authenticatedFetch(`${API_URL}/tools/release-model`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -3743,7 +4465,7 @@ function deleteModel(modelId) {
         return;
     }
 
-    fetch(`${API_URL}/models/${modelId}`, {
+    authenticatedFetch(`${API_URL}/models/${modelId}`, {
         method: 'DELETE'
     })
         .then(response => {
@@ -3779,7 +4501,7 @@ function deleteModel(modelId) {
 
 // 加载训练任务列表
 function loadTrainingTasks() {
-    fetch(`${API_URL}/training`)
+    authenticatedFetch(`${API_URL}/training`)
         .then(response => response.json())
         .then(tasks => {
             const tableBody = document.getElementById('training-table-body');
@@ -3980,7 +4702,7 @@ function showAddTrainingModal() {
                 getGpuInfoBtn.disabled = true;
                 getGpuInfoBtn.textContent = '获取中...';
 
-                const response = await fetch(`${API_URL}/training/all-gpus-info`);
+                const response = await authenticatedFetch(`${API_URL}/training/all-gpus-info`);
                 const data = await response.json();
 
                 // 恢复按钮状态
@@ -4049,7 +4771,7 @@ function showAddTrainingModal() {
                 getAscendInfoBtn.disabled = true;
                 getAscendInfoBtn.textContent = '获取中...';
 
-                const response = await fetch(`${API_URL}/training/ascend-info`);
+                const response = await authenticatedFetch(`${API_URL}/training/ascend-info`);
                 const data = await response.json();
 
                 // 恢复按钮状态
@@ -4211,7 +4933,7 @@ function showAddTrainingModal() {
                 validateAscendMemoryBtn.disabled = true;
                 validateAscendMemoryBtn.textContent = '验证中...';
 
-                const response = await fetch(`${API_URL}/training/validate-ascend-memory`, {
+                const response = await authenticatedFetch(`${API_URL}/training/validate-ascend-memory`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -4269,7 +4991,7 @@ function showAddTrainingModal() {
 
 // 加载数据集选项
 function loadDatasetOptions() {
-    fetch(`${API_URL}/datasets/`)
+    authenticatedFetch(`${API_URL}/datasets/`)
         .then(response => response.json())
         .then(datasets => {
             const select = document.getElementById('training-dataset');
@@ -4334,7 +5056,7 @@ function loadDatasetOptions() {
 
 // 加载模型选项
 function loadModelOptions() {
-    fetch(`${API_URL}/models/`)
+    authenticatedFetch(`${API_URL}/models/`)
         .then(response => response.json())
         .then(models => {
             const select = document.getElementById('training-model');
@@ -4449,7 +5171,7 @@ function submitAddTraining() {
     data.dataset_id = datasetId;
 
     // 发送请求
-    fetch(`${API_URL}/training`, {
+    authenticatedFetch(`${API_URL}/training`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -4478,7 +5200,7 @@ function submitAddTraining() {
 // 开始训练
 function startTraining(taskId) {
     // 检查任务状态
-    fetch(`${API_URL}/training/${taskId}`)
+    authenticatedFetch(`${API_URL}/training/${taskId}`)
         .then(response => response.json())
         .then(task => {
             // 如果任务已经在运行中，显示提示并返回
@@ -4502,7 +5224,7 @@ function startTraining(taskId) {
             document.body.appendChild(loadingToast);
 
             // 发送请求开始训练
-            fetch(`${API_URL}/training/${taskId}/start`, {
+            authenticatedFetch(`${API_URL}/training/${taskId}/start`, {
                 method: 'POST'
             })
             .then(response => {
@@ -4559,7 +5281,7 @@ function stopTraining(taskId) {
         return;
     }
 
-    fetch(`${API_URL}/training/${taskId}/stop`, {
+    authenticatedFetch(`${API_URL}/training/${taskId}/stop`, {
         method: 'POST'
     })
         .then(response => {
@@ -4579,7 +5301,7 @@ function stopTraining(taskId) {
 // 继续训练
 function resumeTraining(taskId) {
     // 检查任务状态
-    fetch(`${API_URL}/training/${taskId}`)
+    authenticatedFetch(`${API_URL}/training/${taskId}`)
         .then(response => response.json())
         .then(task => {
             // 如果任务已经在运行中，显示提示并返回
@@ -4603,7 +5325,7 @@ function resumeTraining(taskId) {
             document.body.appendChild(loadingToast);
 
             // 发送请求继续训练
-            fetch(`${API_URL}/training/${taskId}/resume`, {
+            authenticatedFetch(`${API_URL}/training/${taskId}/resume`, {
                 method: 'POST'
             })
             .then(response => {
@@ -4672,7 +5394,7 @@ function openTensorBoard(taskId) {
     loadingToast.innerHTML = '正在获取TensorBoard URL...';
     document.body.appendChild(loadingToast);
 
-    fetch(`${API_URL}/training/${taskId}/tensorboard`)
+    authenticatedFetch(`${API_URL}/training/${taskId}/tensorboard`)
         .then(response => {
             if (!response.ok) {
                 throw new Error('获取TensorBoard URL失败');
@@ -4864,7 +5586,7 @@ function restartTensorBoard() {
     const loadingToast = showToast('正在重启TensorBoard服务...', 'info', 10000);
 
     // 调用重启API
-    fetch(`${API_URL}/training/restart-tensorboard`, {
+    authenticatedFetch(`${API_URL}/training/restart-tensorboard`, {
         method: 'POST'
     })
     .then(response => {
@@ -4900,7 +5622,7 @@ function openTensorBoardLogsFolder(taskId) {
     const loadingToast = showToast('正在打开日志目录...', 'info', 10000);
 
     // 调用API获取日志目录路径
-    fetch(`${API_URL}/training/${taskId}/logs-folder`)
+    authenticatedFetch(`${API_URL}/training/${taskId}/logs-folder`)
     .then(response => {
         if (!response.ok) {
             throw new Error('获取日志目录路径失败');
@@ -4978,9 +5700,9 @@ function deleteTraining(taskId) {
         confirmButton.textContent = '删除中...';
 
         // 发送删除请求
-        fetch(`${API_URL}/training/${taskId}`, {
-            method: 'DELETE'
-        })
+            authenticatedFetch(`${API_URL}/training/${taskId}`, {
+                method: 'DELETE'
+            })
         .then(response => {
             if (response.ok) {
                 return response.json();
@@ -5151,7 +5873,7 @@ function viewTrainingLogs(taskId) {
     // 获取日志内容和任务状态
     function fetchLogs() {
         // 获取任务状态
-        fetch(`${API_URL}/training/${taskId}`)
+        authenticatedFetch(`${API_URL}/training/${taskId}`)
             .then(response => {
                 if (!response.ok) {
                     // 如果是404错误，表示任务不存在
@@ -5202,7 +5924,7 @@ function viewTrainingLogs(taskId) {
             });
 
         // 获取日志
-        fetch(`${API_URL}/training/${taskId}/logs`)
+        authenticatedFetch(`${API_URL}/training/${taskId}/logs`)
             .then(response => {
                 if (!response.ok) {
                     // 如果是404错误，表示任务不存在
@@ -5387,7 +6109,7 @@ function viewTrainingDetails(taskId) {
     document.body.appendChild(modal);
 
     // 获取训练任务详情
-    fetch(`${API_URL}/training/${taskId}`)
+    authenticatedFetch(`${API_URL}/training/${taskId}`)
         .then(response => {
             if (!response.ok) {
                 throw new Error('获取训练任务详情失败');
@@ -5596,7 +6318,7 @@ function submitDetection() {
     formData.append('iou_thres', iouThreshold.value);
 
     // 发送请求
-    fetch(`${API_URL}/detection`, {
+    authenticatedFetch(`${API_URL}/detection`, {
         method: 'POST',
         body: formData
     })
@@ -5609,7 +6331,7 @@ function submitDetection() {
         })
         .then(result => {
             // 获取检测结果
-            return fetch(`${API_URL}/detection/${result.id}/result`);
+            return authenticatedFetch(`${API_URL}/detection/${result.id}/result`);
         })
         .then(response => {
             if (response.ok) {
@@ -5775,7 +6497,7 @@ function loadAnnotationPage() {
 
 // 加载标注项目列表
 function loadAnnotationProjects() {
-    fetch(`${API_URL}/annotation/projects/`)
+    authenticatedFetch(`${API_URL}/annotation/projects/`)
         .then(response => response.json())
         .then(projects => {
             const tableBody = document.getElementById('annotation-projects-table-body');
@@ -5795,7 +6517,7 @@ function loadAnnotationProjects() {
                 const row = document.createElement('tr');
                 
                 // 获取项目统计信息
-                fetch(`${API_URL}/annotation/projects/${project.id}/stats`)
+                authenticatedFetch(`${API_URL}/annotation/projects/${project.id}/stats`)
                     .then(response => response.json())
                     .then(stats => {
                         const progressPercentage = stats.progress_percentage || 0;
@@ -5952,7 +6674,7 @@ function bindDirectoryBrowseButton() {
                     directoryInput.value = selectedPath;
                     
                     // 扫描选中目录的图片
-                    fetch(`/api/annotation/scan-directory-images?directory_path=${encodeURIComponent(selectedPath)}`)
+                    authenticatedFetch(`/api/annotation/scan-directory-images?directory_path=${encodeURIComponent(selectedPath)}`)
                         .then(response => response.json())
                         .then(data => {
                             imageCountSpan.textContent = data.image_count;
@@ -6090,7 +6812,7 @@ function createProjectWithExistingImages(name, description, classes, imageSource
         apiEndpoint = `${API_URL}/annotation/projects/from-directory`;
     }
     
-    fetch(apiEndpoint, {
+    authenticatedFetch(apiEndpoint, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -6168,7 +6890,7 @@ function scanProjectImages(projectId) {
         return;
     }
     
-    fetch(`${API_URL}/annotation/projects/${projectId}/scan`, {
+    authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/scan`, {
         method: 'POST'
     })
     .then(response => {
@@ -6195,7 +6917,7 @@ function exportAnnotations(projectId) {
         split_data: false
     };
     
-    fetch(`${API_URL}/annotation/projects/${projectId}/export`, {
+    authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/export`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -6252,7 +6974,7 @@ function deleteAnnotationProject(projectId) {
         return;
     }
     
-    fetch(`${API_URL}/annotation/projects/${projectId}`, {
+    authenticatedFetch(`${API_URL}/annotation/projects/${projectId}`, {
         method: 'DELETE'
     })
     .then(response => {
@@ -6284,7 +7006,7 @@ function exportToDataset(projectId) {
     formData.append('dataset_name', datasetName);
     formData.append('dataset_description', datasetDescription);
     
-    fetch(`${API_URL}/annotation/projects/${projectId}/export-to-dataset`, {
+    authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/export-to-dataset`, {
         method: 'POST',
         body: formData
     })
@@ -6357,7 +7079,7 @@ function loadFileBrowserItems(path = '') {
     window.currentBrowserPath = path;
 
     // 发送请求
-    fetch(`${API_URL}/datasets/browse-filesystem?path=${encodeURIComponent(path)}`)
+    authenticatedFetch(`${API_URL}/datasets/browse-filesystem?path=${encodeURIComponent(path)}`)
         .then(response => {
             if (response.ok) {
                 return response.json();
@@ -6672,7 +7394,7 @@ function bindVideoEventHandlers() {
                 if (window.loadingOverlay) window.loadingOverlay.style.display = 'flex';
                 if (window.loadingText) window.loadingText.textContent = '正在提取视频帧，请在\app\static\video_frames目录查看';
 
-                fetch(`${API_URL}/video/extract-frames`, {
+                authenticatedFetch(`${API_URL}/video/extract-frames`, {
                     method: 'POST',
                     body: formData
                 })
@@ -6836,7 +7558,7 @@ function bindVideoEventHandlers() {
             const formData = new FormData(this);
 
             // 发送请求
-            fetch(`${API_URL}/video/detect-scenes`, {
+            authenticatedFetch(`${API_URL}/video/detect-scenes`, {
                 method: 'POST',
                 body: formData
             })
@@ -6866,7 +7588,7 @@ function bindVideoEventHandlers() {
                     // 轮询任务状态
                     const taskId = data.task_id;
                     const statusInterval = setInterval(() => {
-                        fetch(`${API_URL}/video/scene-detection-status/${taskId}`)
+                        authenticatedFetch(`${API_URL}/video/scene-detection-status/${taskId}`)
                         .then(response => response.json())
                         .then(statusData => {
                             if (statusData.status === 'completed' && statusData.info && statusData.info.result) {
@@ -6972,7 +7694,7 @@ function bindVideoEventHandlers() {
             const formData = new FormData(this);
 
             // 发送请求
-            fetch(`${API_URL}/video/detect-motion`, {
+            authenticatedFetch(`${API_URL}/video/detect-motion`, {
                 method: 'POST',
                 body: formData
             })
@@ -7002,7 +7724,7 @@ function bindVideoEventHandlers() {
                     // 轮询任务状态
                     const taskId = data.task_id;
                     const statusInterval = setInterval(() => {
-                        fetch(`${API_URL}/video/motion-detection-status/${taskId}`)
+                        authenticatedFetch(`${API_URL}/video/motion-detection-status/${taskId}`)
                         .then(response => response.json())
                         .then(statusData => {
                             if (statusData.status === 'completed' && statusData.info && statusData.info.result) {
@@ -7152,7 +7874,7 @@ function bindVideoEventHandlers() {
 
     if (startDetectionBtn && stopDetectionBtn && rtModelSelect) {
         // 加载模型列表
-        fetch(`${API_URL}/models/?type=detection`)
+        authenticatedFetch(`${API_URL}/models/?type=detection`)
             .then(response => response.json())
             .then(models => {
                 rtModelSelect.innerHTML = '<option value="">\u8bf7\u9009\u62e9\u6a21\u578b</option>';
@@ -7973,7 +8695,7 @@ function bindVideoEventHandlers() {
             // 显示加载状态
             streamSelect.innerHTML = '<option value="">加载中...</option>';
             
-            fetch(`${API_URL}/streaming/list`)
+            authenticatedFetch(`${API_URL}/streaming/list`)
                 .then(response => response.json())
                 .then(data => {
                     streamSelect.innerHTML = '<option value="">请选择流媒体...</option>';
@@ -8092,7 +8814,7 @@ function bindVideoEventHandlers() {
                     formData.append('source', source);
                     formData.append('stream_type', type);
                     
-                    fetch(`${API_URL}/streaming/test-connection`, {
+                    authenticatedFetch(`${API_URL}/streaming/test-connection`, {
                         method: 'POST',
                         body: formData
                     })
@@ -8126,7 +8848,7 @@ function bindVideoEventHandlers() {
                     formData.append('source', source);
                     formData.append('stream_type', type);
                     
-                    fetch(`${API_URL}/streaming/create`, {
+                    authenticatedFetch(`${API_URL}/streaming/create`, {
                         method: 'POST',
                         body: formData
                     })
@@ -8134,7 +8856,7 @@ function bindVideoEventHandlers() {
                     .then(data => {
                         if (data.success) {
                             // 创建成功，启动流媒体
-                            return fetch(`${API_URL}/streaming/start/${data.stream_id}`, {
+                            return authenticatedFetch(`${API_URL}/streaming/start/${data.stream_id}`, {
                                 method: 'POST'
                             });
                         } else {
@@ -8167,7 +8889,7 @@ function bindVideoEventHandlers() {
             const streamsList = document.getElementById('streams-list');
             if (!streamsList) return;
             
-            fetch(`${API_URL}/streaming/list`)
+            authenticatedFetch(`${API_URL}/streaming/list`)
                 .then(response => response.json())
                 .then(data => {
                     if (data.success && data.streams) {
@@ -8386,7 +9108,7 @@ function bindVideoEventHandlers() {
                     // 发送检测请求
                     console.log('发送检测请求，文件名：', fileName);
 
-                    fetch(`${API_URL}/detection/`, {
+                    authenticatedFetch(`${API_URL}/detection/`, {
                         method: 'POST',
                         body: formData
                     })
@@ -8412,7 +9134,7 @@ function bindVideoEventHandlers() {
                         // 检查是否有检测结果
                         if (data && data.id) {
                             // 获取检测结果
-                            fetch(`${API_URL}/detection/${data.id}/result`)
+                            authenticatedFetch(`${API_URL}/detection/${data.id}/result`)
                                 .then(response => response.json())
                                 .then(resultData => {
                                     console.log('Detection result:', resultData);

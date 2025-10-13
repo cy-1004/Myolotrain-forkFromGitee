@@ -13,7 +13,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 def init_database():
-    """初始化PostgreSQL数据库"""
+    """初始化PostgreSQL数据库，在检测不到目标数据库时自动创建"""
     logger.info("正在初始化PostgreSQL数据库...")
 
     # 数据库连接参数
@@ -36,13 +36,11 @@ def init_database():
         exists = cursor.fetchone()
 
         if exists:
-            # 如果数据库存在，先删除它
-            logger.info("删除已存在的yolov8_platform数据库...")
-            cursor.execute(sql.SQL("DROP DATABASE IF EXISTS {}").format(sql.Identifier('yolov8_platform')))
-
-        # 创建新数据库
-        logger.info("创建yolov8_platform数据库...")
-        cursor.execute(sql.SQL("CREATE DATABASE {} WITH ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0").format(sql.Identifier('yolov8_platform')))
+            logger.info("yolov8_platform数据库已存在，跳过创建步骤")
+        else:
+            # 创建新数据库
+            logger.info("创建yolov8_platform数据库...")
+            cursor.execute(sql.SQL("CREATE DATABASE {} WITH ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0").format(sql.Identifier('yolov8_platform')))
 
         # 关闭连接
         cursor.close()

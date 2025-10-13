@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户管理测试</title>
+    <!-- 使用本地Bootstrap资源 -->
+    <link rel="stylesheet" href="static/libs/bootstrap.min.css">
+    <link rel="stylesheet" href="static/libs/bootstrap-icons.css">
+    <link rel="stylesheet" href="static/css/style.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1>用户管理测试</h1>
+        <div id="page-content">
+            <!-- 用户管理内容将加载到这里 -->
+        </div>
+        <button id="loadUserMgmtBtn" class="btn btn-primary mt-3">加载用户管理</button>
+        <div id="debug-info" class="mt-5 p-3 bg-light border rounded">
+            <h3>调试信息</h3>
+            <pre id="debug-output"></pre>
+        </div>
+    </div>
+
+    <!-- Bootstrap模态框 -->
+    <div class="modal fade" id="mainModal" tabindex="-1" aria-labelledby="mainModalLabel" aria-hidden="true">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="mainModalLabel">模态框标题</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <!-- 模态框内容将动态填充 -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    <button type="button" id="modalSubmit" class="btn btn-primary">确认</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 用户管理模板 -->
+    <template id="user-management-template">
+        <div class="card">
+            <div class="card-header">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h2>用户管理</h2>
+                    <button id="add-user-btn" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> 添加用户
+                    </button>
+                </div>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>用户名</th>
+                                <th>角色</th>
+                                <th>创建时间</th>
+                                <th>最后登录</th>
+                                <th>状态</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body">
+                            <!-- 用户数据将动态填充 -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </template>
+
+    <script src="static/libs/bootstrap.bundle.min.js"></script>
+    <script src="static/js/main.js"></script>
+    <script>
+        // 调试函数
+        function debug(message) {
+            const debugOutput = document.getElementById('debug-output');
+            debugOutput.textContent += message + '\n';
+            console.log(message);
+        }
+
+        // 等待main.js加载完成
+        window.addEventListener('load', function() {
+            debug('页面加载完成，开始测试...');
+            
+            // 检查认证状态
+            if (isLoggedIn()) {
+                debug('用户已登录，尝试获取用户信息...');
+                // 直接调用getCurrentUser函数
+                getCurrentUser().then(() => {
+                    debug('用户信息获取完成，当前用户:', currentUser);
+                    debug('当前用户角色:', currentUser ? currentUser.role : '未定义');
+                }).catch(error => {
+                    debug('获取用户信息失败:', error);
+                });
+            } else {
+                debug('用户未登录，请先登录');
+                alert('请先登录系统');
+                window.location.href = '/login';
+            }
+
+            // 加载用户管理按钮点击事件
+            document.getElementById('loadUserMgmtBtn').addEventListener('click', function() {
+                debug('尝试直接加载用户管理页面...');
+                
+                // 检查main.js中是否已定义用户管理相关函数
+                if (typeof loadUserManagementPage === 'function' && typeof bindUserManagementEvents === 'function') {
+                    debug('发现用户管理相关函数，尝试直接调用...');
+                    
+                    // 获取模板并加载
+                    const template = document.getElementById('user-management-template');
+                    const pageContent = document.getElementById('page-content');
+                    
+                    if (template && pageContent) {
+                        pageContent.innerHTML = template.innerHTML;
+                        debug('用户管理模板已加载');
+                        
+                        // 调用相关函数
+                        loadUserManagementPage();
+                        bindUserManagementEvents();
+                        debug('用户管理功能已初始化');
+                    } else {
+                        debug('未找到用户管理模板或页面内容容器');
+                    }
+                } else {
+                    debug('未找到用户管理相关函数');
+                    debug('尝试直接访问用户API...');
+                    
+                    // 直接尝试获取用户列表
+                    authenticatedFetch('/api/auth/users')
+                        .then(response => {
+                            if (response.ok) {
+                                return response.json();
+                            }
+                            throw new Error('获取用户列表失败，状态码: ' + response.status);
+                        })
+                        .then(users => {
+                            debug('成功获取用户列表，共' + users.length + '个用户');
+                            alert('成功获取用户列表，共' + users.length + '个用户\n\n这表明后端API工作正常，但前端显示有问题');
+                        })
+                        .catch(error => {
+                            debug('获取用户列表失败:', error);
+                            alert('获取用户列表失败: ' + error.message);
+                        });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

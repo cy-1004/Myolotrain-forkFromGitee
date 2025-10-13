@@ -35,7 +35,9 @@ def get_db():
     try:
         yield db
     except Exception as e:
-        logger.error(f"Database session error: {e}", exc_info=True)
+        # 根据DEBUG模式决定是否输出完整错误堆栈
+        # 在生产模式下只输出错误摘要，不输出完整堆栈
+        logger.error(f"Database session error: {e}", exc_info=settings.DEBUG)
         raise
     finally:
         db.close()
