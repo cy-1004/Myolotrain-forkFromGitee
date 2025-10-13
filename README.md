@@ -12,9 +12,10 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 
 ### 更新日志：
 
-**-20251013 增加账户管理功能，优化提取帧功能。
+**-20251013 增加账户管理功能，优化提取帧功能**
 > - 开发者 @Tomle 完成：增加【用户管理】功能，初始账号密码admin/admin@123，请手动更新依赖。
 > - 优化视频处理-提取帧功能，增加下载、预览、删除服务器缓存功能
+> - ！！要求python3.12以上，更新依赖，更新docker安装依赖
 
 **-20250903 更新ultralytics版本、解决手动中断任务继续训练日志监控的问题**
 > - ！！更新ultralytics 8.3.191，如tensorboard无法生成文件，请务必更新！手动更新亦可，同时手动启用tensorboard，命令行：yolo settings tensorboard=True
@@ -323,7 +324,7 @@ Myolotrain/
 ## 3 系统要求
 
 - **操作系统**：Windows 10/11、Linux（Ubuntu 18.04+）或macOS
-- **Python**：Python 3.8或更高版本
+- **Python**：Python 3.12或更高版本
 - **数据库**：PostgreSQL 12或更高版本
 - **硬件**：
   - CPU：建议4核心以上
