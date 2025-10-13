@@ -7,6 +7,7 @@ import numpy as np
 import math
 import shutil
 import yaml
+import json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple, Optional, Union
 import logging
@@ -1261,6 +1262,11 @@ class OpenCVService:
             output_dir = Path(output_dir)
             os.makedirs(output_dir, exist_ok=True)
 
+            # 创建进度文件
+            progress_file = output_dir / "progress.json"
+            with open(progress_file, "w") as f:
+                json.dump({"status": "started", "progress": 0}, f)
+
             # 打开视频
             cap = cv2.VideoCapture(str(video_path))
             if not cap.isOpened():
@@ -1285,12 +1291,28 @@ class OpenCVService:
             if end_time is not None:
                 end_frame = min(int(end_time * fps), frame_count)
 
+            # 计算总的预期帧数（用于进度计算）
+            total_expected_frames = min(
+                (end_frame - start_frame) // frame_interval + 1,
+                max_frames if max_frames is not None else float('inf')
+            )
+            
             # 提取帧
             extracted_frames = []
             frame_index = start_frame
             extracted_count = 0
 
             while frame_index < end_frame:
+                # 更新进度 - 基于实际提取的帧数而不是帧索引
+                if total_expected_frames != float('inf'):
+                    progress = min(99, int((extracted_count / total_expected_frames) * 100))
+                else:
+                    # 如果没有最大帧数限制，基于帧索引位置计算进度
+                    progress = min(99, int(((frame_index - start_frame) / (end_frame - start_frame)) * 99))
+                    
+                with open(progress_file, "w") as f:
+                    json.dump({"status": "processing", "progress": progress, "extracted_frames": extracted_count}, f)
+
                 # 设置当前帧位置
                 cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
 
@@ -1321,7 +1343,8 @@ class OpenCVService:
                 extracted_frames.append({
                     "path": str(output_path),
                     "frame_index": frame_index,
-                    "timestamp": timestamp
+                    "timestamp": timestamp,
+                    "filename": filename
                 })
 
                 # 更新计数
@@ -1332,13 +1355,22 @@ class OpenCVService:
                 # 更新帧索引
                 frame_index += frame_interval
 
+            # 更新最终进度
+            with open(progress_file, "w") as f:
+                json.dump({
+                    "status": "completed", 
+                    "progress": 100, 
+                    "extracted_frames": extracted_count,
+                    "total_frames": frame_count
+                }, f)
+
             # 释放视频对象
             cap.release()
 
             return {
                 "total_frames": frame_count,
                 "extracted_frames": extracted_count,
-                "frames": extracted_frames,
+                "frames": [frame["filename"] for frame in extracted_frames],  # 只返回文件名
                 "video_info": {
                     "fps": fps,
                     "duration": duration,
@@ -1346,6 +1378,12 @@ class OpenCVService:
                 }
             }
         except Exception as e:
+            # 记录错误进度
+            progress_file = Path(output_dir) / "progress.json"
+            if progress_file.exists():
+                with open(progress_file, "w") as f:
+                    json.dump({"status": "failed", "error": str(e)}, f)
+            
             logger.error(f"提取视频帧失败: {str(e)}")
             raise HTTPException(status_code=500, detail=f"提取视频帧失败: {str(e)}")
 

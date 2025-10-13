@@ -173,7 +173,7 @@ async def get_extraction_status(extraction_id: str):
             "error": error_message
         }
     
-    # 检查是否完成
+    # 检查是否完成（优先检查info.json）
     info_file = output_dir / "info.json"
     if info_file.exists():
         with open(info_file, "r") as f:
@@ -183,21 +183,116 @@ async def get_extraction_status(extraction_id: str):
             "info": info
         }
     
+    # 检查进度文件
+    progress_file = output_dir / "progress.json"
+    if progress_file.exists():
+        with open(progress_file, "r") as f:
+            progress_data = json.load(f)
+        return progress_data
+    
     # 任务仍在进行中
     return {
         "status": "in_progress"
     }
 
 
+@router.delete("/frames/{extraction_id}")
+async def delete_extracted_frames(extraction_id: str):
+    """删除提取的帧缓存"""
+    output_dir = FRAMES_DIR / extraction_id
+    zip_file = FRAMES_DIR / f"frames_{extraction_id}.zip"
+    
+    if not output_dir.exists():
+        raise HTTPException(status_code=404, detail="提取任务不存在")
+    
+    try:
+        import shutil
+        # 删除帧目录
+        shutil.rmtree(output_dir)
+        # 如果存在压缩包也删除
+        if zip_file.exists():
+            zip_file.unlink()
+        return {"success": True, "message": "缓存已删除"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除缓存失败: {str(e)}")
+
+
 @router.get("/frames/{extraction_id}/{filename}")
-async def get_frame(extraction_id: str, filename: str):
+async def get_frame(extraction_id: str, filename: str, width: int = None, height: int = None):
     """获取提取的帧"""
     file_path = FRAMES_DIR / extraction_id / filename
     
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="帧不存在")
     
+    # 如果指定了尺寸，则返回调整尺寸后的图片
+    if width and height:
+        try:
+            from PIL import Image
+            import io
+            from fastapi.responses import StreamingResponse
+            
+            # 打开原始图片
+            img = Image.open(file_path)
+            
+            # 调整尺寸
+            img.thumbnail((width, height))
+            
+            # 将图片保存到内存中
+            img_io = io.BytesIO()
+            img.save(img_io, 'JPEG', quality=85)
+            img_io.seek(0)
+            
+            return StreamingResponse(img_io, media_type="image/jpeg")
+        except Exception as e:
+            # 如果处理失败，返回原始图片
+            return FileResponse(path=file_path)
+    
     return FileResponse(path=file_path)
+
+
+@router.get("/download-frames/{extraction_id}")
+async def download_frames(extraction_id: str):
+    """下载所有提取的帧为ZIP文件"""
+    output_dir = FRAMES_DIR / extraction_id
+    
+    if not output_dir.exists():
+        raise HTTPException(status_code=404, detail="提取任务不存在")
+    
+    # 创建ZIP文件
+    import zipfile
+    import tempfile
+    import shutil
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+    
+    try:
+        # 在静态目录下创建ZIP文件
+        zip_filename = f"frames_{extraction_id}.zip"
+        zip_path = FRAMES_DIR / zip_filename
+        
+        # 如果ZIP文件已存在，先删除
+        if zip_path.exists():
+            zip_path.unlink()
+        
+        # 创建ZIP文件
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            # 遍历所有帧文件
+            for file_path in output_dir.iterdir():
+                if file_path.is_file() and file_path.suffix.lower() in ['.jpg', '.jpeg', '.png']:
+                    # 添加文件到ZIP，保持目录结构
+                    zipf.write(file_path, file_path.name)
+        
+        # 返回ZIP文件
+        # 注意：这里我们不使用background_tasks来删除文件，因为FileResponse需要文件存在
+        # 文件将在下次下载时被覆盖删除
+        return FileResponse(
+            path=str(zip_path),
+            media_type='application/zip',
+            filename=zip_filename
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"创建ZIP文件失败: {str(e)}")
 
 
 @router.post("/detect-scenes")
