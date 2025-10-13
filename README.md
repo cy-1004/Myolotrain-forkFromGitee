@@ -10,12 +10,22 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 
 感谢所有开发者的帮助与支持
 
+### 关于开发阶段的环境依赖问题的说明
+
+自2025年10月后的代码，python版本须为3.12，目前此平台在python3.12，torch2.6.0、CUDA12.6环境下开发与测试，若您的环境无法安装以上版本，需自行解决numpy、onnxruntime等依赖版本问题
+
+ numpy版本对照：https://numpy.org/doc/
+
+ onnxruntime版本对照：https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html
+
+
+
 ### 更新日志：
 
 **-20251013 增加账户管理功能，优化提取帧功能**
-> - 开发者 @Tomle 完成：增加【用户管理】功能，初始账号密码admin/admin@123，请手动更新依赖。
+> - 开发者 @Tomle 完成：增加【用户管理】功能，初始账号密码admin/admin@123， **请手动更新依赖** 。
 > - 优化视频处理-提取帧功能，增加下载、预览、删除服务器缓存功能
-> - ！！要求python3.12以上，更新依赖，更新docker安装依赖
+> - ！！要求python3.12以上，更新依赖，更新docker安装依赖， **非docker用户需要手动安装onnxruntime，CPU版：onnxruntime>=1.21.0，GPU版：onnxruntime-gpu>=1.21.0** 并确保CUDA版本在12.0以上，python为3.12。
 
 **-20250903 更新ultralytics版本、解决手动中断任务继续训练日志监控的问题**
 > - ！！更新ultralytics 8.3.191，如tensorboard无法生成文件，请务必更新！手动更新亦可，同时手动启用tensorboard，命令行：yolo settings tensorboard=True
