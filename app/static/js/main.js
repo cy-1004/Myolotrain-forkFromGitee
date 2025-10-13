@@ -6692,110 +6692,242 @@ function bindVideoEventHandlers() {
                     console.log('提取帧成功，提取ID:', data.extraction_id);
                     document.getElementById('extraction-id').textContent = data.extraction_id;
                     
-                    // 显示提取进度（暂时关闭）
-                    // const progressElement = document.getElementById('extraction-progress');
-                    // if (progressElement) progressElement.textContent = `共提取了 ${data.extracted_frames || 0} 帧`;
-
                     // 显示结果区域
-                    // const resultArea = document.getElementById('extract-frames-result');
-                    // if (resultArea) resultArea.style.display = 'block';
+                    const resultArea = document.getElementById('extract-frames-result');
+                    if (resultArea) resultArea.style.display = 'block';
 
-                    // 显示提取结果
-                    // if (data.result) {
-                    //     console.log('提取到帧数:', data.result.extracted_frames || 0);
-                    //     document.getElementById('extracted-frames-count').textContent = data.result.extracted_frames || 0;
-                        
-                        // 确保下载按钮可见并启用
-                    //     const downloadAllBtn = document.getElementById('download-all-frames');
-                    //     if (downloadAllBtn) {
-                    //        downloadAllBtn.style.display = 'block';
-                    //        downloadAllBtn.disabled = false;
-                            
-                            // 绑定下载事件
-                    //        downloadAllBtn.onclick = function() {
-                    //            window.location.href = `${API_URL}/video/download-frames/${data.extraction_id}`;
-                    //        };
-                    //    }
+                    // 显示处理中状态
+                    document.getElementById('extracted-frames-count').textContent = '处理中...';
+                    const framesGallery = document.getElementById('frames-gallery');
+                    framesGallery.innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">正在处理中，请稍候...</div></div>';
+                    
+                    // 显示输出目录
+                    const outputDirElement = document.getElementById('output-dir-path');
+                    if (outputDirElement) {
+                        outputDirElement.textContent = data.output_dir;
+                    }
 
-                        // 显示帧图像
-                    //    const framesGallery = document.getElementById('frames-gallery');
-                    //    framesGallery.innerHTML = '';
+                    // 绑定删除缓存按钮事件
+                    const deleteCacheBtn = document.getElementById('delete-cache-btn');
+                    if (deleteCacheBtn) {
+                        deleteCacheBtn.onclick = function() {
+                            if (confirm('确定要删除服务器上的帧缓存吗？')) {
+                                fetch(`${API_URL}/video/frames/${data.extraction_id}`, {
+                                    method: 'DELETE'
+                                })
+                                .then(response => {
+                                    if (response.ok) {
+                                        return response.json();
+                                    } else {
+                                        return response.json().then(err => { throw new Error(err.detail || '删除失败'); });
+                                    }
+                                })
+                                .then(result => {
+                                    if (result.success) {
+                                        alert('缓存已删除');
+                                        // 隐藏结果区域
+                                        if (resultArea) resultArea.style.display = 'none';
+                                    } else {
+                                        alert('删除失败: ' + result.message);
+                                    }
+                                })
+                                .catch(error => {
+                                    alert('删除失败: ' + error.message);
+                                });
+                            }
+                        };
+                    }
 
-                        // 检查帧数据是否存在
-                    //    const frames = data.result.frames || [];
+                    // 开始轮询任务状态
+                    const extractionId = data.extraction_id;
+                    const statusInterval = setInterval(() => {
+                        fetch(`${API_URL}/video/extraction-status/${extractionId}`)
+                        .then(response => response.json())
+                        .then(statusData => {
+                            // 检查是否完成 - 无论info是否存在都要处理completed状态
+                            if (statusData.status === 'completed') {
+                                clearInterval(statusInterval);
+                                
+                                // 显示提取结果
+                                const result = statusData.info?.result || {};
+                                document.getElementById('extracted-frames-count').textContent = result.extracted_frames || statusData.extracted_frames || 0;
+                                
+                                // 显示帧图像
+                                const framesGallery = document.getElementById('frames-gallery');
+                                framesGallery.innerHTML = '';
 
-                    //    if (frames.length === 0) {
-                    //        framesGallery.innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">未提取到帧</div></div>';
-                    //    } else {
-                            // 只显示前20帧，避免页面过长
-                        //    const framesToShow = frames.slice(0, 20);
-                        //    framesToShow.forEach(frame => {
-                        //        const col = document.createElement('div');
-                        //        col.className = 'col-md-3 mb-3';
+                                // 检查帧数据是否存在
+                                const frames = result.frames || [];
 
-                        //        const card = document.createElement('div');
-                        //        card.className = 'card';
+                                if (frames.length === 0) {
+                                    framesGallery.innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">未提取到帧</div></div>';
+                                } else {
+                                    // 只显示前4帧，避免页面过长
+                                    const framesToShow = frames.slice(0, 4);
+                                    framesToShow.forEach(frame => {
+                                        const col = document.createElement('div');
+                                        col.className = 'col-md-3 mb-3';
 
-                        //        const img = document.createElement('img');
-                        //        img.className = 'card-img-top';
-                        //        img.src = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
-                        //        img.alt = `Frame ${frame}`;
+                                        const card = document.createElement('div');
+                                        card.className = 'card';
 
-                        //        const cardBody = document.createElement('div');
-                        //        cardBody.className = 'card-body';
+                                        const img = document.createElement('img');
+                                        img.className = 'card-img-top';
+                                        // 限制图片最大尺寸以提高加载性能
+                                        img.style.maxWidth = '100%';
+                                        img.style.height = '150px';
+                                        img.style.objectFit = 'cover';
+                                        // 请求调整尺寸后的图片以减少带宽使用
+                                        img.src = `${API_URL}/video/frames/${data.extraction_id}/${frame}?width=300&height=200`;
+                                        img.alt = `Frame ${frame}`;
+                                        // 添加懒加载属性
+                                        img.loading = 'lazy';
 
-                        //        const cardText = document.createElement('p');
-                        //        cardText.className = 'card-text';
-                        //        cardText.textContent = `帧 ${frame}`;
+                                        const cardBody = document.createElement('div');
+                                        cardBody.className = 'card-body';
 
-                        //        const downloadBtn = document.createElement('a');
-                        //        downloadBtn.className = 'btn btn-sm btn-primary';
-                        //        downloadBtn.href = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
-                        //        downloadBtn.download = frame;
-                        //        downloadBtn.textContent = '下载';
+                                        const cardText = document.createElement('p');
+                                        cardText.className = 'card-text';
+                                        cardText.textContent = `帧 ${frame}`;
 
-                        //        cardBody.appendChild(cardText);
-                        //        cardBody.appendChild(downloadBtn);
-                        //        card.appendChild(img);
-                        //        card.appendChild(cardBody);
-                        //        col.appendChild(card);
-                        //        framesGallery.appendChild(col);
-                        //    });
+                                        const downloadBtn = document.createElement('a');
+                                        downloadBtn.className = 'btn btn-sm btn-primary';
+                                        downloadBtn.href = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
+                                        downloadBtn.download = frame;
+                                        downloadBtn.textContent = '下载';
 
-                            // 如果有更多帧，显示提示
-                        //    if (frames.length > 20) {
-                        //        const moreFrames = document.createElement('div');
-                        //        moreFrames.className = 'col-12 text-center mt-3';
-                        //        moreFrames.innerHTML = `<div class="alert alert-info">还有 ${frames.length - 20} 帧未显示</div>`;
-                        //        framesGallery.appendChild(moreFrames);
-                        //    }
+                                        cardBody.appendChild(cardText);
+                                        cardBody.appendChild(downloadBtn);
+                                        card.appendChild(img);
+                                        card.appendChild(cardBody);
+                                        col.appendChild(card);
+                                        framesGallery.appendChild(col);
+                                    });
 
-                            // 绑定下载所有帧按钮事件
-                        //    const downloadAllBtn = document.getElementById('download-all-frames');
-                        //    if (downloadAllBtn) {
-                        //        downloadAllBtn.style.display = 'block';
-                        //        downloadAllBtn.onclick = function() {
-                                    // 显示下载中状态
-                        //            const originalText = downloadAllBtn.textContent;
-                        //            downloadAllBtn.disabled = true;
-                        //            downloadAllBtn.textContent = '下载中...';
-                                    
-                        //            window.open(`${API_URL}/video/download-frames/${data.extraction_id}`, '_blank');
-                                    
-                                    // 3秒后恢复按钮状态
-                        //            setTimeout(() => {
-                        //                downloadAllBtn.disabled = false;
-                        //                downloadAllBtn.textContent = originalText;
-                        //            }, 3000);
-                        //        };
-                        //    }
-                    //    }
-                    //} else {
-                    //    document.getElementById('extracted-frames-count').textContent = '处理中...';
-                    //    document.getElementById('frames-gallery').innerHTML = '<div class="col-12 text-center"><div class="alert alert-info">正在处理中，请稍候...</div></div>';
-                //    }
-            //    } else {
-            //        console.error('提取帧响应数据格式错误:', data);
+                                    // 如果有更多帧，显示提示和预览全部按钮
+                                    if (frames.length > 4) {
+                                        const moreFrames = document.createElement('div');
+                                        moreFrames.className = 'col-12 text-center mt-3';
+                                        moreFrames.innerHTML = `
+                                            <div class="alert alert-info">
+                                                还有 ${frames.length - 4} 帧未显示
+                                                <button class="btn btn-sm btn-outline-primary ms-2" id="preview-all-frames">预览全部</button>
+                                            </div>
+                                        `;
+                                        framesGallery.appendChild(moreFrames);
+                                        
+                                        // 绑定预览全部按钮事件
+                                        document.getElementById('preview-all-frames').addEventListener('click', function() {
+                                            // 清空画廊
+                                            framesGallery.innerHTML = '';
+                                            
+                                            // 分批显示帧，避免一次性加载过多图片
+                                            const batchSize = 20; // 每批显示20帧
+                                            let currentIndex = 0;
+                                            
+                                            const displayBatch = () => {
+                                                const batchEnd = Math.min(currentIndex + batchSize, frames.length);
+                                                const batchFrames = frames.slice(currentIndex, batchEnd);
+                                                
+                                                batchFrames.forEach(frame => {
+                                                    const col = document.createElement('div');
+                                                    col.className = 'col-md-3 mb-3';
+
+                                                    const card = document.createElement('div');
+                                                    card.className = 'card';
+
+                                                    const img = document.createElement('img');
+                                                    img.className = 'card-img-top';
+                                                    // 限制图片最大尺寸以提高加载性能
+                                                    img.style.maxWidth = '100%';
+                                                    img.style.height = '150px';
+                                                    img.style.objectFit = 'cover';
+                                                    // 请求调整尺寸后的图片以减少带宽使用
+                                                    img.src = `${API_URL}/video/frames/${data.extraction_id}/${frame}?width=300&height=200`;
+                                                    img.alt = `Frame ${frame}`;
+                                                    // 添加懒加载属性
+                                                    img.loading = 'lazy';
+
+                                                    const cardBody = document.createElement('div');
+                                                    cardBody.className = 'card-body';
+
+                                                    const cardText = document.createElement('p');
+                                                    cardText.className = 'card-text';
+                                                    cardText.textContent = `帧 ${frame}`;
+
+                                                    const downloadBtn = document.createElement('a');
+                                                    downloadBtn.className = 'btn btn-sm btn-primary';
+                                                    downloadBtn.href = `${API_URL}/video/frames/${data.extraction_id}/${frame}`;
+                                                    downloadBtn.download = frame;
+                                                    downloadBtn.textContent = '下载';
+
+                                                    cardBody.appendChild(cardText);
+                                                    cardBody.appendChild(downloadBtn);
+                                                    card.appendChild(img);
+                                                    card.appendChild(cardBody);
+                                                    col.appendChild(card);
+                                                    framesGallery.appendChild(col);
+                                                });
+                                                
+                                                currentIndex = batchEnd;
+                                                
+                                                // 如果还有更多帧，添加"加载更多"按钮
+                                                if (currentIndex < frames.length) {
+                                                    const loadMoreDiv = document.createElement('div');
+                                                    loadMoreDiv.className = 'col-12 text-center mt-3';
+                                                    loadMoreDiv.innerHTML = `
+                                                        <button class="btn btn-outline-primary" id="load-more-frames">加载更多 (${frames.length - currentIndex} 帧剩余)</button>
+                                                    `;
+                                                    framesGallery.appendChild(loadMoreDiv);
+                                                    
+                                                    document.getElementById('load-more-frames').addEventListener('click', function() {
+                                                        loadMoreDiv.remove();
+                                                        displayBatch();
+                                                    });
+                                                }
+                                            };
+                                            
+                                            displayBatch();
+                                        });
+                                    }
+
+                                    // 绑定下载所有帧按钮事件
+                                    const downloadAllBtn = document.getElementById('download-all-frames');
+                                    if (downloadAllBtn) {
+                                        downloadAllBtn.style.display = 'block';
+                                        downloadAllBtn.onclick = function() {
+                                            // 创建一个临时的下载链接
+                                            const downloadUrl = `${API_URL}/video/download-frames/${data.extraction_id}`;
+                                            const link = document.createElement('a');
+                                            link.href = downloadUrl;
+                                            link.download = `frames_${data.extraction_id}.zip`;
+                                            document.body.appendChild(link);
+                                            link.click();
+                                            document.body.removeChild(link);
+                                        };
+                                    }
+                                }
+                            } else if (statusData.status === 'failed') {
+                                clearInterval(statusInterval);
+                                document.getElementById('extracted-frames-count').textContent = '0';
+                                framesGallery.innerHTML = `<div class="col-12 text-center"><div class="alert alert-danger">提取失败: ${statusData.error || '未知错误'}</div></div>`;
+                            } else if (statusData.status === 'processing' || statusData.status === 'started') {
+                                // 更新进度
+                                document.getElementById('extracted-frames-count').textContent = statusData.extracted_frames || '0';
+                                const progressText = statusData.progress ? ` (${statusData.progress}%)` : '';
+                                framesGallery.innerHTML = `<div class="col-12 text-center"><div class="alert alert-info">正在处理中${progressText}，请稍候...</div>
+                                <div class="progress mt-2">
+                                  <div class="progress-bar" role="progressbar" style="width: ${statusData.progress || 0}%" aria-valuenow="${statusData.progress || 0}" aria-valuemin="0" aria-valuemax="100">${statusData.progress || 0}%</div>
+                                </div></div>`;
+                            }
+                        })
+                        .catch(error => {
+                            console.error('获取任务状态失败:', error);
+                            clearInterval(statusInterval);
+                        });
+                    }, 1000); // 每秒查询一次状态
+                } else {
+                    console.error('提取帧响应数据格式错误:', data);
                 }
             })
             .catch(error => {

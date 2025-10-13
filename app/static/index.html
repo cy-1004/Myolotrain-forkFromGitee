@@ -823,7 +823,7 @@
                                 <input type="number" class="form-control" id="end-time" name="end_time" min="0" step="0.1">
                             </div>
 
-                            <button type="submit" class="btn btn-primary" id="extract-frames-btn">提取帧（保存位置\app\static\video_frames）</button>
+                            <button type="submit" class="btn btn-primary" id="extract-frames-btn">提取帧</button>
                         </form>
 
                         <div class="mt-4" id="extract-frames-result" style="display: none;">
@@ -831,6 +831,7 @@
                             <div class="alert alert-info">
                                 <p>共提取了 <span id="extracted-frames-count">0</span> 帧</p>
                                 <p>提取ID: <span id="extraction-id"></span></p>
+                                <p>输出目录: <span id="output-dir-path"></span></p>
                             </div>
 
                             <div class="row" id="frames-gallery">
@@ -838,7 +839,8 @@
                             </div>
 
                             <div class="mt-3">
-                                <button class="btn btn-success" id="download-all-frames">下载所有帧</button>
+                                <button class="btn btn-success me-2" id="download-all-frames" style="display: none;">下载所有帧</button>
+                                <button class="btn btn-danger" id="delete-cache-btn">删除服务器缓存</button>
                             </div>
                         </div>
                     </div>
