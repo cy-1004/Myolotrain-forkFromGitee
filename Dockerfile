@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.12-slim
 
 # 配置apt使用国内镜像源
 RUN sed -i 's/deb.debian.org/mirrors.ustc.edu.cn/g' /etc/apt/sources.list
@@ -24,7 +24,8 @@ trusted-host = pypi.tuna.tsinghua.edu.cn" > /root/.pip/pip.conf
 
 # 复制依赖文件并安装
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# 安装基础依赖，并添加CPU版本的onnxruntime 1.21.0
+RUN pip install --no-cache-dir -r requirements.txt onnxruntime==1.21.0
 
 # 复制应用代码
 COPY . .

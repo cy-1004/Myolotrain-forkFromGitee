@@ -11,7 +11,7 @@
 
 # YOLO and dependencies
 ultralytics>=8.3.191
-numpy>=1.24.0
+numpy>=1.26.0   #仅有1.26.0以上支持python3.12
 opencv-python>=4.8.0
 PyYAML>=5.3.1
 tqdm>=4.41.0
@@ -47,14 +47,11 @@ pydantic-settings>=2.0.0
 # File handling
 aiofiles>=23.0
 
-# ONNX support(1010增加GPU支持）
+# ONNX support
+onnx>=1.16.0
+onnxslim>=0.1.71
+sympy>=1.14.0
 
 # Authentication
 passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.3.0
-onnx>=1.16.0
-onnxruntime-gpu==1.23.0
-onnxslim>=0.1.71
-sympy>=1.14.0
-
-
