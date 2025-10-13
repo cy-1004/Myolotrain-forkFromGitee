@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>登录 - Myolotrain系统</title>
+    <link href="static/libs/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #f8f9fa;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+            padding: 15px;
+            margin: 0 auto;
+        }
+        .login-card {
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+        }
+        .login-title {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: #333;
+        }
+        .login-btn {
+            width: 100%;
+        }
+        .error-message {
+            color: #dc3545;
+            margin-top: 0.5rem;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-card">
+            <h2 class="login-title">Myolotrain 系统登录</h2>
+            <form id="login-form">
+                <div class="mb-3">
+                    <label for="username" class="form-label">用户名</label>
+                    <input type="text" class="form-control" id="username" placeholder="请输入用户名" required>
+                </div>
+                <div class="mb-3">
+                    <label for="password" class="form-label">密码</label>
+                    <input type="password" class="form-control" id="password" placeholder="请输入密码" required>
+                </div>
+                <div id="login-error" class="error-message" style="display: none;"></div>
+                <button type="submit" class="btn btn-primary login-btn">登录</button>
+            </form>
+        </div>
+    </div>
+
+    <script src="static/libs/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const loginForm = document.getElementById('login-form');
+            const loginError = document.getElementById('login-error');
+            
+            // 检查是否已登录，如果已登录则直接跳转到主页面
+            checkLoginStatus();
+            
+            loginForm.addEventListener('submit', function(e) {
+                e.preventDefault();
+                
+                const username = document.getElementById('username').value;
+                const password = document.getElementById('password').value;
+                
+                // 清空之前的错误信息
+                loginError.style.display = 'none';
+                
+                // 发送登录请求
+                fetch('/api/auth/token', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                    },
+                    body: new URLSearchParams({
+                        'username': username,
+                        'password': password
+                    })
+                })
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(err => {
+                            throw new Error(err.detail || '登录失败，请检查用户名和密码');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    // 保存token到localStorage
+                    localStorage.setItem('access_token', data.access_token);
+                    localStorage.setItem('token_type', data.token_type);
+                    
+                    // 同时将token保存到Cookie中，有效期30分钟
+                    const tokenExpiry = new Date();
+                    tokenExpiry.setTime(tokenExpiry.getTime() + 30 * 60 * 1000);
+                    document.cookie = `access_token=${data.access_token}; expires=${tokenExpiry.toUTCString()}; path=/; SameSite=Lax`;
+                    document.cookie = `token_type=${data.token_type}; expires=${tokenExpiry.toUTCString()}; path=/; SameSite=Lax`;
+                    
+                    // 简化登录流程，直接跳转到主页
+                    // 避免因为/api/auth/users/me请求失败导致登录问题
+                    window.location.href = '/';
+                })
+                .catch(error => {
+                    // 优化错误处理，只显示友好的错误信息
+                    let errorMessage = '登录失败，请检查用户名和密码';
+                    
+                    // 尝试解析错误对象，获取更具体的错误信息
+                    if (error.message && (error.message.includes('Incorrect username or password') || error.message.includes('用户名或密码错误'))) {
+                        errorMessage = '用户名或密码错误';
+                    } else if (error.message && error.message.includes('Could not validate credentials')) {
+                        errorMessage = '无法验证凭证，请重新登录';
+                    }
+                    
+                    loginError.textContent = errorMessage;
+                    loginError.style.display = 'block';
+                });
+            });
+        });
+        
+        // 简化登录状态检查逻辑，避免因为/api/auth/users/me请求失败导致问题
+        function checkLoginStatus() {
+            const accessToken = localStorage.getItem('access_token');
+            if (accessToken) {
+                // 验证令牌有效性后再跳转
+                // 避免无效令牌导致的页面循环刷新
+                fetch('/api/auth/validate-token', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                })
+                .then(response => {
+                    if (response.ok) {
+                        // 令牌有效，跳转到主页
+                        window.location.href = '/';
+                    } else {
+                        // 令牌无效，留在登录页面
+                        localStorage.removeItem('access_token');
+                        localStorage.removeItem('token_type');
+                        document.cookie = 'access_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                        document.cookie = 'token_type=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;';
+                    }
+                })
+                .catch(error => {
+                    // 验证请求失败，留在登录页面
+                    console.error('验证令牌失败:', error);
+                });
+            }
+        }
+    </script>
+</body>
+</html>

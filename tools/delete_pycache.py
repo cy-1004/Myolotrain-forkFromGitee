@@ -16,7 +16,7 @@ def remove_pycache(start_path):
                 print(f"删除失败 {pycache_path}: {e}")
 
 if __name__ == '__main__':
-    parent_dir = os.path.abspath(os.path.join(os.getcwd(), '..'))
-    print(f"正在清理上级目录: {parent_dir}")
-    remove_pycache(parent_dir)
-    print("清理完成")
+    project_dir = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+    print(f"正在清理项目目录: {project_dir}")
+    remove_pycache(project_dir)
+    print("__pycache__文件夹清理完成")

@@ -1,8 +1,11 @@
 from fastapi import APIRouter
 
-from app.api.endpoints import datasets, models, training, detection, opencv, video, tracking, streaming, annotation, settings, tools
+from app.api.endpoints import auth, datasets, models, training, detection, opencv, video, tracking, streaming, annotation, settings, tools
 
 api_router = APIRouter()
+# 认证路由
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+# 功能模块路由
 api_router.include_router(datasets.router, prefix="/datasets", tags=["datasets"])
 api_router.include_router(models.router, prefix="/models", tags=["models"])
 api_router.include_router(training.router, prefix="/training", tags=["training"])
