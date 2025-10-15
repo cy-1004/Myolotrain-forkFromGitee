@@ -426,14 +426,20 @@ class AnnotationTool {
                             this.imageList[previousImageIndex].is_completed = true;
                         }
                         this.updateImageList();
+                        // 更新标注进度
+                        await this.loadProjectStats();
                     }
                 } catch (error) {
                     console.error('自动标记完成失败:', error);
                 }
             };
             
-            // 这里不等待完成，避免影响用户体验
-            markPreviousCompleted();
+            // 优化：使用立即执行的异步函数确保更好的错误处理
+            (async () => {
+                await markPreviousCompleted();
+            })().catch(err => {
+                console.error('执行标记完成过程中出错:', err);
+            });
         }
         
         // 更新图片列表选中状态
@@ -450,6 +456,16 @@ class AnnotationTool {
             this.redraw();
             
             document.getElementById('current-image-name').textContent = this.currentImageData.image_name;
+            
+            // 切换到新图片后立即更新标注进度
+            // 改进：添加异步处理和错误捕获
+            (async () => {
+                try {
+                    await this.loadProjectStats();
+                } catch (error) {
+                    console.error('更新进度失败:', error);
+                }
+            })();
         };
         
         // 使用API端点获取图片文件
