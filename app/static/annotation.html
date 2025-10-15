@@ -85,6 +85,31 @@
             border-radius: 8px;
             margin-bottom: 20px;
         }
+        
+        /* 标注列表项样式 */
+        .annotation-list-item {
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #e0e0e0;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .annotation-list-item.selected {
+            background-color: #e3f2fd;
+            border-color: #2196f3;
+        }
+        
+        .annotation-info {
+            flex-grow: 1;
+        }
+        
+        .annotation-actions {
+            flex-shrink: 0;
+        }
     </style>
 </head>
 <body>
@@ -146,26 +171,6 @@
                         </button>
                     </div>
                 </div>
-
-                <!-- 批量操作区域 -->
-                <div class="card mt-3">
-                    <div class="card-header">
-                        <h5><i class="fas fa-tasks"></i> 批量操作</h5>
-                    </div>
-                    <div class="card-body">
-                        <div class="btn-group-vertical w-100 gap-2">
-                            <button id="ai-auto-annotate" class="btn btn-warning">
-                                <i class="fas fa-robot"></i> AI自动标注
-                            </button>
-                            <button id="stop-auto-annotate" class="btn btn-danger" style="display: none;">
-                                <i class="fas fa-stop"></i> 停止标注
-                            </button>
-                            <button id="mark-all-completed" class="btn btn-primary">
-                                <i class="fas fa-check-double"></i> 一键全部完成
-                            </button>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- 中间图片区域 -->
@@ -200,6 +205,11 @@
 
                 <div class="mt-3 text-center">
                     <div class="btn-group">
+                        <button id="toggle-guidelines" class="btn btn-outline-secondary">
+                            <i class="fas fa-crosshairs"></i> 显示辅助线
+                        </button>
+                        <!-- 辅助线颜色选择器 -->
+                        <input type="color" id="guideline-color" class="form-control form-control-sm" style="width: 40px; height: 38px; padding: 2px; border: none;" title="辅助线颜色">
                         <button id="zoom-in" class="btn btn-outline-secondary">
                             <i class="fas fa-search-plus"></i> 放大
                         </button>
@@ -215,6 +225,26 @@
 
             <!-- 右侧图片列表 -->
             <div class="col-md-3">
+                <!-- 批量操作区域 -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <h5><i class="fas fa-tasks"></i> 批量操作</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="btn-group-vertical w-100 gap-2">
+                            <button id="ai-auto-annotate" class="btn btn-warning">
+                                <i class="fas fa-robot"></i> AI自动标注
+                            </button>
+                            <button id="stop-auto-annotate" class="btn btn-danger" style="display: none;">
+                                <i class="fas fa-stop"></i> 停止标注
+                            </button>
+                            <button id="mark-all-completed" class="btn btn-primary">
+                                <i class="fas fa-check-double"></i> 一键全部完成
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header">
                         <h5><i class="fas fa-images"></i> 图片列表</h5>

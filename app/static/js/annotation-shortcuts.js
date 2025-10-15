@@ -95,6 +95,37 @@ class AnnotationShortcuts {
                 }
                 break;
                 
+            // 新增：辅助线切换快捷键 (G键)
+            case 'KeyG':
+                e.preventDefault();
+                this.annotationManager.toggleGuidelines();
+                break;
+                
+            // 新增：缩放快捷键
+            case 'Equal': // +键
+            case 'NumpadAdd':
+                e.preventDefault();
+                if (this.annotationManager.canvas) {
+                    this.annotationManager.canvas.zoom(1.2);
+                }
+                break;
+                
+            case 'Minus': // -键
+            case 'NumpadSubtract':
+                e.preventDefault();
+                if (this.annotationManager.canvas) {
+                    this.annotationManager.canvas.zoom(0.8);
+                }
+                break;
+                
+            case 'Digit0': // 0键重置缩放
+            case 'Numpad0':
+                e.preventDefault();
+                if (this.annotationManager.canvas) {
+                    this.annotationManager.canvas.resetZoom();
+                }
+                break;
+                
             // 数字键快速选择类别
             case 'Digit1':
             case 'Digit2':

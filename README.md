@@ -6,21 +6,23 @@
 
 Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机视觉任务提供了直观的图形界面。该平台集成了数据集管理、模型管理、训练管理和目标检测功能，支持windows、linux、docker等多种部署方式，使用户能够轻松地训练和部署 YOLOv8 模型，支持CPU和GPU，使用tensorboard实时查看训练进度，具备数据集自动分割、数据集增强、实时检测、动态轨迹和预测等。
 
+## 声明
+
+- :construction:  **本项目目前处于早期开发阶段，现阶段功能并不完整，不建议用于生产环境，开发阶段API、功能和文档会频繁变动。欢迎参与开发、试用、提Issue 或提交PR。**
+
+- :bangbang: **本项目独立开发的功能完全开源、不限制商用，因目前代码中的训练、推理等功能使用Ultralytics，具体开源协议请遵循Ultralytics，由于使用本项目而产生的商业纠纷或侵权行为一概与本项目开发者无关，请自行承担法律风险。**
+
+- 自2025年10月后的代码，python版本须为3.12，目前此平台在python3.12，torch2.6.0、CUDA12.6环境下开发与测试，若您的环境无法安装以上版本，需自行解决numpy、onnxruntime等依赖版本问题（numpy版本对照：https://numpy.org/doc/  onnxruntime版本对照：https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html)
+
 ## 致谢
 
 感谢所有开发者的帮助与支持
 
-### 关于开发阶段的环境依赖问题的说明
-
-自2025年10月后的代码，python版本须为3.12，目前此平台在python3.12，torch2.6.0、CUDA12.6环境下开发与测试，若您的环境无法安装以上版本，需自行解决numpy、onnxruntime等依赖版本问题
-
- numpy版本对照：https://numpy.org/doc/
-
- onnxruntime版本对照：https://onnxruntime.ai/docs/execution-providers/CUDA-ExecutionProvider.html
-
-
 
 ### 更新日志：
+
+**-20251015 优化在线标注功能，提高标注效率**
+> - 优化在线标注功能，增加辅助线、标注框选择与删除、增加标注框ID、鼠标滚轮放大缩小图片 。
 
 **-20251013 增加账户管理功能，优化提取帧功能**
 > - 开发者 @Tomle 完成：增加【用户管理】功能，初始账号密码admin/admin@123， **请手动更新依赖** 。
