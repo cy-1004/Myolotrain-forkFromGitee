@@ -87,7 +87,7 @@ class AnnotationService:
         return project
 
     def scan_images(self, db: Session, project_id: UUID, image_directory: str) -> int:
-        """扫描图片目录，创建图片标注记录"""
+        """扫描图片目录，更新图片标注记录，保留已有标注信息"""
         project = annotation_project.get(db, id=project_id)
         if not project:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -99,15 +99,10 @@ class AnnotationService:
         # 支持的图片格式
         image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
         
-        # 先清理现有的图片记录
-        existing_images = image_annotation.get_by_project_id(db, project_id=project_id, skip=0, limit=10000)
-        for img in existing_images:
-            image_annotation.remove(db, id=img.id)
-        
-        count = 0
+        # 获取当前目录中的所有图片文件
+        current_image_files = []
         for image_file in image_dir.iterdir():
-            if image_file.suffix.lower() in image_extensions:
-                # 计算相对于static目录的路径
+            if image_file.is_file() and image_file.suffix.lower() in image_extensions:
                 try:
                     # 尝试获取相对于static目录的路径
                     static_dir = Path("app/static")
@@ -120,21 +115,38 @@ class AnnotationService:
                     # 如果无法计算相对路径，使用绝对路径
                     relative_path = str(image_file)
                 
-                # 创建图片标注记录
+                current_image_files.append({
+                    'path': relative_path,
+                    'name': image_file.name
+                })
+        
+        # 获取数据库中已有的图片记录
+        existing_images = image_annotation.get_by_project_id(db, project_id=project_id, skip=0, limit=10000)
+        existing_image_paths = {img.image_path: img for img in existing_images}
+        
+        # 处理新增的图片
+        for image_info in current_image_files:
+            if image_info['path'] not in existing_image_paths:
+                # 创建新的图片标注记录
                 image_annotation_data = ImageAnnotationCreate(
                     project_id=project.id,
-                    image_path=relative_path,
-                    image_name=image_file.name,
+                    image_path=image_info['path'],
+                    image_name=image_info['name'],
                     annotations=[],
                     is_completed=False
                 )
                 image_annotation.create(db, obj_in=image_annotation_data)
-                count += 1
+        
+        # 处理删除的图片
+        current_paths = {img['path'] for img in current_image_files}
+        for path, img in existing_image_paths.items():
+            if path not in current_paths:
+                image_annotation.remove(db, id=img.id)
         
         # 提交数据库事务
         db.commit()
         
-        return count
+        return len(current_image_files)
     
     def _scan_images(self, db: Session, project: AnnotationProject, image_directory: str):
         """初始扫描图片目录（内部使用）"""
