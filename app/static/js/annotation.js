@@ -112,48 +112,72 @@ class AnnotationTool {
         this.mouseX = e.clientX - rect.left;
         this.mouseY = e.clientY - rect.top;
         
-        // 转换为画布坐标（考虑缩放和偏移）
+        // 考虑画布偏移和缩放
         const canvasX = (this.mouseX - this.offsetX) / this.scale;
         const canvasY = (this.mouseY - this.offsetY) / this.scale;
         
+        // 修改：检测用户是否在点击标注框后开始拖拽
+        // 如果用户点击了一个标注框，但随后拖动了鼠标超过一定距离，则切换到绘制模式
+        if (this.selectedAnnotation && this.clickStartX !== undefined && 
+            Math.abs(e.clientX - this.clickStartX) > 5 && Math.abs(e.clientY - this.clickStartY) > 5) {
+            // 用户开始拖拽，取消选中并切换到绘制模式
+            this.selectedAnnotation = null;
+            this.isDrawing = true;
+            this.startX = this.clickStartX;
+            this.startY = this.clickStartY;
+            // 重新计算起始点为画布坐标
+            this.startX = (this.clickStartX - rect.left - this.offsetX) / this.scale;
+            this.startY = (this.clickStartY - rect.top - this.offsetY) / this.scale;
+            this.clickStartX = undefined;
+            this.clickStartY = undefined;
+        }
+        
+        // 绘制模式
         if (this.isDrawing) {
+            // 计算当前矩形
+            const width = canvasX - this.startX;
+            const height = canvasY - this.startY;
+            
+            // 确保矩形坐标正确（左上角为原点）
             this.currentBox = {
-                x: Math.min(this.startX, canvasX),
-                y: Math.min(this.startY, canvasY),
-                width: Math.abs(canvasX - this.startX),
-                height: Math.abs(canvasY - this.startY)
+                x: width < 0 ? canvasX : this.startX,
+                y: height < 0 ? canvasY : this.startY,
+                width: Math.abs(width),
+                height: Math.abs(height)
             };
             
             this.redraw();
         } else if (this.isDragging && this.selectedAnnotation) {
-            // 拖拽标注框
-            const deltaX = canvasX - this.dragStartX;
-            const deltaY = canvasY - this.dragStartY;
+            // 拖拽模式
+            const dx = canvasX - this.dragStartX;
+            const dy = canvasY - this.dragStartY;
             
-            this.selectedAnnotation.x += deltaX;
-            this.selectedAnnotation.y += deltaY;
+            this.selectedAnnotation.x += dx;
+            this.selectedAnnotation.y += dy;
             
-            // 更新拖拽起始位置
             this.dragStartX = canvasX;
             this.dragStartY = canvasY;
             
             this.redraw();
         } else if (this.isResizing && this.selectedAnnotation) {
-            // 调整标注框大小
+            // 调整大小模式
             this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle);
             this.redraw();
         } else if (this.isPanning) {
-            // 拖动画布
-            this.offsetX += this.mouseX - this.panStartX;
-            this.offsetY += this.mouseY - this.panStartY;
+            // 平移模式
+            const dx = this.mouseX - this.panStartX;
+            const dy = this.mouseY - this.panStartY;
+            
+            this.offsetX += dx;
+            this.offsetY += dy;
+            
             this.panStartX = this.mouseX;
             this.panStartY = this.mouseY;
+            
             this.redraw();
-        }
-        
-        // 每次鼠标移动都重绘，以确保辅助线跟随鼠标
-        if (this.showGuidelines) {
-            this.redraw();
+        } else {
+            // 普通鼠标移动，更新鼠标样式
+            this.updateCursor(canvasX, canvasY);
         }
     }
     
@@ -475,8 +499,8 @@ class AnnotationTool {
     resizeCanvas() {
         if (!this.currentImage) return;
         
-        const maxWidth = window.innerWidth * 0.7; // 自动计算窗口高度的60%作为最大款度
-        const maxHeight = window.innerHeight * 0.7; // 自动计算窗口高度的70%作为最大高度
+        const maxWidth = 800
+        const maxHeight = 600
         
         let { width, height } = this.currentImage;
         
@@ -657,8 +681,17 @@ class AnnotationTool {
             }
         }
         
-        // 如果点击了标注框，则选中它而不是开始绘制
-        if (clickedAnnotation) {
+        // 修改：添加拖拽绘制的逻辑，允许在标注框内绘制新的标注
+        // 使用鼠标移动距离来区分简单点击和拖拽操作
+        // 当用户点击并开始拖动时，即使在现有标注框内也直接开始绘制新标注
+        
+        // 存储初始点击位置，用于后续检测是否为拖拽操作
+        this.clickStartX = e.clientX;
+        this.clickStartY = e.clientY;
+        
+        if (clickedAnnotation && !e.shiftKey && !this.isPanning && !this.isPanReady) {
+            // 仅在简单点击且未按Shift键、未在平移模式时才选中现有标注框
+            // 注意：我们会在onMouseMove中检测是否开始拖拽，如果是拖拽则会切换到绘制模式
             this.selectedAnnotation = clickedAnnotation;
             this.updateAnnotationList(); // 更新标注列表显示
             this.redraw();
@@ -701,8 +734,12 @@ class AnnotationTool {
             this.saveAnnotation();
         } else if (this.isPanning) {
             this.isPanning = false;
-            this.canvas.style.cursor = this.isPanReady ? 'grab' : 'crosshair';
+            this.canvas.style.cursor = 'default';
         }
+        
+        // 清除初始点击位置记录
+        this.clickStartX = undefined;
+        this.clickStartY = undefined;
     }
     
     // 新增：获取调整大小的控制点
