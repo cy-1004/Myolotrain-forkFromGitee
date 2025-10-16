@@ -475,8 +475,8 @@ class AnnotationTool {
     resizeCanvas() {
         if (!this.currentImage) return;
         
-        const maxWidth = 800;
-        const maxHeight = 600;
+        const maxWidth = window.innerWidth * 0.7; // 自动计算窗口高度的60%作为最大款度
+        const maxHeight = window.innerHeight * 0.7; // 自动计算窗口高度的70%作为最大高度
         
         let { width, height } = this.currentImage;
         
