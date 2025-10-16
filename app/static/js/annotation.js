@@ -175,10 +175,9 @@ class AnnotationTool {
             this.panStartY = this.mouseY;
             
             this.redraw();
-        } else {
-            // 普通鼠标移动，更新鼠标样式
-            this.updateCursor(canvasX, canvasY);
         }
+        
+        // 移除对未定义的updateCursor方法的调用
     }
     
     // 新增：调整标注框大小
