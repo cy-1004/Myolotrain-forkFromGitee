@@ -83,6 +83,16 @@ class AnnotationTool {
             toggleGuidelinesBtn.addEventListener('click', this.toggleGuidelines.bind(this));
         }
         
+        // 新增：筛选按钮事件监听器
+        const filterCompletedBtn = document.getElementById('filter-completed');
+        const filterUncompletedBtn = document.getElementById('filter-uncompleted');
+        if (filterCompletedBtn) {
+            filterCompletedBtn.addEventListener('click', this.toggleCompletedFilter.bind(this));
+        }
+        if (filterUncompletedBtn) {
+            filterUncompletedBtn.addEventListener('click', this.toggleUncompletedFilter.bind(this));
+        }
+        
         // 新增：辅助线颜色选择器
         const guidelineColorPicker = document.getElementById('guideline-color');
         if (guidelineColorPicker) {
@@ -112,72 +122,49 @@ class AnnotationTool {
         this.mouseX = e.clientX - rect.left;
         this.mouseY = e.clientY - rect.top;
         
-        // 考虑画布偏移和缩放
+        // 转换为画布坐标（考虑缩放和偏移）
         const canvasX = (this.mouseX - this.offsetX) / this.scale;
         const canvasY = (this.mouseY - this.offsetY) / this.scale;
         
-        // 修改：检测用户是否在点击标注框后开始拖拽
-        // 如果用户点击了一个标注框，但随后拖动了鼠标超过一定距离，则切换到绘制模式
-        if (this.selectedAnnotation && this.clickStartX !== undefined && 
-            Math.abs(e.clientX - this.clickStartX) > 5 && Math.abs(e.clientY - this.clickStartY) > 5) {
-            // 用户开始拖拽，取消选中并切换到绘制模式
-            this.selectedAnnotation = null;
-            this.isDrawing = true;
-            this.startX = this.clickStartX;
-            this.startY = this.clickStartY;
-            // 重新计算起始点为画布坐标
-            this.startX = (this.clickStartX - rect.left - this.offsetX) / this.scale;
-            this.startY = (this.clickStartY - rect.top - this.offsetY) / this.scale;
-            this.clickStartX = undefined;
-            this.clickStartY = undefined;
-        }
-        
-        // 绘制模式
         if (this.isDrawing) {
-            // 计算当前矩形
-            const width = canvasX - this.startX;
-            const height = canvasY - this.startY;
-            
-            // 确保矩形坐标正确（左上角为原点）
             this.currentBox = {
-                x: width < 0 ? canvasX : this.startX,
-                y: height < 0 ? canvasY : this.startY,
-                width: Math.abs(width),
-                height: Math.abs(height)
+                x: Math.min(this.startX, canvasX),
+                y: Math.min(this.startY, canvasY),
+                width: Math.abs(canvasX - this.startX),
+                height: Math.abs(canvasY - this.startY)
             };
             
             this.redraw();
         } else if (this.isDragging && this.selectedAnnotation) {
-            // 拖拽模式
-            const dx = canvasX - this.dragStartX;
-            const dy = canvasY - this.dragStartY;
+            // 拖拽标注框
+            const deltaX = canvasX - this.dragStartX;
+            const deltaY = canvasY - this.dragStartY;
             
-            this.selectedAnnotation.x += dx;
-            this.selectedAnnotation.y += dy;
+            this.selectedAnnotation.x += deltaX;
+            this.selectedAnnotation.y += deltaY;
             
+            // 更新拖拽起始位置
             this.dragStartX = canvasX;
             this.dragStartY = canvasY;
             
             this.redraw();
         } else if (this.isResizing && this.selectedAnnotation) {
-            // 调整大小模式
+            // 调整标注框大小
             this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle);
             this.redraw();
         } else if (this.isPanning) {
-            // 平移模式
-            const dx = this.mouseX - this.panStartX;
-            const dy = this.mouseY - this.panStartY;
-            
-            this.offsetX += dx;
-            this.offsetY += dy;
-            
+            // 拖动画布
+            this.offsetX += this.mouseX - this.panStartX;
+            this.offsetY += this.mouseY - this.panStartY;
             this.panStartX = this.mouseX;
             this.panStartY = this.mouseY;
-            
             this.redraw();
         }
         
-        // 移除对未定义的updateCursor方法的调用
+        // 每次鼠标移动都重绘，以确保辅助线跟随鼠标
+        if (this.showGuidelines) {
+            this.redraw();
+        }
     }
     
     // 新增：调整标注框大小
@@ -394,9 +381,36 @@ class AnnotationTool {
         const imageListContainer = document.getElementById('image-list');
         imageListContainer.innerHTML = '';
         
-        this.imageList.forEach((imageData, index) => {
+        // 应用筛选条件
+        const filteredImages = this.imageList.filter(imageData => {
+            // 如果没有启用任何筛选，则显示所有图片
+            if (!this.showCompleted && !this.showUncompleted) {
+                return true;
+            }
+            
+            // 如果启用了已完成筛选，则显示已完成的图片
+            if (this.showCompleted && imageData.is_completed) {
+                return true;
+            }
+            
+            // 如果启用了未完成筛选，则显示未完成的图片
+            if (this.showUncompleted && !imageData.is_completed) {
+                return true;
+            }
+            
+            // 其他情况不显示
+            return false;
+        });
+        
+        // 保存筛选后的图片列表和对应的原始索引
+        this.filteredImageList = filteredImages;
+        this.filteredImageIndices = filteredImages.map(filteredImg => 
+            this.imageList.findIndex(img => img.id === filteredImg.id)
+        );
+        
+        this.filteredImageList.forEach((imageData, index) => {
             const imageItem = document.createElement('div');
-            imageItem.className = `annotation-item ${index === this.currentImageIndex ? 'selected' : ''}`;
+            imageItem.className = `annotation-item ${this.filteredImageIndices[index] === this.currentImageIndex ? 'selected' : ''}`;
             imageItem.innerHTML = `
                 <div class="d-flex justify-content-between align-items-center">
                     <span class="text-truncate">${imageData.image_name}</span>
@@ -406,7 +420,7 @@ class AnnotationTool {
                     </div>
                 </div>
             `;
-            imageItem.addEventListener('click', () => this.loadImage(index));
+            imageItem.addEventListener('click', () => this.loadImage(this.filteredImageIndices[index]));
             imageListContainer.appendChild(imageItem);
         });
         
@@ -466,9 +480,7 @@ class AnnotationTool {
         }
         
         // 更新图片列表选中状态
-        document.querySelectorAll('#image-list .annotation-item').forEach((item, i) => {
-            item.classList.toggle('selected', i === index);
-        });
+        this.updateImageListSelection();
         
         // 加载图片
         const img = new Image();
@@ -498,8 +510,8 @@ class AnnotationTool {
     resizeCanvas() {
         if (!this.currentImage) return;
         
-        const maxWidth = 800
-        const maxHeight = 600
+        const maxWidth = window.innerWidth * 0.7; // 自动计算窗口高度的60%作为最大款度
+        const maxHeight = window.innerHeight * 0.7; // 自动计算窗口高度的70%作为最大高度
         
         let { width, height } = this.currentImage;
         
@@ -680,17 +692,8 @@ class AnnotationTool {
             }
         }
         
-        // 修改：添加拖拽绘制的逻辑，允许在标注框内绘制新的标注
-        // 使用鼠标移动距离来区分简单点击和拖拽操作
-        // 当用户点击并开始拖动时，即使在现有标注框内也直接开始绘制新标注
-        
-        // 存储初始点击位置，用于后续检测是否为拖拽操作
-        this.clickStartX = e.clientX;
-        this.clickStartY = e.clientY;
-        
-        if (clickedAnnotation && !e.shiftKey && !this.isPanning && !this.isPanReady) {
-            // 仅在简单点击且未按Shift键、未在平移模式时才选中现有标注框
-            // 注意：我们会在onMouseMove中检测是否开始拖拽，如果是拖拽则会切换到绘制模式
+        // 如果点击了标注框，则选中它而不是开始绘制
+        if (clickedAnnotation) {
             this.selectedAnnotation = clickedAnnotation;
             this.updateAnnotationList(); // 更新标注列表显示
             this.redraw();
@@ -733,12 +736,8 @@ class AnnotationTool {
             this.saveAnnotation();
         } else if (this.isPanning) {
             this.isPanning = false;
-            this.canvas.style.cursor = 'default';
+            this.canvas.style.cursor = this.isPanReady ? 'grab' : 'crosshair';
         }
-        
-        // 清除初始点击位置记录
-        this.clickStartX = undefined;
-        this.clickStartY = undefined;
     }
     
     // 新增：获取调整大小的控制点
@@ -879,8 +878,21 @@ class AnnotationTool {
                 label = `${index}. ${className}`;
             }
             
-            // 标签背景使用不透明颜色
-            this.ctx.fillStyle = isSelected ? '#44FF44' : color;
+            // 标签背景使用半透明颜色
+            if (isSelected) {
+                this.ctx.fillStyle = 'rgba(68, 255, 68, 0.7)'; // 半透明绿色
+            } else {
+                // 将颜色转换为半透明格式
+                if (color.startsWith('#')) {
+                    const r = parseInt(color.substr(1, 2), 16);
+                    const g = parseInt(color.substr(3, 2), 16);
+                    const b = parseInt(color.substr(5, 2), 16);
+                    this.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.7)`;
+                } else {
+                    // 如果不是十六进制颜色，使用默认半透明白色背景
+                    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                }
+            }
             this.ctx.fillRect(box.x, box.y - 20, this.ctx.measureText(label).width + 10, 20);
             this.ctx.fillStyle = 'white';
             this.ctx.font = '12px Arial';
@@ -1617,6 +1629,48 @@ class AnnotationTool {
                 throw error;
             }
         }
+    }
+    
+    // 新增：切换已完成筛选
+    toggleCompletedFilter() {
+        this.showCompleted = !this.showCompleted;
+        const btn = document.getElementById('filter-completed');
+        if (btn) {
+            if (this.showCompleted) {
+                btn.classList.remove('btn-outline-success');
+                btn.classList.add('btn-success');
+            } else {
+                btn.classList.remove('btn-success');
+                btn.classList.add('btn-outline-success');
+            }
+        }
+        this.updateImageList();
+    }
+    
+    // 新增：切换未完成筛选
+    toggleUncompletedFilter() {
+        this.showUncompleted = !this.showUncompleted;
+        const btn = document.getElementById('filter-uncompleted');
+        if (btn) {
+            if (this.showUncompleted) {
+                btn.classList.remove('btn-outline-warning');
+                btn.classList.add('btn-warning');
+            } else {
+                btn.classList.remove('btn-warning');
+                btn.classList.add('btn-outline-warning');
+            }
+        }
+        this.updateImageList();
+    }
+    
+    // 新增：更新图片列表选中状态
+    updateImageListSelection() {
+        const imageItems = document.querySelectorAll('#image-list .annotation-item');
+        imageItems.forEach((item, index) => {
+            // 获取原始索引
+            const originalIndex = this.filteredImageIndices[index];
+            item.classList.toggle('selected', originalIndex === this.currentImageIndex);
+        });
     }
 }
 

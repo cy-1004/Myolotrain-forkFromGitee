@@ -160,15 +160,16 @@
 
                 <div class="card mt-3">
                     <div class="card-header">
-                        <h5><i class="fas fa-list"></i> 当前标注</h5>
+                        <h5><i class="fas fa-list"></i> 当前标注
+                            <button id="clear-all" class="btn btn-warning btn-sm mt-2">
+                            <i class="fas fa-trash"></i> 清除所有
+                            </button>
+                        </h5>
                     </div>
                     <div class="card-body">
                         <div id="annotation-list">
                             <!-- 标注列表将在这里显示 -->
                         </div>
-                        <button id="clear-all" class="btn btn-warning btn-sm mt-2">
-                            <i class="fas fa-trash"></i> 清除所有
-                        </button>
                     </div>
                 </div>
             </div>
@@ -252,6 +253,11 @@
                     <div class="card-body">
                         <div class="mb-3">
                             <input type="text" id="image-search" class="form-control" placeholder="搜索图片...">
+                        </div>
+                        <!-- 筛选按钮 -->
+                        <div class="mb-3 d-flex gap-2">
+                            <button id="filter-completed" class="btn btn-outline-success btn-sm flex-fill">已完成</button>
+                            <button id="filter-uncompleted" class="btn btn-outline-warning btn-sm flex-fill">未完成</button>
                         </div>
                         <div id="image-list" style="max-height: 600px; overflow-y: auto;">
                             <!-- 图片列表将在这里显示 -->

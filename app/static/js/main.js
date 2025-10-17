@@ -6886,7 +6886,7 @@ function loadDatasetOptionsForAnnotation() {
 
 // 扫描项目图片
 function scanProjectImages(projectId) {
-    if (!confirm('确定要扫描项目图片吗？这将重新扫描图片目录并更新图片列表，此操作将清空所有标注请谨慎操作！！。')) {
+    if (!confirm('确定要扫描项目图片吗？这将重新扫描图片目录并更新图片列表。')) {
         return;
     }
     
