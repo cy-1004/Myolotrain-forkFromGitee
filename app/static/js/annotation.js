@@ -510,23 +510,44 @@ class AnnotationTool {
     resizeCanvas() {
         if (!this.currentImage) return;
         
-        const maxWidth = window.innerWidth * 0.7; // 自动计算窗口高度的60%作为最大款度
-        const maxHeight = window.innerHeight * 0.7; // 自动计算窗口高度的70%作为最大高度
+        // 获取用户屏幕分辨率和可用空间
+        const screenWidth = window.screen.width;
+        const screenHeight = window.screen.height;
+        const windowWidth = window.innerWidth;
+        const windowHeight = window.innerHeight;
+        
+        // 计算可用空间（考虑页面布局和其他元素）
+        // 为侧边栏和其他UI元素预留空间
+        const reservedWidth = 300; // 左右两侧面板的宽度
+        const reservedHeight = 150; // 顶部工具栏、底部导航等的高度
+        
+        // 计算最大可用尺寸
+        const maxWidth = Math.min(screenWidth * 0.8, windowWidth - reservedWidth, 1600); // 最大不超过1600px
+        const maxHeight = Math.min(screenHeight * 0.7, windowHeight - reservedHeight, 1600); // 最大不超过1600px
         
         let { width, height } = this.currentImage;
         
-        if (width > maxWidth) {
-            height = (height * maxWidth) / width;
-            width = maxWidth;
+        // 移除可能导致尺寸限制的条件，让画布能更好地适应容器
+        // 只在图片尺寸超过最大限制时才进行缩放
+        if (width > maxWidth || height > maxHeight) {
+            // 保持宽高比
+            const aspectRatio = width / height;
+            
+            if (width > maxWidth) {
+                width = maxWidth;
+                height = width / aspectRatio;
+            }
+            
+            if (height > maxHeight) {
+                height = maxHeight;
+                width = height * aspectRatio;
+            }
         }
         
-        if (height > maxHeight) {
-            width = (width * maxHeight) / height;
-            height = maxHeight;
-        }
-        
+        // 设置画布尺寸
         this.canvas.width = width;
         this.canvas.height = height;
+        
         // 重置缩放比例和偏移量
         this.scale = 1;
         this.offsetX = 0;

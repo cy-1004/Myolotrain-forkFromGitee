@@ -22,12 +22,14 @@
     justify-content: center;
 }
 
-#annotationCanvas {
+#annotation-canvas {
     position: absolute;
     top: 0;
     left: 0;
     cursor: crosshair;
     z-index: 2;
+    max-width: none; /* 移除最大宽度限制 */
+    max-height: none; /* 移除最大高度限制 */
 }
 
 .current-image {
