@@ -8,8 +8,8 @@ class AnnotationTool {
         this.isDrawing = false;
         this.isDragging = false;
         this.isResizing = false;
-        this.isPanning = false; // 新增：是否处于抓手模式
-        this.isPanReady = false; // 新增：是否准备好进行拖拽
+        this.isPanning = false;
+        this.isPanReady = false;
         this.startX = 0;
         this.startY = 0;
         this.currentBox = null;
@@ -43,6 +43,15 @@ class AnnotationTool {
         // 新增属性：拖动画布的起始位置
         this.panStartX = 0;
         this.panStartY = 0;
+        // 新增属性：标记是否刚刚完成绘制（用于防止click事件重新选中）
+        this.justFinishedDrawing = false;
+        
+        // 新增属性：标记是否通过点击选中
+        this.selectedByClick = false;
+        
+        // 新增属性：标记是否刚刚完成拖拽或调整大小操作
+        this.justFinishedDragging = false;
+        this.justFinishedResizing = false;
         
         this.init();
     }
@@ -77,13 +86,11 @@ class AnnotationTool {
         document.getElementById('stop-auto-annotate').addEventListener('click', this.stopAutoAnnotate.bind(this));
         document.getElementById('delete-image').addEventListener('click', this.deleteCurrentImage.bind(this));
         
-        // 新增：辅助线开关按钮
         const toggleGuidelinesBtn = document.getElementById('toggle-guidelines');
         if (toggleGuidelinesBtn) {
             toggleGuidelinesBtn.addEventListener('click', this.toggleGuidelines.bind(this));
         }
         
-        // 新增：筛选按钮事件监听器
         const filterCompletedBtn = document.getElementById('filter-completed');
         const filterUncompletedBtn = document.getElementById('filter-uncompleted');
         if (filterCompletedBtn) {
@@ -93,7 +100,6 @@ class AnnotationTool {
             filterUncompletedBtn.addEventListener('click', this.toggleUncompletedFilter.bind(this));
         }
         
-        // 新增：辅助线颜色选择器
         const guidelineColorPicker = document.getElementById('guideline-color');
         if (guidelineColorPicker) {
             guidelineColorPicker.addEventListener('input', (e) => {
@@ -102,8 +108,7 @@ class AnnotationTool {
             });
         }
         
-        // 键盘快捷键 - 确保事件能够正确捕获
-        document.addEventListener('keydown', this.handleKeyboard.bind(this));
+        // 键盘快捷键
         document.addEventListener('keydown', this.handleKeyDown.bind(this));
         document.addEventListener('keyup', this.handleKeyUp.bind(this));
         
@@ -111,20 +116,13 @@ class AnnotationTool {
         document.getElementById('image-search').addEventListener('input', this.filterImages.bind(this));
     }
     
-    draw(e) {
-        // 这个方法现在由 onMouseMove 处理
-        // 保持空实现以避免错误
-    }
+
     
-    // 修改：鼠标移动事件处理
     onMouseMove(e) {
-        const rect = this.canvas.getBoundingClientRect();
-        this.mouseX = e.clientX - rect.left;
-        this.mouseY = e.clientY - rect.top;
-        
-        // 转换为画布坐标（考虑缩放和偏移）
-        const canvasX = (this.mouseX - this.offsetX) / this.scale;
-        const canvasY = (this.mouseY - this.offsetY) / this.scale;
+        // 使用通用坐标转换方法
+        const { x: canvasX, y: canvasY, rawX: mouseX, rawY: mouseY } = this.getCanvasCoordinates(e);
+        this.mouseX = mouseX;
+        this.mouseY = mouseY;
         
         if (this.isDrawing) {
             this.currentBox = {
@@ -147,10 +145,15 @@ class AnnotationTool {
             this.dragStartX = canvasX;
             this.dragStartY = canvasY;
             
+            // 实时更新左侧列表信息
+            this.updateAnnotationList();
             this.redraw();
         } else if (this.isResizing && this.selectedAnnotation) {
             // 调整标注框大小
-            this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle);
+            this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle, canvasX, canvasY);
+            
+            // 实时更新左侧列表信息
+            this.updateAnnotationList();
             this.redraw();
         } else if (this.isPanning) {
             // 拖动画布
@@ -161,20 +164,66 @@ class AnnotationTool {
             this.redraw();
         }
         
+        // 更新鼠标样式
+        this.updateCursorStyle(canvasX, canvasY);
+        
         // 每次鼠标移动都重绘，以确保辅助线跟随鼠标
         if (this.showGuidelines) {
             this.redraw();
         }
     }
     
-    // 新增：调整标注框大小
-    resizeAnnotation(annotation, handle) {
+    updateCursorStyle(canvasX, canvasY) {
+        // 如果正在绘制、拖拽、调整大小或抓手模式，使用特定光标
+        if (this.isDrawing || this.isDragging || this.isResizing || this.isPanning) {
+            return; // 保持当前操作的光标样式
+        }
+        
+        // 编辑模式下，根据鼠标位置显示不同的光标
+        if (this.selectedAnnotation) {
+            // 检查是否在调整大小的控制点上
+            const handle = this.getResizeHandle(this.selectedAnnotation, canvasX, canvasY);
+            if (handle) {
+                switch (handle) {
+                    case 'right':
+                    case 'left':
+                        this.canvas.style.cursor = 'ew-resize';
+                        return;
+                    case 'top':
+                    case 'bottom':
+                        this.canvas.style.cursor = 'ns-resize';
+                        return;
+                    case 'top-right':
+                    case 'bottom-left':
+                        this.canvas.style.cursor = 'ne-resize';
+                        return;
+                    case 'top-left':
+                    case 'bottom-right':
+                        this.canvas.style.cursor = 'nw-resize';
+                        return;
+                }
+            }
+            
+            // 检查是否在标注框内部（用于拖拽）
+            if (this.isInAnnotationArea(this.selectedAnnotation, canvasX, canvasY)) {
+                this.canvas.style.cursor = 'move';
+                return;
+            }
+            
+            // 检查是否在文字标题区域
+            if (this.isInTitleArea(this.selectedAnnotation, canvasX, canvasY)) {
+                this.canvas.style.cursor = 'pointer';
+                return;
+            }
+        }
+        
+        // 默认光标（十字标记）
+        this.canvas.style.cursor = 'crosshair';
+    }
+
+    resizeAnnotation(annotation, handle, canvasX, canvasY) {
         const minWidth = 5;
         const minHeight = 5;
-        
-        // 转换鼠标坐标到画布坐标（考虑缩放和偏移）
-        const canvasX = (this.mouseX - this.offsetX) / this.scale;
-        const canvasY = (this.mouseY - this.offsetY) / this.scale;
         
         switch (handle) {
             case 'right':
@@ -193,32 +242,116 @@ class AnnotationTool {
                 annotation.y = annotation.y + annotation.height - newHeight;
                 annotation.height = newHeight;
                 break;
+            case 'top-right':
+                annotation.width = Math.max(minWidth, canvasX - annotation.x);
+                annotation.height = Math.max(minHeight, canvasY - annotation.y);
+                break;
+            case 'bottom-left':
+                const newWidthBL = Math.max(minWidth, annotation.x + annotation.width - canvasX);
+                annotation.x = annotation.x + annotation.width - newWidthBL;
+                annotation.width = newWidthBL;
+                annotation.height = Math.max(minHeight, canvasY - annotation.y);
+                break;
+            case 'top-left':
+                const newWidthTL = Math.max(minWidth, annotation.x + annotation.width - canvasX);
+                annotation.x = annotation.x + annotation.width - newWidthTL;
+                annotation.width = newWidthTL;
+                const newHeightTL = Math.max(minHeight, annotation.y + annotation.height - canvasY);
+                annotation.y = annotation.y + annotation.height - newHeightTL;
+                annotation.height = newHeightTL;
+                break;
+            case 'bottom-right':
+                annotation.width = Math.max(minWidth, canvasX - annotation.x);
+                annotation.height = Math.max(minHeight, canvasY - annotation.y);
+                break;
         }
     }
     
-    // 修改：画布点击事件处理
+    getCanvasCoordinates(e) {
+        const rect = this.canvas.getBoundingClientRect();
+        const scaleX = this.canvas.width / rect.width;
+        const scaleY = this.canvas.height / rect.height;
+        
+        const clickX = (e.clientX - rect.left) * scaleX;
+        const clickY = (e.clientY - rect.top) * scaleY;
+        
+        return {
+            x: (clickX - this.offsetX) / this.scale,
+            y: (clickY - this.offsetY) / this.scale,
+            rawX: clickX,
+            rawY: clickY
+        };
+    }
+
+    isInTitleArea(annotation, canvasX, canvasY, index = -1) {
+        const className = this.projectData.classes[annotation.class_id] || `Class ${annotation.class_id}`;
+        const label = index >= 0 ? `${index + 1}. ${className}` : className;
+        
+        // 创建临时canvas测量文字宽度
+        const tempCanvas = document.createElement('canvas');
+        const tempCtx = tempCanvas.getContext('2d');
+        tempCtx.font = '12px Arial';
+        const textWidth = tempCtx.measureText(label).width;
+        
+        // 标题区域：文字位置 + 边距
+        const titleLeft = annotation.x + 4;
+        const titleRight = annotation.x + textWidth + 8;
+        const titleTop = annotation.y - 20;
+        const titleBottom = annotation.y - 6;
+        
+        return canvasX >= titleLeft && canvasX <= titleRight &&
+               canvasY >= titleTop && canvasY <= titleBottom;
+    }
+
+    isInAnnotationArea(annotation, canvasX, canvasY) {
+        return canvasX >= annotation.x && canvasX <= annotation.x + annotation.width &&
+               canvasY >= annotation.y && canvasY <= annotation.y + annotation.height;
+    }
+
+    setSelectedAnnotation(annotation, byClick = false) {
+        this.selectedAnnotation = annotation;
+        this.selectedByClick = byClick;
+        this.updateAnnotationList(); // 更新标注列表显示
+        this.redraw(); // 重新绘制以显示选中状态
+    }
+
     onCanvasClick(e) {
         // 如果正在绘制或处于抓手模式，不处理点击选择
         if (this.isDrawing || this.isPanning || this.isPanReady) return;
         
-        const rect = this.canvas.getBoundingClientRect();
-        const clickX = e.clientX - rect.left;
-        const clickY = e.clientY - rect.top;
+        // 如果刚刚完成绘制，不处理点击选择（防止重新选中）
+        if (this.justFinishedDrawing) {
+            this.justFinishedDrawing = false;
+            return;
+        }
         
-        // 转换为画布坐标（考虑缩放和偏移）
-        const canvasX = (clickX - this.offsetX) / this.scale;
-        const canvasY = (clickY - this.offsetY) / this.scale;
+        // 如果刚刚完成拖拽或调整大小操作，不处理点击选择（保持选中状态）
+        if (this.justFinishedDragging || this.justFinishedResizing) {
+            this.justFinishedDragging = false;
+            this.justFinishedResizing = false;
+            return;
+        }
         
-        // 检查是否点击了某个标注框（检查整个标注框区域）
+        // 使用通用坐标转换方法
+        const { x: canvasX, y: canvasY } = this.getCanvasCoordinates(e);
+        
+        // 检查是否点击了标注框（使用与startDrawing相同的精确规则）
         let clickedAnnotation = null;
         let clickedIndex = -1;
         
         // 从后往前遍历，确保点击的是最上层的标注框
         for (let i = this.annotations.length - 1; i >= 0; i--) {
             const ann = this.annotations[i];
-            // 检查点击位置是否在标注框内（包括边框）
-            if (canvasX >= ann.x && canvasX <= ann.x + ann.width &&
-                canvasY >= ann.y && canvasY <= ann.y + ann.height) {
+            
+            // 方式1：检查是否点击了标注框左上角的文字标题区域
+            if (this.isInTitleArea(ann, canvasX, canvasY, i)) {
+                clickedAnnotation = ann;
+                clickedIndex = i;
+                break;
+            }
+            
+            // 方式2：按住Ctrl键+点击标注框区域
+            if (e.ctrlKey && this.isInAnnotationArea(ann, canvasX, canvasY)) {
                 clickedAnnotation = ann;
                 clickedIndex = i;
                 break;
@@ -226,11 +359,7 @@ class AnnotationTool {
         }
         
         // 更新选中的标注框
-        this.selectedAnnotation = clickedAnnotation;
-        this.updateAnnotationList(); // 更新标注列表显示
-        
-        // 重新绘制以显示选中状态
-        this.redraw();
+        this.setSelectedAnnotation(clickedAnnotation);
         
         // 如果点击了标注框，可以在这里添加其他处理逻辑
         if (clickedAnnotation) {
@@ -238,7 +367,6 @@ class AnnotationTool {
         }
     }
     
-    // 新增：切换辅助线显示
     toggleGuidelines() {
         this.showGuidelines = !this.showGuidelines;
         const btn = document.getElementById('toggle-guidelines');
@@ -471,7 +599,6 @@ class AnnotationTool {
                 }
             };
             
-            // 优化：使用立即执行的异步函数确保更好的错误处理
             (async () => {
                 await markPreviousCompleted();
             })().catch(err => {
@@ -626,6 +753,17 @@ class AnnotationTool {
                     </button>
                 </div>
             `;
+            
+            // 方式3：点击标注列表项选中对应的标注框
+            annItem.addEventListener('click', (e) => {
+                // 防止点击删除按钮时触发选中
+                if (!e.target.closest('.annotation-actions')) {
+                    this.selectedAnnotation = ann;
+                    this.updateAnnotationList();
+                    this.redraw();
+                }
+            });
+            
             annotationList.appendChild(annItem);
         });
     }
@@ -651,6 +789,9 @@ class AnnotationTool {
         this.offsetX = mouseX - canvasX * this.scale;
         this.offsetY = mouseY - canvasY * this.scale;
         
+        // 确保偏移量不会超出画布边界
+        this.constrainOffset();
+        
         // 重新绘制
         this.redraw();
     }
@@ -662,7 +803,14 @@ class AnnotationTool {
         this.redraw();
     }
     
-    // 修改：开始绘制/拖拽/调整大小
+    constrainOffset() {
+        const maxOffsetX = Math.max(0, (this.canvas.width * this.scale - this.canvas.width) / 2);
+        const maxOffsetY = Math.max(0, (this.canvas.height * this.scale - this.canvas.height) / 2);
+        
+        this.offsetX = Math.max(-maxOffsetX, Math.min(maxOffsetX, this.offsetX));
+        this.offsetY = Math.max(-maxOffsetY, Math.min(maxOffsetY, this.offsetY));
+    }
+    
     startDrawing(e) {
         // 如果准备好进行抓手模式，开始拖拽
         if (this.isPanReady) {
@@ -673,13 +821,10 @@ class AnnotationTool {
             return;
         }
         
-        const rect = this.canvas.getBoundingClientRect();
-        this.startX = e.clientX - rect.left;
-        this.startY = e.clientY - rect.top;
-        
-        // 考虑画布偏移和缩放
-        const canvasX = (this.startX - this.offsetX) / this.scale;
-        const canvasY = (this.startY - this.offsetY) / this.scale;
+        // 使用通用坐标转换方法
+        const { x: canvasX, y: canvasY, rawX: startX, rawY: startY } = this.getCanvasCoordinates(e);
+        this.startX = startX;
+        this.startY = startY;
         
         // 如果有选中的标注框，检查是否点击了控制点
         if (this.selectedAnnotation) {
@@ -692,8 +837,7 @@ class AnnotationTool {
             }
             
             // 检查是否点击了标注框内部（用于拖拽）
-            if (canvasX >= this.selectedAnnotation.x && canvasX <= this.selectedAnnotation.x + this.selectedAnnotation.width &&
-                canvasY >= this.selectedAnnotation.y && canvasY <= this.selectedAnnotation.y + this.selectedAnnotation.height) {
+            if (this.isInAnnotationArea(this.selectedAnnotation, canvasX, canvasY)) {
                 // 点击了标注框内部，开始拖拽
                 this.isDragging = true;
                 this.dragStartX = canvasX;
@@ -702,22 +846,27 @@ class AnnotationTool {
             }
         }
         
-        // 检查是否点击了其他标注框
+        // 检查是否点击了标注框顶部的文字标题区域
         let clickedAnnotation = null;
         for (let i = this.annotations.length - 1; i >= 0; i--) {
             const ann = this.annotations[i];
-            if (canvasX >= ann.x && canvasX <= ann.x + ann.width &&
-                canvasY >= ann.y && canvasY <= ann.height) {
+            
+            // 方式1：检查是否点击了标注框左上角的文字标题区域
+            if (this.isInTitleArea(ann, canvasX, canvasY, i)) {
+                clickedAnnotation = ann;
+                break;
+            }
+            
+            // 方式2：按住Ctrl键+点击标注框区域
+            if (e.ctrlKey && this.isInAnnotationArea(ann, canvasX, canvasY)) {
                 clickedAnnotation = ann;
                 break;
             }
         }
         
-        // 如果点击了标注框，则选中它而不是开始绘制
+        // 如果通过方式1或方式2点击了标注框，则选中它而不是开始绘制
         if (clickedAnnotation) {
-            this.selectedAnnotation = clickedAnnotation;
-            this.updateAnnotationList(); // 更新标注列表显示
-            this.redraw();
+            this.setSelectedAnnotation(clickedAnnotation, true);
             return;
         }
         
@@ -729,8 +878,9 @@ class AnnotationTool {
         this.redraw();
     }
     
-    // 修改：停止绘制/拖拽/调整大小
     stopDrawing(e) {
+        this.justFinishedDrawing = this.isDrawing;
+        
         if (this.isDrawing) {
             this.isDrawing = false;
             
@@ -740,33 +890,64 @@ class AnnotationTool {
                     ...this.currentBox
                 });
                 this.updateAnnotationList();
-                // 实时保存
                 this.saveAnnotation();
+                this.selectedAnnotation = null;
+                this.updateAnnotationList();
+            } else {
+                this.selectedAnnotation = null;
+                this.updateAnnotationList();
             }
             
             this.currentBox = null;
             this.redraw();
         } else if (this.isDragging) {
             this.isDragging = false;
-            // 保存更改
             this.saveAnnotation();
+            this.justFinishedDragging = true;
         } else if (this.isResizing) {
             this.isResizing = false;
             this.resizeHandle = null;
-            // 保存更改
             this.saveAnnotation();
+            this.justFinishedResizing = true;
         } else if (this.isPanning) {
             this.isPanning = false;
             this.canvas.style.cursor = this.isPanReady ? 'grab' : 'crosshair';
         }
+        
+        this.selectedByClick = false;
     }
     
-    // 新增：获取调整大小的控制点
     getResizeHandle(annotation, x, y) {
         const handleSize = 8;
         const right = annotation.x + annotation.width;
         const bottom = annotation.y + annotation.height;
         
+        // 四个角落控制点（优先级最高）
+        // 左上角
+        if (x >= annotation.x - handleSize && x <= annotation.x + handleSize &&
+            y >= annotation.y - handleSize && y <= annotation.y + handleSize) {
+            return 'top-left';
+        }
+        
+        // 右上角
+        if (x >= right - handleSize && x <= right + handleSize &&
+            y >= annotation.y - handleSize && y <= annotation.y + handleSize) {
+            return 'top-right';
+        }
+        
+        // 左下角
+        if (x >= annotation.x - handleSize && x <= annotation.x + handleSize &&
+            y >= bottom - handleSize && y <= bottom + handleSize) {
+            return 'bottom-left';
+        }
+        
+        // 右下角
+        if (x >= right - handleSize && x <= right + handleSize &&
+            y >= bottom - handleSize && y <= bottom + handleSize) {
+            return 'bottom-right';
+        }
+        
+        // 四个边控制点
         // 右侧控制点
         if (x >= right - handleSize && x <= right + handleSize &&
             y >= annotation.y && y <= bottom) {
@@ -829,7 +1010,6 @@ class AnnotationTool {
         this.ctx.restore();
     }
     
-    // 新增：绘制辅助线（跟随鼠标移动）
     drawGuidelines() {
         this.ctx.save();
         this.ctx.strokeStyle = this.guidelineColor; // 使用自定义颜色
@@ -845,13 +1025,13 @@ class AnnotationTool {
             // 垂直线（从顶部到底部）
             this.ctx.beginPath();
             this.ctx.moveTo(canvasX, 0);
-            this.ctx.lineTo(canvasX, this.canvas.height / this.scale);
+            this.ctx.lineTo(canvasX, this.canvas.height);
             this.ctx.stroke();
             
             // 水平线（从左侧到右侧）
             this.ctx.beginPath();
             this.ctx.moveTo(0, canvasY);
-            this.ctx.lineTo(this.canvas.width / this.scale, canvasY);
+            this.ctx.lineTo(this.canvas.width, canvasY);
             this.ctx.stroke();
             
             // 显示鼠标坐标
@@ -863,7 +1043,6 @@ class AnnotationTool {
         this.ctx.restore();
     }
     
-    // 修改：优化绘制框函数，添加序号参数和选中状态
     drawBox(box, color, isDrawing = false, index = null, isSelected = false) {
         // 设置边框颜色
         let borderColor;
@@ -926,7 +1105,6 @@ class AnnotationTool {
         }
     }
     
-    // 修改：绘制调整大小的控制点
     drawResizeHandles(box) {
         const handleSize = 6;
         const right = box.x + box.width;
@@ -1063,9 +1241,20 @@ class AnnotationTool {
         }
     }
     
-    handleKeyboard(e) {
+
+    
+    // 处理按键按下事件（整合所有键盘快捷键）
+    handleKeyDown(e) {
         // 防止在输入框中触发快捷键
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+            return;
+        }
+        
+        // 空格键作为抓手工具准备状态
+        if (e.key === ' ') {
+            e.preventDefault();
+            this.isPanReady = true;
+            this.canvas.style.cursor = 'grab';
             return;
         }
         
@@ -1103,25 +1292,22 @@ class AnnotationTool {
             case 'delete':
             case 'backspace':
                 e.preventDefault();
-                // 删除选中的标注框
                 this.deleteSelectedAnnotation();
                 break;
-            // 新增：辅助线切换快捷键 (G键)
             case 'g':
                 e.preventDefault();
                 this.toggleGuidelines();
                 break;
-            // 新增：缩放快捷键
             case '+':
-            case '=': // +键
+            case '=':
                 e.preventDefault();
                 this.zoom(1.2);
                 break;
-            case '-': // -键
+            case '-':
                 e.preventDefault();
                 this.zoom(0.8);
                 break;
-            case '0': // 0键重置缩放
+            case '0':
                 e.preventDefault();
                 this.resetZoom();
                 break;
@@ -1136,22 +1322,6 @@ class AnnotationTool {
         }
     }
     
-    // 新增：处理按键按下事件（用于空格键抓手模式）
-    handleKeyDown(e) {
-        // 防止在输入框中触发快捷键
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
-            return;
-        }
-        
-        // 空格键作为抓手工具准备状态
-        if (e.key === ' ') {
-            e.preventDefault();
-            this.isPanReady = true;
-            this.canvas.style.cursor = 'grab';
-        }
-    }
-    
-    // 新增：处理按键释放事件
     handleKeyUp(e) {
         if (e.key === ' ') {
             this.isPanReady = false;
@@ -1160,7 +1330,6 @@ class AnnotationTool {
         }
     }
     
-    // 新增：处理鼠标滚轮事件
     handleWheel(e) {
         e.preventDefault();
         
@@ -1171,17 +1340,8 @@ class AnnotationTool {
         this.zoom(zoomFactor);
     }
     
-    // 新增：切换抓手模式（用于拖动画布）
-    togglePanMode() {
-        this.isPanning = !this.isPanning;
-        if (this.isPanning) {
-            console.log('切换到抓手模式');
-        } else {
-            console.log('退出抓手模式');
-        }
-    }
+
     
-    // 新增：删除选中的标注框
     deleteSelectedAnnotation() {
         if (this.selectedAnnotation) {
             const index = this.annotations.indexOf(this.selectedAnnotation);
@@ -1652,7 +1812,6 @@ class AnnotationTool {
         }
     }
     
-    // 新增：切换已完成筛选
     toggleCompletedFilter() {
         this.showCompleted = !this.showCompleted;
         const btn = document.getElementById('filter-completed');
@@ -1668,7 +1827,6 @@ class AnnotationTool {
         this.updateImageList();
     }
     
-    // 新增：切换未完成筛选
     toggleUncompletedFilter() {
         this.showUncompleted = !this.showUncompleted;
         const btn = document.getElementById('filter-uncompleted');
@@ -1684,7 +1842,6 @@ class AnnotationTool {
         this.updateImageList();
     }
     
-    // 新增：更新图片列表选中状态
     updateImageListSelection() {
         const imageItems = document.querySelectorAll('#image-list .annotation-item');
         imageItems.forEach((item, index) => {
