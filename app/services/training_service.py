@@ -6,6 +6,7 @@ import subprocess
 import platform
 import uuid
 import json
+import threading
 import torch
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +23,7 @@ from app.services.ascend_service import AscendDeviceManager
 # 设置TensorBoard为True
 # 使用Python解释器运行yolo模块，确保使用虚拟环境中的ultralytics
 try:
-    subprocess.run([sys.executable, '-m', 'ultralytics', 'settings', 'tensorboard=true'], check=True)
+    subprocess.run(['yolo', 'settings', 'tensorboard=true'], check=True)
 except subprocess.CalledProcessError as e:
     print(f"警告: 设置TensorBoard时出错: {e}")
     # 继续执行，即使设置失败
@@ -836,6 +837,45 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         })
 
         print(f"\n=== 训练进程已启动，PID: {training_process.pid} ===")
+
+        # 启动一个线程来监控训练进程的状态
+        def monitor_training_process():
+            try:
+                # 等待训练进程结束
+                training_process.wait()
+                
+                # 训练完成后，更新任务状态
+                db_task_updated = training_task.get(db, id=task_id)
+                if db_task_updated:
+                    # 检查训练是否成功完成
+                    if training_process.returncode == 0:
+                        # 训练成功，更新状态为已完成
+                        training_task.update(db, db_obj=db_task_updated, obj_in={
+                            "status": "completed",
+                            "end_time": datetime.now()
+                        })
+                        print(f"\n=== 训练任务 {task_id} 已成功完成 ===")
+                    else:
+                        # 训练失败，更新状态为失败
+                        training_task.update(db, db_obj=db_task_updated, obj_in={
+                            "status": "failed",
+                            "end_time": datetime.now()
+                        })
+                        print(f"\n=== 训练任务 {task_id} 失败 ===")
+            except Exception as e:
+                print(f"\n=== 监控训练进程时出错: {e} ===")
+                # 更新任务状态为失败
+                db_task_updated = training_task.get(db, id=task_id)
+                if db_task_updated:
+                    training_task.update(db, db_obj=db_task_updated, obj_in={
+                        "status": "failed",
+                        "end_time": datetime.now()
+                    })
+
+        # 启动监控线程
+        monitor_thread = threading.Thread(target=monitor_training_process)
+        monitor_thread.daemon = True
+        monitor_thread.start()
 
         return db_task
     except Exception as e:

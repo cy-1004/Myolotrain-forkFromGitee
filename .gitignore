@@ -24,6 +24,7 @@ datasets_import/*
 app/static/temp/*
 dl/*
 app/static/annotations/*
+/yolopose/*
 
 # 数据库
 postgres_data/

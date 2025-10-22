@@ -116,8 +116,12 @@ class AnnotationTool {
         document.getElementById('image-search').addEventListener('input', this.filterImages.bind(this));
     }
     
+    // 新增方法：设置辅助线颜色（供annotation-manager.js调用）
+    setGuidelineColor(color) {
+        this.guidelineColor = color;
+        this.redraw();
+    }
 
-    
     onMouseMove(e) {
         // 使用通用坐标转换方法
         const { x: canvasX, y: canvasY, rawX: mouseX, rawY: mouseY } = this.getCanvasCoordinates(e);

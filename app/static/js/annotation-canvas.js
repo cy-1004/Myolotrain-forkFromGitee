@@ -11,15 +11,11 @@ class AnnotationCanvas {
         this.isDrawing = false;
         this.startPoint = null;
         this.currentClass = 0;
-        // 新增属性：辅助线开关
-        this.showGuidelines = false;
-        // 新增属性：辅助线颜色
-        this.guidelineColor = 'rgba(255, 255, 255, 0.5)';
-        // 新增属性：缩放相关
+        // 缩放相关
         this.scale = 1;
         this.offsetX = 0;
         this.offsetY = 0;
-        // 新增属性：鼠标位置
+        // 鼠标位置
         this.lastMouseX = 0;
         this.lastMouseY = 0;
         
@@ -43,26 +39,6 @@ class AnnotationCanvas {
         
         // 窗口大小变化
         window.addEventListener('resize', this.resizeCanvas.bind(this));
-        
-        // 添加鼠标移动事件监听器，用于辅助线
-        this.canvas.addEventListener('mousemove', (e) => {
-            if (this.showGuidelines) {
-                this.lastMouseX = e.clientX;
-                this.lastMouseY = e.clientY;
-            }
-        });
-    }
-    
-    // 新增：切换辅助线显示
-    toggleGuidelines() {
-        this.showGuidelines = !this.showGuidelines;
-        this.redraw();
-    }
-    
-    // 新增：设置辅助线颜色
-    setGuidelineColor(color) {
-        this.guidelineColor = color;
-        this.redraw();
     }
     
     // 修改：优化resizeCanvas函数
@@ -107,11 +83,6 @@ class AnnotationCanvas {
             this.ctx.drawImage(this.image, 0, 0, this.canvas.width, this.canvas.height);
         }
         
-        // 绘制辅助线
-        if (this.showGuidelines) {
-            this.drawGuidelines();
-        }
-        
         // 绘制现有标注框
         this.annotations.forEach((annotation, index) => {
             this.drawAnnotation(annotation, annotation === this.selectedAnnotation, index + 1);
@@ -121,38 +92,6 @@ class AnnotationCanvas {
         if (this.currentAnnotation) {
             this.drawCurrentAnnotation(this.currentAnnotation);
         }
-    }
-    
-    // 新增：绘制辅助线（跟随鼠标移动）
-    drawGuidelines() {
-        // 获取鼠标在画布上的位置
-        const rect = this.canvas.getBoundingClientRect();
-        const mouseX = (this.lastMouseX || rect.left + rect.width / 2) - rect.left;
-        const mouseY = (this.lastMouseY || rect.top + rect.height / 2) - rect.top;
-        
-        this.ctx.save();
-        this.ctx.strokeStyle = this.guidelineColor; // 使用自定义颜色
-        this.ctx.lineWidth = 1;
-        this.ctx.setLineDash([5, 5]);
-        
-        // 绘制鼠标位置的垂直线
-        this.ctx.beginPath();
-        this.ctx.moveTo(mouseX, 0);
-        this.ctx.lineTo(mouseX, this.canvas.height);
-        this.ctx.stroke();
-        
-        // 绘制鼠标位置的水平线
-        this.ctx.beginPath();
-        this.ctx.moveTo(0, mouseY);
-        this.ctx.lineTo(this.canvas.width, mouseY);
-        this.ctx.stroke();
-        
-        // 显示鼠标坐标
-        this.ctx.fillStyle = this.guidelineColor; // 使用自定义颜色
-        this.ctx.font = '12px Arial';
-        this.ctx.fillText(`(${Math.round(mouseX)}, ${Math.round(mouseY)})`, mouseX + 5, mouseY - 5);
-        
-        this.ctx.restore();
     }
     
     onMouseDown(e) {
@@ -304,7 +243,6 @@ class AnnotationCanvas {
         
         this.ctx.strokeStyle = transparentColor;
         this.ctx.lineWidth = isSelected ? 3 : 2;
-        
 
         // 绘制边框
         this.ctx.strokeRect(canvasAnnotation.x, canvasAnnotation.y, canvasAnnotation.width, canvasAnnotation.height);
@@ -331,7 +269,6 @@ class AnnotationCanvas {
         this.ctx.strokeStyle = '#2196F3';
         this.ctx.lineWidth = 2;
         this.ctx.setLineDash([5, 5]);
-        
 
         // 绘制边框
         this.ctx.strokeRect(canvasAnnotation.x, canvasAnnotation.y, canvasAnnotation.width, canvasAnnotation.height);

@@ -10,9 +10,10 @@ class ModelBase(BaseModel):
     task: str = "detect"
 
 class ModelCreate(ModelBase):
-    pass
+    path: str
+    source: str = "upload"
 
-class ModelUpdate(ModelBase):
+class ModelUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     type: Optional[str] = None

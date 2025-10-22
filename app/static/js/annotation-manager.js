@@ -57,49 +57,51 @@ class AnnotationManager {
             modal.show();
         });
         
-        // 新增：辅助线切换按钮
+        // 新增：辅助线切换按钮（使用annotation.js中的功能）
         const toggleGuidelinesBtn = document.getElementById('toggleGuidelinesBtn');
         if (toggleGuidelinesBtn) {
             toggleGuidelinesBtn.addEventListener('click', () => {
-                this.toggleGuidelines();
-            });
-        }
-        
-        // 新增：辅助线颜色选择器
-        const guidelineColorPicker = document.getElementById('guideline-color');
-        if (guidelineColorPicker) {
-            guidelineColorPicker.addEventListener('input', (e) => {
-                if (this.canvas) {
-                    this.canvas.setGuidelineColor(e.target.value);
+                if (window.annotationTool) {
+                    window.annotationTool.toggleGuidelines();
                 }
             });
         }
         
-        // 新增：缩放按钮
+        // 新增：辅助线颜色选择器（使用annotation.js中的功能）
+        const guidelineColorPicker = document.getElementById('guideline-color');
+        if (guidelineColorPicker) {
+            guidelineColorPicker.addEventListener('input', (e) => {
+                if (window.annotationTool) {
+                    window.annotationTool.setGuidelineColor(e.target.value);
+                }
+            });
+        }
+        
+        // 新增：缩放按钮（使用annotation.js中的功能）
         const zoomInBtn = document.getElementById('zoomInBtn');
         const zoomOutBtn = document.getElementById('zoomOutBtn');
         const resetZoomBtn = document.getElementById('resetZoomBtn');
         
         if (zoomInBtn) {
             zoomInBtn.addEventListener('click', () => {
-                if (this.canvas) {
-                    this.canvas.zoom(1.2);
+                if (window.annotationTool) {
+                    window.annotationTool.zoom(1.2);
                 }
             });
         }
         
         if (zoomOutBtn) {
             zoomOutBtn.addEventListener('click', () => {
-                if (this.canvas) {
-                    this.canvas.zoom(0.8);
+                if (window.annotationTool) {
+                    window.annotationTool.zoom(0.8);
                 }
             });
         }
         
         if (resetZoomBtn) {
             resetZoomBtn.addEventListener('click', () => {
-                if (this.canvas) {
-                    this.canvas.resetZoom();
+                if (window.annotationTool) {
+                    window.annotationTool.resetZoom();
                 }
             });
         }
@@ -114,14 +116,15 @@ class AnnotationManager {
         });
     }
     
-    // 新增：切换辅助线显示
+    // 新增：切换辅助线显示（供AnnotationShortcuts调用）
     toggleGuidelines() {
-        if (this.canvas) {
-            this.canvas.toggleGuidelines();
+        if (window.annotationTool) {
+            window.annotationTool.toggleGuidelines();
             const btn = document.getElementById('toggleGuidelinesBtn');
             if (btn) {
-                btn.textContent = this.canvas.showGuidelines ? '隐藏辅助线' : '显示辅助线';
-                btn.className = this.canvas.showGuidelines ? 'btn btn-secondary' : 'btn btn-outline-secondary';
+                // 更新按钮文本和样式
+                btn.textContent = window.annotationTool.showGuidelines ? '隐藏辅助线' : '显示辅助线';
+                btn.className = window.annotationTool.showGuidelines ? 'btn btn-secondary' : 'btn btn-outline-secondary';
             }
         }
     }

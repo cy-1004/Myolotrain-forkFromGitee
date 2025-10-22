@@ -4501,7 +4501,7 @@ function deleteModel(modelId) {
 
 // 加载训练任务列表
 function loadTrainingTasks() {
-    authenticatedFetch(`${API_URL}/training`)
+    authenticatedFetch(`${API_URL}/training/`)
         .then(response => response.json())
         .then(tasks => {
             const tableBody = document.getElementById('training-table-body');
@@ -5171,7 +5171,7 @@ function submitAddTraining() {
     data.dataset_id = datasetId;
 
     // 发送请求
-    authenticatedFetch(`${API_URL}/training`, {
+    authenticatedFetch(`${API_URL}/training/`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'

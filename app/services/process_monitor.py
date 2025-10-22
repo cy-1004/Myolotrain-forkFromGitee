@@ -206,7 +206,8 @@ class ProcessMonitor:
                 "Results saved to",
                 "results saved to",
                 "results_dict",  # 新增：训练结果字典输出
-                "save_dir"        # 新增：保存目录输出
+                "best.pt",
+                "last.pt"
             ]
             for marker in success_markers:
                 if marker in log_content:

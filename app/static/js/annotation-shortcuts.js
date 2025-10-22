@@ -28,35 +28,48 @@ class AnnotationShortcuts {
             return;
         }
         
+        // 将快捷键处理委托给annotation.js中的handleKeyDown方法
+        // 这里只保留annotation-manager.js特有的功能
         switch (e.code) {
+            // 调用annotation.js中的功能
             case 'KeyA':
             case 'ArrowLeft':
                 e.preventDefault();
-                this.annotationManager.previousImage();
+                if (window.annotationTool) {
+                    window.annotationTool.prevImage();
+                }
                 break;
                 
             case 'KeyD':
             case 'ArrowRight':
                 e.preventDefault();
-                this.annotationManager.nextImage();
+                if (window.annotationTool) {
+                    window.annotationTool.nextImage();
+                }
                 break;
                 
             case 'KeyW':
             case 'ArrowUp':
                 e.preventDefault();
-                this.annotationManager.previousClass();
+                if (window.annotationTool) {
+                    window.annotationTool.prevClass();
+                }
                 break;
                 
             case 'KeyS':
             case 'ArrowDown':
                 e.preventDefault();
-                this.annotationManager.nextClass();
+                if (window.annotationTool) {
+                    window.annotationTool.nextClass();
+                }
                 break;
                 
             case 'Delete':
             case 'Backspace':
                 e.preventDefault();
-                this.annotationManager.deleteSelectedAnnotation();
+                if (window.annotationTool) {
+                    window.annotationTool.deleteSelectedAnnotation();
+                }
                 break;
                 
             case 'Enter':
@@ -84,10 +97,13 @@ class AnnotationShortcuts {
             case 'KeyS':
                 if (e.ctrlKey) {
                     e.preventDefault();
-                    this.annotationManager.saveCurrentImage();
+                    if (window.annotationTool) {
+                        window.annotationTool.saveAnnotation();
+                    }
                 }
                 break;
                 
+            // annotation-manager.js特有的 fitImageToWindow 功能
             case 'KeyF':
                 if (!e.ctrlKey) {
                     e.preventDefault();
@@ -95,34 +111,36 @@ class AnnotationShortcuts {
                 }
                 break;
                 
-            // 新增：辅助线切换快捷键 (G键)
+            // 调用annotation.js中的功能
             case 'KeyG':
                 e.preventDefault();
-                this.annotationManager.toggleGuidelines();
+                if (window.annotationTool) {
+                    window.annotationTool.toggleGuidelines();
+                }
                 break;
                 
-            // 新增：缩放快捷键
+            // 调用annotation.js中的功能
             case 'Equal': // +键
             case 'NumpadAdd':
                 e.preventDefault();
-                if (this.annotationManager.canvas) {
-                    this.annotationManager.canvas.zoom(1.2);
+                if (window.annotationTool) {
+                    window.annotationTool.zoom(1.2);
                 }
                 break;
                 
             case 'Minus': // -键
             case 'NumpadSubtract':
                 e.preventDefault();
-                if (this.annotationManager.canvas) {
-                    this.annotationManager.canvas.zoom(0.8);
+                if (window.annotationTool) {
+                    window.annotationTool.zoom(0.8);
                 }
                 break;
                 
             case 'Digit0': // 0键重置缩放
             case 'Numpad0':
                 e.preventDefault();
-                if (this.annotationManager.canvas) {
-                    this.annotationManager.canvas.resetZoom();
+                if (window.annotationTool) {
+                    window.annotationTool.resetZoom();
                 }
                 break;
                 
