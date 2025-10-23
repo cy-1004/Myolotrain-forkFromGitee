@@ -10,9 +10,9 @@ echo ========================================
 echo   YOLOv8 Training Platform Launcher
 echo ========================================
 echo.
-echo  1. ³õÊ¼»¯ÏîÄ¿£¨GPU»·¾³£©
-echo  2. ³õÊ¼»¯ÏîÄ¿£¨´¿CPU»·¾³£©
-echo  3. Æô¶¯ÏµÍ³
+echo  1. åˆå§‹åŒ–é¡¹ç›®ï¼ˆGPUç¯å¢ƒï¼‰
+echo  2. åˆå§‹åŒ–é¡¹ç›®ï¼ˆçº¯CPUç¯å¢ƒï¼‰
+echo  3. å¯åŠ¨ç³»ç»Ÿ
 echo  4. Exit
 echo.
 set /p choice=Enter your choice (1-4):
@@ -29,11 +29,11 @@ echo ========================================
 echo   Initializing System (GPU Environment)
 echo ========================================
 echo.
-echo Õâ½«»á:
-echo - ´´½¨pythonĞéÄâ»·¾³
-echo - °²×°PyTorch GPU°æ±¾(CUDA 12.6)
-echo - °²×°ÆäËûÒÀÀµ
-echo - ³õÊ¼»¯Êı¾İ¿â£¨½«É¾³ıÔ­Êı¾İ¿â£©
+echo è¿™å°†ä¼š:
+echo - åˆ›å»ºpythonè™šæ‹Ÿç¯å¢ƒ
+echo - å®‰è£…PyTorch GPUç‰ˆæœ¬(CUDA 12.6)
+echo - å®‰è£…å…¶ä»–ä¾èµ–
+echo - åˆå§‹åŒ–æ•°æ®åº“ï¼ˆå°†åˆ é™¤åŸæ•°æ®åº“ï¼‰
 echo.
 set /p confirm=Continue? (y/n):
 if /i "%confirm%" neq "y" goto menu
@@ -50,7 +50,8 @@ call venv\Scripts\activate.bat
 :: Install PyTorch GPU version
 echo Installing PyTorch GPU version...
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
-
+echo Installing onnxruntime-gpu version...
+pip3 install onnxruntime-gpu
 :: Install other dependencies
 if exist requirements.txt (
   echo Installing other dependencies...
@@ -71,11 +72,11 @@ echo ========================================
 echo   Initializing System (CPU Environment)
 echo ========================================
 echo.
-echo Õâ½«»á:
-echo - ´´½¨pythonĞéÄâ»·¾³
-echo - °²×°PyTorch CPU°æ±¾
-echo - °²×°ÆäËûÒÀÀµ
-echo - ³õÊ¼»¯Êı¾İ¿â£¨½«É¾³ıÔ­Êı¾İ¿â£©
+echo è¿™å°†ä¼š:
+echo - åˆ›å»ºpythonè™šæ‹Ÿç¯å¢ƒ
+echo - å®‰è£…PyTorch CPUç‰ˆæœ¬
+echo - å®‰è£…å…¶ä»–ä¾èµ–
+echo - åˆå§‹åŒ–æ•°æ®åº“ï¼ˆå°†åˆ é™¤åŸæ•°æ®åº“ï¼‰
 echo.
 set /p confirm=Continue? (y/n):
 if /i "%confirm%" neq "y" goto menu
@@ -94,29 +95,31 @@ echo Installing PyTorch CPU version...
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cpu
 :: Install FastAPI and Uvicorn
 echo Installing FastAPI and Uvicorn...
-:: °²×° FastAPI ÍêÕû°æ
+:: å®‰è£… FastAPI å®Œæ•´ç‰ˆ
 pip install fastapi[all]
-:: °²×°ºËĞÄÒÀÀµ
+echo installing onnxruntime
+pip install onnxruntime
+:: å®‰è£…æ ¸å¿ƒä¾èµ–
 pip install ultralytics python-multipart tensorboard
 :: Install other dependencies
 if exist requirements.txt (
   echo Installing other dependencies...
   pip install -r requirements.txt
 )
-:: °²×° PostgreSQL Çı¶¯
+:: å®‰è£… PostgreSQL é©±åŠ¨
 echo Installing PostgreSQL dependencies...
 pip install psycopg2-binary
 
-:: ĞÂÔö£º°²×° SQLAlchemy
+:: æ–°å¢ï¼šå®‰è£… SQLAlchemy
 echo Installing SQLAlchemy...
 pip install sqlalchemy
-:: ĞÂÔö£º°²×° pydantic
+:: æ–°å¢ï¼šå®‰è£… pydantic
 echo Installing pydantic...
 pip install pydantic
-:: °²×° pydantic-settings
+:: å®‰è£… pydantic-settings
 echo Installing pydantic-settings...
 pip install pydantic-settings
-:: ¿ÉÑ¡£ºÉı¼¶ pip
+:: å¯é€‰ï¼šå‡çº§ pip
 python -m pip install --upgrade pip
 
 
