@@ -18,8 +18,8 @@ def create_venv():
     
     # 检查Python版本
     python_version = sys.version_info
-    if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 8):
-        print("错误: 需要Python 3.8或更高版本")
+    if python_version.major < 3 or (python_version.major == 3 and python_version.minor < 12):
+        print("错误: 需要Python 3.12或更高版本")
         sys.exit(1)
     
     print(f"检测到Python版本: {python_version.major}.{python_version.minor}.{python_version.micro}")

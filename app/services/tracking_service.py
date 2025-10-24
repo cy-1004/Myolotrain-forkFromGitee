@@ -70,10 +70,30 @@ class TrackingService:
         返回:
             List[Dict]: 追踪结果列表
         """
+        """
+        追踪单帧中的目标 - 不保存任何本地文件
+
+        参数:
+            frame: 输入帧
+            detections: 检测结果列表
+            target_class_id: 要追踪的目标类别ID
+            enable_tracking: 是否启用追踪特定类别
+            cancel_tracking: 是否取消追踪
+
+        返回:
+            List[Dict]: 追踪结果列表
+        """
         try:
             # 记录请求参数
             logger.info(f"追踪帧参数: target_class_id={target_class_id}, enable_tracking={enable_tracking}, cancel_tracking={cancel_tracking}")
 
+            # 验证输入参数
+            if frame is None:
+                raise ValueError("输入帧不能为空")
+            
+            if detections is None:
+                detections = []
+            
             # 处理追踪模式切换
             if cancel_tracking:
                 # 取消追踪 - 禁用单目标模式

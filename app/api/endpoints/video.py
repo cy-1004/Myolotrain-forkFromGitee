@@ -40,6 +40,7 @@ async def get_video_info(
     db: Session = Depends(get_db)
 ):
     """获取视频信息"""
+    temp_file = None
     try:
         # 保存上传的视频
         temp_file = await save_upload_file_temp(video, TEMP_DIR)
@@ -57,9 +58,9 @@ async def get_video_info(
         raise HTTPException(status_code=500, detail=f"获取视频信息失败: {str(e)}")
     finally:
         # 清理临时文件
-        if 'temp_file' in locals():
+        if temp_file and os.path.exists(str(temp_file)):
             try:
-                os.remove(temp_file)
+                os.remove(str(temp_file))
             except:
                 pass
 
@@ -77,6 +78,7 @@ async def extract_frames(
     db: Session = Depends(get_db)
 ):
     """从视频中提取帧"""
+    temp_file = None
     try:
         # 保存上传的视频
         temp_file = await save_upload_file_temp(video, TEMP_DIR)
@@ -92,10 +94,10 @@ async def extract_frames(
             resize = (resize_width, resize_height)
         
         # 在后台任务中提取帧
-        def extract_frames_task():
+        def extract_frames_task(temp_file_path: str):
             try:
                 result = opencv_service.extract_frames(
-                    video_path=temp_file,
+                    video_path=temp_file_path,
                     output_dir=output_dir,
                     interval=interval,
                     max_frames=max_frames,
@@ -121,7 +123,7 @@ async def extract_frames(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
             except Exception as e:
@@ -131,12 +133,13 @@ async def extract_frames(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
         
         # 添加后台任务
-        background_tasks.add_task(extract_frames_task)
+        if temp_file:
+            background_tasks.add_task(extract_frames_task, str(temp_file))
         
         # 返回任务信息
         return {
@@ -147,9 +150,9 @@ async def extract_frames(
         }
     except Exception as e:
         # 清理临时文件
-        if 'temp_file' in locals():
+        if temp_file and os.path.exists(str(temp_file)):
             try:
-                os.remove(temp_file)
+                os.remove(str(temp_file))
             except:
                 pass
         raise HTTPException(status_code=500, detail=f"启动帧提取任务失败: {str(e)}")
@@ -176,19 +179,45 @@ async def get_extraction_status(extraction_id: str):
     # 检查是否完成（优先检查info.json）
     info_file = output_dir / "info.json"
     if info_file.exists():
-        with open(info_file, "r") as f:
-            info = json.load(f)
-        return {
-            "status": "completed",
-            "info": info
-        }
+        try:
+            with open(info_file, "r") as f:
+                info = json.load(f)
+            return {
+                "status": "completed",
+                "info": info
+            }
+        except json.JSONDecodeError:
+            # 如果info.json文件损坏或为空，返回错误状态
+            return {
+                "status": "failed",
+                "error": "结果文件损坏"
+            }
     
     # 检查进度文件
     progress_file = output_dir / "progress.json"
     if progress_file.exists():
-        with open(progress_file, "r") as f:
-            progress_data = json.load(f)
-        return progress_data
+        try:
+            with open(progress_file, "r") as f:
+                # 检查文件是否为空
+                content = f.read().strip()
+                if not content:
+                    # 如果文件为空，返回默认的处理中状态
+                    return {
+                        "status": "in_progress",
+                        "progress": 0,
+                        "extracted_frames": 0
+                    }
+                # 重置文件指针
+                f.seek(0)
+                progress_data = json.load(f)
+            return progress_data
+        except json.JSONDecodeError:
+            # 如果progress.json文件损坏或为空，返回默认的处理中状态
+            return {
+                "status": "in_progress",
+                "progress": 0,
+                "extracted_frames": 0
+            }
     
     # 任务仍在进行中
     return {
@@ -218,7 +247,7 @@ async def delete_extracted_frames(extraction_id: str):
 
 
 @router.get("/frames/{extraction_id}/{filename}")
-async def get_frame(extraction_id: str, filename: str, width: int = None, height: int = None):
+async def get_frame(extraction_id: str, filename: str, width: Optional[int] = None, height: Optional[int] = None):
     """获取提取的帧"""
     file_path = FRAMES_DIR / extraction_id / filename
     
@@ -304,6 +333,7 @@ async def detect_scenes(
     db: Session = Depends(get_db)
 ):
     """检测视频场景变化"""
+    temp_file = None
     try:
         # 保存上传的视频
         temp_file = await save_upload_file_temp(video, TEMP_DIR)
@@ -314,10 +344,10 @@ async def detect_scenes(
         os.makedirs(output_dir, exist_ok=True)
         
         # 在后台任务中检测场景
-        def detect_scenes_task():
+        def detect_scenes_task(temp_file_path: str):
             try:
                 result = opencv_service.detect_scenes(
-                    video_path=temp_file,
+                    video_path=temp_file_path,
                     threshold=threshold,
                     min_scene_length=min_scene_length
                 )
@@ -336,7 +366,7 @@ async def detect_scenes(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
             except Exception as e:
@@ -346,12 +376,13 @@ async def detect_scenes(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
         
         # 添加后台任务
-        background_tasks.add_task(detect_scenes_task)
+        if temp_file:
+            background_tasks.add_task(detect_scenes_task, str(temp_file))
         
         # 返回任务信息
         return {
@@ -362,9 +393,9 @@ async def detect_scenes(
         }
     except Exception as e:
         # 清理临时文件
-        if 'temp_file' in locals():
+        if temp_file and os.path.exists(str(temp_file)):
             try:
-                os.remove(temp_file)
+                os.remove(str(temp_file))
             except:
                 pass
         raise HTTPException(status_code=500, detail=f"启动场景检测任务失败: {str(e)}")
@@ -414,6 +445,7 @@ async def detect_motion(
     db: Session = Depends(get_db)
 ):
     """检测视频中的运动"""
+    temp_file = None
     try:
         # 保存上传的视频
         temp_file = await save_upload_file_temp(video, TEMP_DIR)
@@ -424,10 +456,10 @@ async def detect_motion(
         os.makedirs(output_dir, exist_ok=True)
         
         # 在后台任务中检测运动
-        def detect_motion_task():
+        def detect_motion_task(temp_file_path: str):
             try:
                 result = opencv_service.detect_motion(
-                    video_path=temp_file,
+                    video_path=temp_file_path,
                     sensitivity=sensitivity,
                     blur_size=blur_size,
                     min_area=min_area
@@ -448,7 +480,7 @@ async def detect_motion(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
             except Exception as e:
@@ -458,12 +490,13 @@ async def detect_motion(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
         
         # 添加后台任务
-        background_tasks.add_task(detect_motion_task)
+        if temp_file:
+            background_tasks.add_task(detect_motion_task, str(temp_file))
         
         # 返回任务信息
         return {
@@ -474,9 +507,9 @@ async def detect_motion(
         }
     except Exception as e:
         # 清理临时文件
-        if 'temp_file' in locals():
+        if temp_file and os.path.exists(str(temp_file)):
             try:
-                os.remove(temp_file)
+                os.remove(str(temp_file))
             except:
                 pass
         raise HTTPException(status_code=500, detail=f"启动运动检测任务失败: {str(e)}")
@@ -534,6 +567,7 @@ async def create_dataset_from_video(
     db: Session = Depends(get_db)
 ):
     """从视频创建数据集"""
+    temp_file = None
     try:
         # 验证分割比例
         if abs(train_ratio + val_ratio + test_ratio - 1.0) > 0.001:
@@ -560,10 +594,10 @@ async def create_dataset_from_video(
         }
         
         # 在后台任务中创建数据集
-        def create_dataset_task():
+        def create_dataset_task(temp_file_path: str):
             try:
                 result = opencv_service.create_dataset_from_video(
-                    video_path=temp_file,
+                    video_path=temp_file_path,
                     output_dir=output_dir,
                     extraction_method=extraction_method,
                     interval=interval,
@@ -594,7 +628,7 @@ async def create_dataset_from_video(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
                 
@@ -606,7 +640,7 @@ async def create_dataset_from_video(
                         db=db,
                         name=dataset_name,
                         description=f"从视频 {video.filename} 创建的数据集",
-                        path=str(output_dir)
+                        directory_path=str(output_dir)
                     )
                     
                     # 更新信息文件
@@ -639,12 +673,13 @@ async def create_dataset_from_video(
                 
                 # 清理临时文件
                 try:
-                    os.remove(temp_file)
+                    os.remove(temp_file_path)
                 except:
                     pass
         
         # 添加后台任务
-        background_tasks.add_task(create_dataset_task)
+        if temp_file:
+            background_tasks.add_task(create_dataset_task, str(temp_file))
         
         # 返回任务信息
         return {
@@ -655,9 +690,9 @@ async def create_dataset_from_video(
         }
     except Exception as e:
         # 清理临时文件
-        if 'temp_file' in locals():
+        if temp_file and os.path.exists(str(temp_file)):
             try:
-                os.remove(temp_file)
+                os.remove(str(temp_file))
             except:
                 pass
         raise HTTPException(status_code=500, detail=f"启动数据集创建任务失败: {str(e)}")

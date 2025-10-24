@@ -16,6 +16,7 @@ app/static/uploads/*
 app/static/datasets/*
 app/static/models/*
 app/static/results/*
+app/static/video_frames/*
 logs/*
 *.log
 packages/*

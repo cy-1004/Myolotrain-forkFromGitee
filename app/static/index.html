@@ -40,6 +40,9 @@
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-page="video">视频处理</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="tracking">目标追踪</a>
+                    </li>
                     <li class="nav-item admin-only" style="display: none;">
                         <a class="nav-link" href="#" data-page="user-management">
                             <i class="bi bi-people"></i> 用户管理
@@ -2042,6 +2045,14 @@
                             <select class="form-select" id="camera-select">
                                 <option value="">加载中...</option>
                             </select>
+                            <div class="form-text">
+                                <small class="text-muted">
+                                    如果摄像头列表为空，请检查：
+                                    <br>1. 摄像头是否连接正常
+                                    <br>2. 是否被其他程序占用
+                                    <br>3. 浏览器是否允许访问摄像头
+                                </small>
+                            </div>
                         </div>
 
                         <div class="mb-3">

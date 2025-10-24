@@ -294,7 +294,7 @@ function startCameraTracking() {
     const cameraSelect = document.getElementById('camera-select');
     const deviceId = cameraSelect ? cameraSelect.value : '';
     const trackingStatus = document.getElementById('camera-tracking-status');
-
+    
     // 重置追踪器
     resetTracker()
         .then(() => {
@@ -429,14 +429,27 @@ function startCameraTracking() {
         })
         .catch(error => {
             console.error('启动摄像头追踪失败:', error);
-
+            
             // 更新追踪状态
             if (trackingStatus) {
                 trackingStatus.textContent = `启动失败: ${error.message}`;
             }
 
-            // 显示错误提示
-            alert('启动摄像头追踪失败: ' + error.message);
+            // 显示简单错误提示
+            let errorMessage = '启动摄像头追踪失败: ' + error.message;
+            alert(errorMessage);
+            
+            // 恢复按钮状态
+            const startButton = document.getElementById('start-camera-tracking');
+            const stopButton = document.getElementById('stop-camera-tracking');
+            if (startButton) startButton.style.display = 'inline-block';
+            if (stopButton) stopButton.style.display = 'none';
+            
+            // 停止可能已经启动的摄像头流
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
         });
 }
 
@@ -894,7 +907,7 @@ function drawDetectionsAndTracks(detections, tracks) {
 
 // 帧率控制变量
 let lastFrameTime = 0;
-const FRAME_INTERVAL = 200; // 每200毫秒处理一帧，约等于5fps
+const FRAME_INTERVAL = 100; // 每100毫秒处理一帧，约等于10fps
 
 /**
  * 处理视频帧
@@ -947,8 +960,8 @@ function processFrame() {
             formData.append('conf_thres', 0.25);
             formData.append('iou_thres', 0.45);
 
-            // 发送检测请求
-            fetch(`${API_BASE_URL}/detection/`, {
+            // 发送同步检测请求
+            fetch(`${API_BASE_URL}/sync-detection/sync-detect`, {
                 method: 'POST',
                 body: formData
             })
@@ -976,59 +989,17 @@ function processFrame() {
                     detections = response;
                     console.log('使用API返回的检测结果数组');
                 } else {
-                    console.log('未找到有效的检测结果，使用模拟数据');
-
-                    // 获取画布尺寸
-                    const canvasWidth = canvasElement.width;
-                    const canvasHeight = canvasElement.height;
-
-                    // 创建默认的测试检测结果
-                    detections = [
-                        {
-                            bbox: [Math.floor(canvasWidth * 0.2), Math.floor(canvasHeight * 0.2),
-                                Math.floor(canvasWidth * 0.4), Math.floor(canvasHeight * 0.6)],
-                            class_id: 0,
-                            confidence: 0.9,
-                            class_name: "person"
-                        },
-                        {
-                            bbox: [Math.floor(canvasWidth * 0.6), Math.floor(canvasHeight * 0.3),
-                                Math.floor(canvasWidth * 0.8), Math.floor(canvasHeight * 0.7)],
-                            class_id: 1,
-                            confidence: 0.85,
-                            class_name: "car"
-                        }
-                    ];
+                    console.log('未找到有效的检测结果，使用空数组');
+                    detections = [];
                 }
 
                 // 继续处理检测结果
                 console.log('检测结果:', detections);
 
-                // 如果没有检测结果，使用默认的测试检测结果
-                if (detections.length === 0 && window.DEBUG_MODE) {
-                    console.log('没有检测结果，使用默认的测试检测结果');
-
-                    // 获取画布尺寸
-                    const canvasWidth = canvasElement.width;
-                    const canvasHeight = canvasElement.height;
-
-                    // 创建默认的测试检测结果
-                    detections = [
-                        {
-                            bbox: [Math.floor(canvasWidth * 0.2), Math.floor(canvasHeight * 0.2),
-                                Math.floor(canvasWidth * 0.4), Math.floor(canvasHeight * 0.6)],
-                            class_id: 0,
-                            confidence: 0.9,
-                            class_name: "person"
-                        },
-                        {
-                            bbox: [Math.floor(canvasWidth * 0.6), Math.floor(canvasHeight * 0.3),
-                                Math.floor(canvasWidth * 0.8), Math.floor(canvasHeight * 0.7)],
-                            class_id: 0,
-                            confidence: 0.85,
-                            class_name: "person"
-                        }
-                    ];
+                // 如果没有检测结果，使用空数组
+                if (detections.length === 0) {
+                    console.log('没有检测结果');
+                    detections = [];
                 }
 
                 console.log('检测结果:', detections);
@@ -1049,16 +1020,27 @@ function processFrame() {
                         }
 
                         // 确保边界框坐标是数字
-                        bbox = bbox.map(coord => {
-                            const num = parseFloat(coord);
-                            return isNaN(num) ? 0 : num;
-                        });
+                        if (Array.isArray(bbox)) {
+                            bbox = bbox.map(coord => {
+                                const num = parseFloat(coord);
+                                return isNaN(num) ? 0 : num;
+                            });
+                        } else {
+                            // 如果bbox不是数组，使用默认值
+                            bbox = [0, 0, 100, 100];
+                        }
+
+                        // 处理不同的字段名称
+                        const class_id = det.class_id !== undefined ? det.class_id : 
+                                        det.class !== undefined ? det.class : 0;
+                        const confidence = det.confidence !== undefined ? det.confidence : 0.5;
+                        const class_name = det.class_name || det.name || 'object';
 
                         return {
                             bbox: bbox,
-                            class_id: det.class_id || 0,
-                            confidence: det.confidence || 0.5,
-                            class_name: det.class_name || 'object'
+                            class_id: class_id,
+                            confidence: confidence,
+                            class_name: class_name
                         };
                     });
                 }
@@ -1106,25 +1088,10 @@ function processFrame() {
                     return { tracks: [] };
                 })
                 .then(response => {
-                    // 如果没有追踪结果，使用检测结果创建模拟的追踪结果
+                    // 如果没有追踪结果，返回空数组
                     if (!response.tracks || response.tracks.length === 0) {
-                        console.log('没有追踪结果，使用检测结果创建模拟的追踪结果');
-
-                        // 使用检测结果创建模拟的追踪结果
-                        const mockTracks = window.formattedDetections.map((det, index) => {
-                            return {
-                                id: index + 1,  // 使用索引作为ID
-                                bbox: det.bbox,
-                                class_id: det.class_id,
-                                class_name: det.class_name,
-                                confidence: det.confidence,
-                                trajectory: [
-                                    [det.bbox[0], det.bbox[1]],  // 左上角作为轨迹起点
-                                ]
-                            };
-                        });
-
-                        return { tracks: mockTracks };
+                        console.log('没有追踪结果');
+                        return { tracks: [] };
                     }
 
                     return response;

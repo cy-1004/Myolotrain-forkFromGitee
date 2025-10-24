@@ -51,6 +51,9 @@ call venv\Scripts\activate.bat
 echo Installing PyTorch GPU version...
 pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
+echo Installing onnxruntime-gpu..
+pip3 install onnxruntime-gpu
+
 :: Install other dependencies
 if exist requirements.txt (
   echo Installing other dependencies...
@@ -99,6 +102,8 @@ pip install fastapi[all]
 :: °²×°ºËÐÄÒÀÀµ
 pip install ultralytics python-multipart tensorboard
 :: Install other dependencies
+echo installing onnxruntime
+pip install onnxruntime
 if exist requirements.txt (
   echo Installing other dependencies...
   pip install -r requirements.txt

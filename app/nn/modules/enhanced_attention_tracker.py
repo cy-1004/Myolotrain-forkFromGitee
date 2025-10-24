@@ -130,8 +130,8 @@ class EnhancedAttentionTracker:
             num_layers=3,
             dim_feedforward=1024,
             dropout=0.1,
-            layer_scale_init_value=1e-6,
-            drop_path_rate=0.1
+            layer_scale_init_value=1e-5,  # 调整Layer Scale初始值
+            drop_path_rate=0.2  # 增加随机深度以提高泛化能力
         ).to(device)
         self.transformer.eval()
 
@@ -257,8 +257,8 @@ class EnhancedAttentionTracker:
                         # 如果裁剪区域为空，使用整个图像
                         crop = image
 
-                # 调整大小为固定尺寸 - 减小尺寸以降低内存占用
-                crop = cv2.resize(crop, (32, 32))  # 从64x64减小到32x32
+                # 调整大小为固定尺寸 - 使用更大的尺寸提高准确性
+                crop = cv2.resize(crop, (64, 64))  # 从32x32增加到64x64
                 crops.append(crop)
             except Exception as e:
                 logger.warning(f"裁剪目标区域失败: {str(e)}")
@@ -289,8 +289,8 @@ class EnhancedAttentionTracker:
             if self.device == 'cuda':
                 torch.cuda.empty_cache()
 
-        # 确保从GPU移动到CPU，减少GPU内存占用
-        features = features.cpu()
+        # 不将特征移动到CPU，保持在相同的设备上以避免设备不匹配错误
+        # features = features.cpu()
 
         return features
 
@@ -447,9 +447,28 @@ class EnhancedAttentionTracker:
         返回:
             List[Dict]: 更新后的轨迹列表
         """
+        """
+        更新追踪器状态
+
+        参数:
+            image (np.ndarray): 当前帧图像
+            detections (List[Dict]): 检测结果列表，每个检测包含 'bbox', 'class_id', 'confidence' 等字段
+
+        返回:
+            List[Dict]: 更新后的轨迹列表
+        """
         self.frame_count += 1
 
+        # 输入验证
+        if image is None:
+            logger.error("输入图像为空")
+            return []
+        
+        if detections is None:
+            detections = []
+
         # 如果没有轨迹，初始化轨迹
+        logger.info(f"初始化轨迹，检测到 {len(detections)} 个目标")
         if len(self.tracks) == 0:
             for i, det in enumerate(detections):
                 try:
@@ -466,6 +485,7 @@ class EnhancedAttentionTracker:
 
                     class_id = det.get('class_id', 0)
                     confidence = det.get('confidence', 0.5)
+                    class_name = det.get('class_name', f"Class {class_id}")
 
                     # 如果是单目标模式，检查类别ID
                     if self.single_target_mode:
@@ -485,6 +505,7 @@ class EnhancedAttentionTracker:
                         'id': self.next_id,
                         'boxes': [bbox],
                         'class_id': class_id,
+                        'class_name': class_name,
                         'confidence': confidence,
                         'features': [features[0]],
                         'age': 1,
@@ -606,6 +627,7 @@ class EnhancedAttentionTracker:
 
                 class_id = det.get('class_id', track['class_id'])
                 confidence = det.get('confidence', track['confidence'])
+                class_name = det.get('class_name', track.get('class_name', f"Class {class_id}"))
 
                 # 更新轨迹 - 限制保存的历史数据量
                 MAX_HISTORY = 5  # 只保留最近5帧的数据
@@ -621,6 +643,7 @@ class EnhancedAttentionTracker:
                     track['features'] = track['features'][-MAX_HISTORY:]
 
                 track['class_id'] = class_id  # 更新类别ID
+                track['class_name'] = class_name  # 更新类别名称
                 track['confidence'] = confidence  # 更新置信度
                 track['age'] += 1
                 track['hits'] += 1
@@ -677,6 +700,7 @@ class EnhancedAttentionTracker:
 
                 class_id = det.get('class_id', 0)
                 confidence = det.get('confidence', 0.5)
+                class_name = det.get('class_name', f"Class {class_id}")
 
                 # 提取特征
                 if det_idx >= len(detection_features):
@@ -690,6 +714,7 @@ class EnhancedAttentionTracker:
                     'id': self.next_id,
                     'boxes': [bbox],
                     'class_id': class_id,
+                    'class_name': class_name,
                     'confidence': confidence,
                     'features': [features[0]],
                     'age': 1,
@@ -752,6 +777,13 @@ class EnhancedAttentionTracker:
                     'time_since_update': track['time_since_update'],
                     'trajectory': track['trajectory']
                 }
+
+                # 添加类别名称（如果存在）
+                if 'class_name' in track:
+                    track_info['class_name'] = track['class_name']
+                else:
+                    # 如果轨迹中没有类别名称，使用类别ID作为默认值
+                    track_info['class_name'] = f"Class {track['class_id']}"
 
                 active_tracks.append(track_info)
 
