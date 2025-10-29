@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="static/libs/bootstrap-icons.css">
     <link rel="stylesheet" href="static/css/style.css">
     <link rel="stylesheet" href="static/css/alert-styles.css">
+    <link rel="stylesheet" href="static/css/monitoring.css">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
@@ -51,6 +52,11 @@
                     <li class="nav-item">
                         <a class="nav-link" href="#" data-page="settings">
                             <i class="bi bi-gear"></i> 设置
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="monitoring">
+                            <i class="bi bi-activity"></i> 系统监控
                         </a>
                     </li>
                 </ul>
@@ -2229,6 +2235,100 @@
         </form>
     </template>
 
+    <!-- 系统监控页面 -->
+    <template id="monitoring-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>系统监控</h2>
+                <p class="lead">实时监控系统资源使用情况</p>
+            </div>
+            <div class="col-auto">
+                <button class="btn btn-primary me-2" id="refresh-monitoring-btn">
+                    <i class="bi bi-arrow-repeat"></i> 刷新
+                </button>
+                <button class="btn btn-secondary" id="toggle-monitoring-btn">
+                    <i class="bi bi-power"></i> <span id="monitoring-status-text">关闭监控</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="monitoring-dashboard">
+            <!-- 消息 -->
+            <div id="monitoring-error-message" class="alert alert-danger" style="display: none;"></div>
+            <!-- 时间范围选择器 -->
+            <div class="time-range-selector">
+                <label for="time-range-selector">时间范围:</label>
+                <select id="time-range-selector">
+                    <option value="30m">最近30分钟</option>
+                    <option value="1h" selected>最近1小时</option>
+                    <option value="6h">最近6小时</option>
+                    <option value="12h">最近12小时</option>
+                    <option value="24h">最近24小时</option>
+                </select>
+                <span class="ms-3">最后更新: <span id="last-update-time">--:--:--</span></span>
+            </div>
+            <!-- 实时指标卡片 -->
+            <div class="metric-container">
+                <!-- CPU使用率 -->
+                <div class="metric-card cpu-card">
+                    <div class="metric-label">CPU使用率</div>
+                    <div class="metric-value" id="cpu-percent">--</div>
+                    <div>核心数: <span id="cpu-count">--</span></div>
+                </div>
+
+                <!-- 内存使用率 -->
+                <div class="metric-card memory-card">
+                    <div class="metric-label">内存使用率</div>
+                    <div class="metric-value" id="memory-percent">--</div>
+                    <div><span id="memory-used">--</span> / <span id="memory-total">--</span></div>
+                </div>
+
+                <!-- 磁盘使用率 -->
+                <div class="metric-card disk-card">
+                    <div class="metric-label">磁盘使用率</div>
+                    <div class="metric-value" id="disk-percent">--</div>
+                    <div><span id="disk-used">--</span> / <span id="disk-total">--</span></div>
+                </div>
+
+                <!-- 网络流量 -->
+                <div class="metric-card network-card">
+                    <div class="metric-label">网络流量</div>
+                    <div class="metric-value" id="network-traffic">--</div>
+                    <div>发送: <span id="bytes-sent">--</span></div>
+                    <div>接收: <span id="bytes-recv">--</span></div>
+                </div>
+            </div>
+
+            <!-- GPU信息 -->
+            <div class="row mb-4">
+                <div class="col">
+                    <div class="card">
+                        <div class="card-header">
+                            <h5>GPU信息</h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="gpu-container">
+                                <p class="text-muted">正在加载GPU信息...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 历史数据图表 -->
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>资源使用历史</h5>
+                </div>
+                <div class="card-body">
+                    <div class="chart-container">
+                        <canvas id="monitoring-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </template>
+
     <!-- 使用本地JavaScript资源 -->
     <script src="static/libs/bootstrap.bundle.min.js"></script>
     <!-- Chart.js 图表库 -->
@@ -2252,6 +2352,7 @@
     <!-- 目录浏览器 -->
     <script src="static/js/directory-browser.js"></script>
     <script src="static/js/main.js"></script>
+    <script src="static/js/monitoring.js"></script>
 
     <!-- 引入模态框 -->
     <div id="modals-container"></div>

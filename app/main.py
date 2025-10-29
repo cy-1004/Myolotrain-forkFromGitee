@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.services.process_monitor import process_monitor
 from app.services.tensorboard_service import tensorboard_manager
 from app.services.upload_service import start_cleanup
+from app.services.monitoring_service import system_monitor
 from app.patches.torch_load_patch import apply_patch
 
 # 导入认证相关模块

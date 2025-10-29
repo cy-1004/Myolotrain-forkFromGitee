@@ -955,6 +955,11 @@ function loadPage(page) {
                 `;
             }
             break;
+        case 'monitoring':
+            // 初始化监控页面
+            initMonitoringPage();
+            bindEventListeners();
+            break;
     }
 }
 
