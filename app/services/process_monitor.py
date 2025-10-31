@@ -52,9 +52,11 @@ class ProcessMonitor:
 
                 # 检查每个任务的进程状态
                 for task in running_tasks:
-                    if task.process_id:
+                    # 正确访问数据库模型的属性
+                    process_id = getattr(task, 'process_id', None)
+                    if process_id:
                         try:
-                            pid = int(task.process_id)
+                            pid = int(process_id)
                             is_running = self._is_process_running(pid)
 
                             # 如果进程不再运行，分析日志判断状态
@@ -69,7 +71,8 @@ class ProcessMonitor:
                                     # 查找并注册输出模型
                                     try:
                                         # 获取输出目录
-                                        output_dir = task.parameters.get("output_dir") if task.parameters else None
+                                        parameters = getattr(task, 'parameters', None)
+                                        output_dir = parameters.get("output_dir") if parameters else None
                                         if output_dir:
                                             # 查找最佳模型文件
                                             best_model_path = None
@@ -118,21 +121,23 @@ class ProcessMonitor:
                                                 training_task.update(db, db_obj=task, obj_in={
                                                     "status": "completed",
                                                     "end_time": datetime.datetime.now(),
-                                                    "output_model_id": db_model.id
+                                                    "output_model_id": str(db_model.id)  # 确保使用字符串格式的UUID而不是对象
                                                 })
                                             else:
                                                 print(f"警告: 未找到训练输出的模型文件")
-                                                # 即使没有找到模型文件，也更新任务状态
+                                                # 即使没有找到模型文件，也更新任务状态，但不设置output_model_id
                                                 training_task.update(db, db_obj=task, obj_in={
                                                     "status": "completed",
                                                     "end_time": datetime.datetime.now()
+                                                    # 不设置output_model_id字段，保持为NULL
                                                 })
                                     except Exception as e:
                                         print(f"注册输出模型时出错: {e}")
-                                        # 即使注册模型失败，也更新任务状态
+                                        # 即使注册模型失败，也更新任务状态，但不设置output_model_id
                                         training_task.update(db, db_obj=task, obj_in={
                                             "status": "completed",
                                             "end_time": datetime.datetime.now()
+                                            # 不设置output_model_id字段，保持为NULL
                                         })
                                     
                                     print(f"训练任务 {task.id} 处理完成")

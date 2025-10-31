@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 import os
 import subprocess
 from fastapi import APIRouter, Depends, HTTPException, Body, Request
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
 import torch
@@ -24,7 +25,7 @@ class TrainingRequest(BaseModel):
     gpu_memory: Optional[int] = None  # GPU显存限制（MB）
 
 @router.post("/train")
-async def start_training(request: TrainingRequest):
+async def start_training_api(request: TrainingRequest):
     try:
         from app.services.training_service import train_model
 
@@ -384,9 +385,20 @@ def open_logs_folder(
         raise HTTPException(status_code=404, detail="训练任务不存在")
 
     # 构建日志目录路径
-    if task.parameters and "output_dir" in task.parameters:
-        output_dir = task.parameters["output_dir"]
-        exp_dir = os.path.join(output_dir, "exp")
+    import json
+    parameters = {}
+    if hasattr(task, 'parameters') and task.parameters is not None:
+        parameters = task.parameters if isinstance(task.parameters, dict) else {}
+        # 如果parameters是字符串，尝试解析为JSON
+        if isinstance(task.parameters, str):
+            try:
+                parameters = json.loads(task.parameters)
+            except json.JSONDecodeError:
+                parameters = {}
+    
+    if isinstance(parameters, dict) and "output_dir" in parameters:
+        output_dir = parameters["output_dir"]
+        exp_dir = os.path.join(str(output_dir), "exp")
 
         # 检查目录是否存在
         if os.path.exists(exp_dir):
@@ -404,6 +416,45 @@ def open_logs_folder(
             raise HTTPException(status_code=404, detail="日志目录不存在")
     else:
         raise HTTPException(status_code=404, detail="训练任务没有输出目录信息")
+
+
+@router.get("/{task_id}/logs/download")
+def download_training_logs(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    下载训练日志文件
+    """
+    # 获取训练任务
+    task = training_service.get_training_task(db, task_id=task_id)
+
+    # 检查任务是否存在
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+
+    # 检查TensorBoard日志目录
+    tensorboard_path = None
+    if hasattr(task, 'tensorboard_path'):
+        tensorboard_path = str(task.tensorboard_path) if task.tensorboard_path is not None else None
+    if not tensorboard_path:
+        raise HTTPException(status_code=404, detail="日志文件不存在")
+
+    # 构建日志文件路径
+    from pathlib import Path
+    tensorboard_dir = Path(tensorboard_path)
+    log_path = tensorboard_dir / "training_log.txt"
+
+    # 检查日志文件是否存在
+    if not log_path.exists():
+        raise HTTPException(status_code=404, detail="日志文件不存在")
+
+    # 返回日志文件下载响应
+    return FileResponse(
+        path=str(log_path),
+        filename=f"training_logs_{task_id}.txt",
+        media_type="text/plain"
+    )
 
 @router.post("/restart-tensorboard")
 def restart_tensorboard():
@@ -553,7 +604,7 @@ def validate_ascend_memory(request: AscendMemoryValidationRequest):
     # 验证请求的内存是否合理
     is_valid, message, total_memory = AscendDeviceManager.validate_ascend_memory(
         requested_memory=request.ascend_memory,
-        ascend_index=request.ascend_index
+        ascend_index=request.ascend_index if request.ascend_index is not None else 0
     )
 
     # 获取昇腾NPU信息

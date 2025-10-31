@@ -43,30 +43,25 @@ def main():
         memory_limit = {}
 
         # 设置运行设备
-        os.environ['CUDA_VISIBLE_DEVICES'] = '0' if device_type == 'gpu' else '-1'
+        # 处理自动选择GPU的情况
+        if device_type == 'gpu' and gpu_memory == -1:
+            # 自动选择GPU，不设置CUDA_VISIBLE_DEVICES，让PyTorch自动选择
+            print('\n=== 自动选择空闲GPU进行训练 ===')
+        else:
+            # 手动设置GPU或CPU
+            os.environ['CUDA_VISIBLE_DEVICES'] = '0' if device_type == 'gpu' else '-1'
 
         # 如果使用 CPU，设置线程数
         if device_type == 'cpu':
             # 使用全局导入的torch模块
             import torch as torch_local  # 使用不同的名称避免混淆
-            torch_local.set_num_threads(cpu_cores)
+            torch_local.set_num_threads(int(str(cpu_cores)))
             print('\n=== 使用 CPU 训练，线程数: ' + str(cpu_cores) + ' ===')
         else:
-            print('\n=== 使用 GPU 训练，显存限制 ' + str(gpu_memory) + 'MB ===')
-
-    #    # 设置内存限制（造成异常，暂时关闭）
-    #    # 检测操作系统类型
-    #    import platform
-    #    if platform.system() == 'Linux' or platform.system() == 'Darwin':
-    #        try:
-    #            import resource
-    #            resource.setrlimit(resource.RLIMIT_AS, (memory_limit * 1024 * 1024, memory_limit * 1024 * 1024))
-    #            print('\n=== 内存限制设置' + str(memory_limit) + 'MB ===')
-    #        except Exception as e:
-    #            print('\n=== 警告: 无法设置内存限制: ' + str(e) + ' ===')
-    #    else:
-    #        # Windows系统不支持resource模块
-    #        print('\n=== Windows系统不支持内存限制设置，内存限制将被忽略 ===')
+            if gpu_memory == -1:
+                print('\n=== 使用 GPU 训练，自动选择最空闲的GPU ===')
+            else:
+                print('\n=== 使用 GPU 训练，显存限制 ' + str(gpu_memory) + 'MB ===')
 
         if os.path.exists(font_path):
             print('\n=== 使用项目内置 Arial Unicode 字体: ' + str(font_path) + ' ===')
@@ -182,7 +177,7 @@ def main():
             'name': 'exp',
             'exist_ok': True,
             'workers': 0,  # 禁用多进程数据加载，避免多进程问题
-            'amp': False  # 禁用自动混合精度，避免下载额外模型
+            'amp': False   # 禁用自动混合精度，避免下载额外模型
         }}
 
         # 设置环境变量，确保TensorBoard日志写入到正确的位置
@@ -205,6 +200,28 @@ def main():
         if rect:
             train_args['rect'] = True
             print('\n=== 已启用矩形训练模型===')
+
+        # 添加设备参数 - 支持多GPU训练
+        if device_type == 'gpu':
+            # 检查是否有GPU索引环境变量
+            gpu_indices = os.environ.get('GPU_INDICES')
+            if gpu_indices:
+                # 使用指定的GPU索引
+                gpu_list = [int(idx) for idx in gpu_indices.split(',')]
+                train_args['device'] = gpu_list
+                print('\n=== 设置设备为多GPU: ' + str(gpu_list) + ' ===')
+            elif gpu_memory == -1:
+                # 自动选择GPU，使用特殊值-1
+                train_args['device'] = -1
+                print('\n=== 设置设备为自动选择GPU ===')
+            else:
+                # 使用默认GPU设备
+                train_args['device'] = 0
+                print('\n=== 设置设备为GPU 0 ===')
+        else:
+            # 使用CPU设备
+            train_args['device'] = 'cpu'
+            print('\n=== 设置设备为CPU ===')
 
         # 开始训练
         results = model.train(**train_args)

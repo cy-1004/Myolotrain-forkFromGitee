@@ -160,6 +160,13 @@ def download_model_pt(
     """
     from app.crud.crud_model import model
     
+    # 检查模型ID是否为有效的UUID格式
+    try:
+        import uuid
+        uuid.UUID(model_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="模型ID格式无效")
+    
     # 获取模型信息
     db_model = model.get(db, id=model_id)
     if not db_model:

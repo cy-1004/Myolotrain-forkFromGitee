@@ -26,6 +26,10 @@ app/static/temp/*
 dl/*
 app/static/annotations/*
 /yolopose/*
+app/static/augmented_datasets/*
+app/static/advanced_augmentations/*
+app/static/processed_images/*
+bak/
 
 # 数据库
 postgres_data/

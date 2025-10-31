@@ -145,12 +145,15 @@ class DeviceManager:
 
     @staticmethod
     def get_device_info(device_type: str = 'auto', gpu_memory: Optional[int] = None, gpu_index: int = 0,
+                        gpu_indices: Optional[List[int]] = None, auto_select_gpu: bool = False,
                         ascend_memory: Optional[int] = None, ascend_index: int = 0) -> dict:
         """
         获取设备信息并配置训练设备
         :param device_type: 'cpu', 'gpu', 'ascend' 或 'auto'
         :param gpu_memory: GPU显存限制（MB）
         :param gpu_index: GPU索引，默认为0
+        :param gpu_indices: 多个GPU索引列表
+        :param auto_select_gpu: 是否自动选择空闲GPU
         :param ascend_memory: 昇腾NPU内存限制（MB）
         :param ascend_index: 昇腾NPU索引，默认为0
         :return: 设备配置信息
@@ -164,6 +167,8 @@ class DeviceManager:
             'device': 'cpu',
             'gpu_memory': None,
             'gpu_index': gpu_index,
+            'gpu_indices': gpu_indices,
+            'auto_select_gpu': auto_select_gpu,
             'ascend_memory': None,
             'ascend_index': ascend_index,
             'cpu_cores': None,
@@ -221,62 +226,114 @@ class DeviceManager:
                 device_type = 'cpu'
                 device_info['device_type'] = 'cpu'
             else:
-                # 检查指定的GPU是否存在
-                selected_gpu = None
-                for gpu in available_gpus:
-                    if gpu.get("index", 0) == gpu_index:
-                        selected_gpu = gpu
-                        break
+                # 处理自动选择GPU情况
+                if auto_select_gpu:
+                    # 自动选择最空闲的GPU
+                    if available_gpus:
+                        # 按可用显存排序，选择最空闲的GPU
+                        sorted_gpus = sorted(available_gpus, key=lambda x: x.get('memory_free', 0), reverse=True)
+                        selected_gpu = sorted_gpus[0]
+                        
+                        # 使用-1表示自动选择GPU
+                        device_info['device'] = [-1]
+                        device_info['gpu_indices'] = [-1]
+                        device_info['gpu_index'] = -1
+                        print(f"\n=== 自动选择GPU: {selected_gpu.get('name')} (索引: {selected_gpu.get('index')}) ===")
+                        
+                        # 显存设置为None表示自动
+                        device_info['gpu_memory'] = None
+                    else:
+                        print('\n=== 警告: 没有可用的GPU，将使用CPU训练 ===')
+                        device_type = 'cpu'
+                        device_info['device_type'] = 'cpu'
+                # 处理多GPU情况
+                elif gpu_indices and len(gpu_indices) > 1:
+                    # 多GPU训练
+                    selected_gpus = []
+                    for idx in gpu_indices:
+                        for gpu in available_gpus:
+                            if gpu.get("index", 0) == idx:
+                                selected_gpus.append(gpu)
+                                break
+                    
+                    if selected_gpus:
+                        # 设置多GPU设备
+                        device_info['device'] = gpu_indices
+                        device_info['gpu_indices'] = gpu_indices
+                        print(f"\n=== 使用多GPU训练: {gpu_indices} ===")
+                        
+                        # 设置GPU显存限制（应用于所有GPU）
+                        if gpu_memory and gpu_memory > 0:
+                            # 对于多GPU，我们使用总的显存限制
+                            print(f"\n=== 多GPU总显存限制为 {gpu_memory}MB ===")
+                            device_info['gpu_memory'] = gpu_memory
+                        else:
+                            # 自动显存限制
+                            device_info['gpu_memory'] = None
+                    else:
+                        print('\n=== 警告: 指定的GPU不存在，将使用单GPU训练 ===')
+                        # 回退到单GPU模式
+                        gpu_indices = None
+                        device_info['gpu_indices'] = None
+                
+                # 处理单GPU情况
+                if not auto_select_gpu and (not gpu_indices or len(gpu_indices) <= 1):
+                    # 检查指定的GPU是否存在
+                    selected_gpu = None
+                    for gpu in available_gpus:
+                        if gpu.get("index", 0) == gpu_index:
+                            selected_gpu = gpu
+                            break
 
-                # 如果没有找到指定的GPU，使用第一个GPU
-                if not selected_gpu and available_gpus:
-                    selected_gpu = available_gpus[0]
-                    gpu_index = selected_gpu.get("index", 0)
-                    device_info['gpu_index'] = gpu_index
-                    print(f"\n=== 警告: 指定的GPU ID {gpu_index} 不存在，使用GPU ID {gpu_index} ===")
+                    # 如果没有找到指定的GPU，使用第一个GPU
+                    if not selected_gpu and available_gpus:
+                        selected_gpu = available_gpus[0]
+                        gpu_index = selected_gpu.get("index", 0)
+                        device_info['gpu_index'] = gpu_index
+                        print(f"\n=== 警告: 指定的GPU ID {gpu_index} 不存在，使用GPU ID {gpu_index} ===")
 
-                if selected_gpu:
-                    # 设置当前设备
-                    try:
-                        torch.cuda.set_device(gpu_index)
-                        device_info['device'] = f'cuda:{gpu_index}'
-                    except Exception as e:
-                        print(f'\n=== 警告: 无法设置当前GPU设备: {str(e)} ===')
-                        device_info['device'] = 'cuda'
-
-                    # 设置GPU显存限制
-                    if gpu_memory:
-                        # 获取选定的GPU信息
-                        total_memory = selected_gpu.get("memory", 0)
-                        free_memory = selected_gpu.get("memory_free", 0)
-
-                        # 验证GPU显存设置
-                        if gpu_memory <= 0:
-                            print(f"\n=== 警告: 请求的显存必须大于0MB ===")
-                            # 使用推荐的显存大小（80%的可用显存）
-                            gpu_memory = int(free_memory * 0.8)
-                        elif gpu_memory > total_memory:
-                            print(f"\n=== 警告: 请求的显存({gpu_memory}MB)超过了GPU最大显存({total_memory}MB) ===")
-                            # 使用推荐的显存大小（80%的可用显存）
-                            gpu_memory = int(free_memory * 0.8)
-                        elif gpu_memory > free_memory:
-                            print(f"\n=== 警告: 请求的显存({gpu_memory}MB)超过了当前可用显存({free_memory}MB) ===")
-                            # 使用推荐的显存大小（80%的可用显存）
-                            gpu_memory = int(free_memory * 0.8)
-
-                        print(f"\n=== 设置GPU {gpu_index} 显存限制为 {gpu_memory}MB ===")
+                    if selected_gpu:
+                        # 设置当前设备
+                        try:
+                            torch.cuda.set_device(gpu_index)
+                            device_info['device'] = f'cuda:{gpu_index}'
+                        except Exception as e:
+                            print(f'\n=== 警告: 无法设置当前GPU设备: {str(e)} ===')
+                            device_info['device'] = 'cuda'
 
                         # 设置GPU显存限制
-                        try:
-                            torch.cuda.set_per_process_memory_fraction(gpu_memory / total_memory)
-                            device_info['gpu_memory'] = gpu_memory
-                        except Exception as e:
-                            print(f'\n=== 警告: 无法设置GPU显存限制: {str(e)} ===')
-                else:
-                    print('\n=== 警告: 没有可用的GPU，将使用CPU训练 ===')
-                    device_type = 'cpu'
-                    device_info['device_type'] = 'cpu'
-                    device_info['device'] = 'cpu'
+                        if gpu_memory:
+                            # 获取选定的GPU信息
+                            total_memory = selected_gpu.get("memory", 0)
+                            free_memory = selected_gpu.get("memory_free", 0)
+
+                            # 验证GPU显存设置
+                            if gpu_memory <= 0:
+                                print(f"\n=== 警告: 请求的显存必须大于0MB ===")
+                                # 使用推荐的显存大小（80%的可用显存）
+                                gpu_memory = int(free_memory * 0.8)
+                            elif gpu_memory > total_memory:
+                                print(f"\n=== 警告: 请求的显存({gpu_memory}MB)超过了GPU最大显存({total_memory}MB) ===")
+                                # 使用推荐的显存大小（80%的可用显存）
+                                gpu_memory = int(free_memory * 0.8)
+                            elif gpu_memory > free_memory:
+                                print(f"\n=== 警告: 请求的显存({gpu_memory}MB)超过了当前可用显存({free_memory}MB) ===")
+                                # 使用推荐的显存大小（80%的可用显存）
+                                gpu_memory = int(free_memory * 0.8)
+
+                            print(f"\n=== 设置GPU {gpu_index} 显存限制为 {gpu_memory}MB ===")
+
+                            # 设置GPU显存限制
+                            try:
+                                torch.cuda.set_per_process_memory_fraction(gpu_memory / total_memory)
+                                device_info['gpu_memory'] = gpu_memory
+                            except Exception as e:
+                                print(f'\n=== 警告: 无法设置GPU显存限制: {str(e)} ===')
+                    else:
+                        print('\n=== 警告: 没有可用的GPU，将使用CPU训练 ===')
+                        device_type = 'cpu'
+                        device_info['device_type'] = 'cpu'
+                        device_info['device'] = 'cpu'
 
         # 处理CPU设备
         if device_type == 'cpu':
@@ -288,16 +345,6 @@ class DeviceManager:
                 torch.set_num_threads(recommended_cores)
                 device_info['cpu_cores'] = recommended_cores
 
-    #    # 设置内存限制（仅在Linux/MacOS上）（造成一场，暂时关闭）
-    #    if platform.system() in ['Linux', 'Darwin']:
-    #        try:
-    #            import resource
-    #            # 设置为系统内存的75%
-    #            memory_limit = int(os.sysconf('SC_PAGE_SIZE') * os.sysconf('SC_PHYS_PAGES') * 0.75)
-    #            resource.setrlimit(resource.RLIMIT_AS, (memory_limit, memory_limit))
-    #            device_info['memory_limit'] = memory_limit
-    #        except Exception as e:
-    #            print(f'\n=== 警告: 无法设置内存限制: {str(e)} ===')
 
         return device_info
 
@@ -310,6 +357,8 @@ def train_model(
     device_type: str = 'auto',
     gpu_memory: Optional[int] = None,
     gpu_index: int = 0,
+    gpu_indices: Optional[List[int]] = None,
+    auto_select_gpu: bool = False,
     ascend_memory: Optional[int] = None,
     ascend_index: int = 0,
     **kwargs
@@ -322,6 +371,8 @@ def train_model(
         device_type=device_type,
         gpu_memory=gpu_memory,
         gpu_index=gpu_index,
+        gpu_indices=gpu_indices,
+        auto_select_gpu=auto_select_gpu,
         ascend_memory=ascend_memory,
         ascend_index=ascend_index
     )
@@ -341,9 +392,24 @@ def train_model(
         'epochs': epochs,
         'batch': batch_size,
         'imgsz': image_size,
-        'device': device_info['device'],
         **kwargs
     }
+    
+    # 设置设备参数
+    if device_info['device_type'] == 'gpu':
+        # 处理自动选择GPU
+        if device_info.get('auto_select_gpu', False):
+            # 使用-1表示自动选择最空闲的GPU
+            train_args['device'] = [-1] if len(device_info.get('available_gpus', [])) > 1 else -1
+        # 处理多GPU训练
+        elif 'gpu_indices' in device_info and device_info['gpu_indices']:
+            train_args['device'] = device_info['gpu_indices']
+        else:
+            # 单GPU训练
+            train_args['device'] = device_info['device']
+    else:
+        # 非GPU设备
+        train_args['device'] = device_info['device']
 
     # 开始训练
     try:
@@ -490,13 +556,24 @@ def create_training_task(
                 detail="模型未找到",
             )
 
+    # 处理硬件配置中的自动选择GPU选项
+    processed_hardware_config = hardware_config.copy() if hardware_config else {}
+    
+    # 如果启用了自动选择GPU，确保相关参数正确设置
+    if processed_hardware_config.get('auto_select_gpu', False):
+        # 确保GPU索引为-1表示自动选择
+        processed_hardware_config['gpu_index'] = -1
+        # 显存设置为-1表示自动
+        if processed_hardware_config.get('gpu_memory') == '自动':
+            processed_hardware_config['gpu_memory'] = -1
+    
     # 创建训练任务
     task_in = TrainingTaskCreate(
         name=name,
         dataset_id=dataset_id,  # 如果使用本地数据集，这里会是None
         model_id=model_id,
         parameters=parameters,
-        hardware_config=hardware_config
+        hardware_config=processed_hardware_config
     )
 
     return training_task.create(db, obj_in=task_in)
@@ -784,6 +861,16 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     # 修改双花括号为单花括号，因为在这里我们不需要转义
     script_content = script_content.replace("train_args = {{", "train_args = {")
     script_content = script_content.replace("}}", "}")
+    
+    # 添加多GPU支持
+    gpu_indices = hardware_config.get("gpu_indices", None)
+    if gpu_indices and isinstance(gpu_indices, list):
+        # 设置GPU索引环境变量
+        gpu_indices_str = ",".join(str(idx) for idx in gpu_indices)
+        script_content = script_content.replace(
+            "os.environ['ULTRALYTICS_TENSORBOARD'] = '1'", 
+            f"os.environ['ULTRALYTICS_TENSORBOARD'] = '1'\n        os.environ['GPU_INDICES'] = '{gpu_indices_str}'"
+        )
 
     # 写入脚本文件
     with open(script_path, "w", encoding="utf-8") as f:
@@ -980,8 +1067,9 @@ def stop_training(db: Session, task_id: str) -> TrainingTask:
 
 def resume_training(db: Session, task_id: str) -> TrainingTask:
     """
-    继续已停止的训练任务
+    恢复训练任务
     """
+    # 获取训练任务
     db_task = training_task.get(db, id=task_id)
     if not db_task:
         raise HTTPException(
@@ -989,15 +1077,14 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
             detail="训练任务未找到",
         )
 
-    # 检查任务状态，只有中断的任务才能继续训练
-    if db_task.status not in ["cancelled", "failed"]:
+    # 检查任务状态
+    if db_task.status not in ["completed", "failed", "cancelled"]:
         raise HTTPException(
             status_code=400,
             detail="只有中断、失败的任务才能继续训练",
         )
 
-    # 使用YOLOv8的内置恢复训练机制，不再手动查找检查点文件
-    # 检查是否有输出目录
+    # 检查输出目录
     if not db_task.parameters or "output_dir" not in db_task.parameters:
         raise HTTPException(
             status_code=400,
@@ -1102,44 +1189,57 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
         if db_model:
             model_path = db_model.path
 
-    # 创建模型文件路径
-    model_file_abs = Path(model_path) if model_path else Path(model_type)
+    # 在恢复训练时，优先使用检查点文件
+    last_checkpoint = getattr(db_task, 'last_checkpoint', None)
+    if last_checkpoint and os.path.exists(last_checkpoint):
+        # 使用检查点文件进行恢复训练
+        model_file_abs = Path(last_checkpoint)
+        print(f"\n=== 使用检查点文件进行恢复训练: {model_file_abs} ===")
+    else:
+        # 如果没有检查点文件，回退到原始模型文件
+        model_file_abs = Path(model_path) if model_path else Path(model_type)
+        print(f"\n=== 没有找到检查点文件，使用原始模型文件: {model_file_abs} ===")
 
-    # 创建训练脚本
-    script_path = os.path.join(tensorboard_dir, "resume_train_script.py")
+    # 准备训练参数字典
+    train_args = {
+        'data': str(dataset_yaml_abs),
+        'epochs': epochs,
+        'batch': batch_size,
+        'imgsz': img_size,
+        'project': str(output_dir_abs),
+        'name': 'exp',
+        'exist_ok': True,
+        'workers': 0,  # 禁用多进程数据加载，避免多进程问题
+        'amp': False,  # 禁用自动混合精度，避免下载额外模型
+        'resume': True  # 启用恢复训练
+    }
 
-    # 使用模板文件生成脚本内容
-    template_path = os.path.join(settings.BASE_DIR, 'app', 'templates', 'train_script_template.py')
-    with open(template_path, 'r', encoding='utf-8') as f:
-        script_content = f.read()
+    # 添加设备参数
+    if device_type == 'gpu':
+        # 检查是否有GPU索引环境变量
+        gpu_indices = hardware_config.get("gpu_indices", None)
+        if gpu_indices and isinstance(gpu_indices, list):
+            # 使用指定的GPU索引
+            gpu_list = [int(idx) for idx in gpu_indices]
+            train_args['device'] = gpu_list
+            print(f"\n=== 设置设备为多GPU: {gpu_list} ===")
+        elif gpu_memory == -1:
+            # 自动选择GPU，使用特殊值-1
+            train_args['device'] = -1
+            print("\n=== 设置设备为自动选择GPU ===")
+        else:
+            # 使用默认GPU设备
+            train_args['device'] = 0
+            print("\n=== 设置设备为GPU 0 ===")
+    else:
+        # 使用CPU设备
+        train_args['device'] = 'cpu'
+        print("\n=== 设置设备为CPU ===")
 
-    # 格式化脚本内容
-    script_content = script_content.format(
-        os.path.join(settings.BASE_DIR, 'app', 'static', 'fonts', 'Arial.Unicode.ttf'),
-        device_type,
-        cpu_cores,
-        gpu_memory,
-        memory_limit,
-        model_type,
-        dataset_yaml_abs,
-        epochs,
-        batch_size,
-        img_size,
-        rect_training,
-        output_dir_abs,
-        model_file_abs
-    )
-    # 修改脚本内容，添加resume=True参数和device参数
-    device_param = 'cpu'  # 默认使用CPU以避免CUDA相关问题
-    script_content = script_content.replace("'workers': 0,  # 禁用多进程数据加载，避免多进程问题", "'workers': 0,  # 禁用多进程数据加载，避免多进程问题")
-    script_content = script_content.replace("'amp': False  # 禁用自动混合精度，避免下载额外模型", "'amp': False,  # 禁用自动混合精度，避免下载额外模型\n            'resume': True,  # 启用恢复训练\n            'device': '" + device_param + "'  # 明确指定使用的设备，避免CUDA相关问题")
-    # 修改双花括号为单花括号，因为在这里我们不需要转义
-    script_content = script_content.replace("train_args = {{", "train_args = {")
-    script_content = script_content.replace("}}", "}")
-
-    # 写入脚本文件
-    with open(script_path, "w", encoding="utf-8") as f:
-        f.write(script_content)
+    # 如果启用矩形训练，添加rect参数
+    if rect_training:
+        train_args['rect'] = True
+        print("\n=== 已启用矩形训练模型===")
 
     # 更新任务状态为训练中
     db_task = training_task.update(db, db_obj=db_task, obj_in={
@@ -1157,11 +1257,40 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     # 使用gbk编码以追加模式打开日志文件，以确保中文显示正确
     log_file = open(log_file_path, "a", encoding="gbk", errors="replace")
 
+    print(f"\n=== 调用YOLO恢复训练... ===")
+    
+    # 构造要执行的Python代码
+    python_code = f"""
+import os
+import sys
+from ultralytics import YOLO
+
+# 设置环境变量
+os.environ['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
+os.environ['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
+os.environ['ULTRALYTICS_TENSORBOARD'] = '1'
+
+# 加载模型
+model_file = r'{model_file_abs}'
+print(f"加载模型: {{model_file}}")
+model = YOLO(model_file)
+
+# 训练参数
+train_args = {train_args}
+
+print(f"开始恢复训练，参数: {{train_args}}")
+
+# 开始训练
+results = model.train(**train_args)
+
+print("\\n训练完成")
+print(f"结果摘要: {{results}}")
+"""
+
     # 启动训练进程
-    print(f"\n=== 等待继续训练进程启动... ===")
     try:
         training_process = subprocess.Popen(
-            [sys.executable, script_path],
+            [sys.executable, "-c", python_code],
             stdout=log_file,
             stderr=log_file,
             text=True,
@@ -1380,3 +1509,246 @@ def get_training_results(db: Session, task_id: str) -> Dict[str, Any]:
             "model_path": db_model.path
         }
     }
+# YOLOv8 训练脚本
+import sys
+import os
+import warnings
+import logging
+import multiprocessing
+
+# 禁用自动下载
+os.environ['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
+# 禁用AMP检查
+os.environ['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
+
+# 设置多进程启动方法，确保与Windows兼容
+import torch
+# 在导入任何其他模块之前设置多进程启动方法
+torch.multiprocessing.set_start_method('spawn', force=True)
+
+# 覆盖torch.load函数，确保使用weights_only=False
+import torch as torch_for_patch
+original_torch_load = torch_for_patch.load
+def patched_torch_load(*args, **kwargs):
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+        print('\n=== 覆盖torch.load，使用weights_only=False ===')
+    return original_torch_load(*args, **kwargs)
+torch_for_patch.load = patched_torch_load
+
+# 禁用matplotlib字体警告
+logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", category=UserWarning, module="matplotlib")
+
+import matplotlib
+
+def main():
+    try:
+        # 设置字体路径，避免下载 Arial Unicode 字体
+        font_path = r'{}'
+
+        # 设置硬件资源限制
+        device_type = '{}'
+        cpu_cores = {}
+        gpu_memory = {}
+        memory_limit = {}
+
+        # 设置运行设备
+        # 处理自动选择GPU的情况
+        if device_type == 'gpu' and gpu_memory == -1:
+            # 自动选择GPU，不设置CUDA_VISIBLE_DEVICES，让PyTorch自动选择
+            print('\n=== 自动选择空闲GPU进行训练 ===')
+        else:
+            # 手动设置GPU或CPU
+            os.environ['CUDA_VISIBLE_DEVICES'] = '0' if device_type == 'gpu' else '-1'
+
+        # 如果使用 CPU，设置线程数
+        if device_type == 'cpu':
+            # 使用全局导入的torch模块
+            import torch as torch_local  # 使用不同的名称避免混淆
+            torch_local.set_num_threads(int(str(cpu_cores)))
+            print('\n=== 使用 CPU 训练，线程数: ' + str(cpu_cores) + ' ===')
+        else:
+            if gpu_memory == -1:
+                print('\n=== 使用 GPU 训练，自动选择最空闲的GPU ===')
+            else:
+                print('\n=== 使用 GPU 训练，显存限制 ' + str(gpu_memory) + 'MB ===')
+
+        if os.path.exists(font_path):
+            print('\n=== 使用项目内置 Arial Unicode 字体: ' + str(font_path) + ' ===')
+            matplotlib.rcParams['font.family'] = 'sans-serif'
+            matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS']
+            os.environ['ULTRALYTICS_FONT'] = font_path
+        else:
+            print('\n=== 警告: 项目内置 Arial Unicode 字体不存在' + str(font_path) + ' ===')
+
+
+
+        # 设置参数
+        model_type = '{}'
+        dataset_yaml = r'{}'
+        epochs = {}
+        batch_size = {}
+        img_size = {}
+        rect = {}
+        output_dir = r'{}'
+        model_file = r'{}'
+
+        # 检查模型文件是否存在
+        if not os.path.exists(model_file):
+            print('\n=== 警告: 指定的模型文件不存在: ' + str(model_file) + ' ===\n请检查模型路径是否正确')
+
+        print('\n\n\n=== 训练配置信息 ===')
+        print('模型类型: ' + str(model_type))
+        print('数据集路径: ' + str(dataset_yaml))
+        print('训练轮数: ' + str(epochs))
+        print('批量大小: ' + str(batch_size))
+        print('图像大小: ' + str(img_size))
+        print('输出目录: ' + str(output_dir))
+        print('模型文件: ' + str(model_file))
+
+        # 检查文件和目录是否存在
+        if not os.path.exists(dataset_yaml):
+            raise FileNotFoundError('数据集配置文件不存在: ' + str(dataset_yaml))
+
+        if not os.path.exists(model_file):
+            raise FileNotFoundError('模型文件不存在: ' + str(model_file))
+
+        # 确保输出目录存在
+        os.makedirs(output_dir, exist_ok=True)
+
+        # 添加安全全局变量
+        print('\n=== 添加PyTorch安全全局变量 ===')
+        # 使用全局导入的torch模块
+        try:
+            # 导入PyTorch核心类
+            from torch.nn.modules.container import Sequential
+            from torch.nn import Module, ModuleList, ModuleDict
+
+            # 导入Ultralytics模型类
+            from ultralytics.nn.tasks import DetectionModel, SegmentationModel, ClassificationModel, PoseModel
+
+            # 导入Ultralytics模块类
+            from ultralytics.nn.modules import conv
+            # 只导入需要的模块，避免未使用的导入
+            # from ultralytics.nn.modules import block
+            # from ultralytics.nn.modules import head
+
+            # 添加PyTorch核心类到安全全局变量
+            # 使用全局torch模块
+            import torch as torch_global
+            torch_global.serialization.add_safe_globals([Sequential, Module, ModuleList, ModuleDict])
+
+            # 添加Ultralytics模型类到安全全局变量
+            torch_global.serialization.add_safe_globals([DetectionModel, SegmentationModel, ClassificationModel, PoseModel])
+
+            # 添加Ultralytics模块类
+            torch_global.serialization.add_safe_globals([conv.Conv])
+
+            # 添加所有Ultralytics模块类
+            # 直接添加常用的类
+            try:
+                # 添加常用的模块类
+                from torch.nn.modules.container import Sequential
+                from ultralytics.nn.modules.conv import Conv
+                torch_global.serialization.add_safe_globals([Sequential, Conv])
+                print('\n=== 成功添加常用模块类到安全全局变量 ===')
+            except Exception as e:
+                print('\n=== 警告: 无法添加常用模块类到安全全局变量: ' + str(e) + ' ===')
+
+            # 在PyTorch 2.6+中，可以使用weights_only=False参数代替添加安全全局变量
+            print('\n=== 使用weights_only=False参数加载模型，避免安全全局变量问题 ===')
+        except ImportError as e:
+            print('\n=== 警告: 无法导入所需类: ' + str(e) + ' ===')
+
+        # 导入 YOLO
+        print('\n=== 导入 YOLO 模块 ===')
+        from ultralytics import YOLO
+
+        # 加载模型
+        print('\n=== 加载模型: ' + str(model_file) + ' ===')
+        print('\n=== 模型文件是否存在: ' + str(os.path.exists(model_file)) + ' ===')
+        print('\n=== 模型文件大小: ' + str(os.path.getsize(model_file) / (1024 * 1024)) + ' MB ===')
+
+        # 使用用户上传的模型文件
+        model = YOLO(model_file)
+
+        # 开始训练
+        print('\n=== 开始训练数据集配置文件=' + str(dataset_yaml) + ', 轮数=' + str(epochs) + ', 批量=' + str(batch_size) + ', 图像大小=' + str(img_size) + ', 矩形训练=' + str(rect) + ' ===')
+
+
+
+        # 准备训练参数
+        train_args = {{
+            'data': dataset_yaml,
+            'epochs': epochs,
+            'batch': batch_size,
+            'imgsz': img_size,
+            'project': output_dir,
+            'name': 'exp',
+            'exist_ok': True,
+            'workers': 0,  # 禁用多进程数据加载，避免多进程问题
+            'amp': False  # 禁用自动混合精度，避免下载额外模型
+        }}
+
+        # 设置环境变量，确保TensorBoard日志写入到正确的位置
+        os.environ['ULTRALYTICS_TENSORBOARD'] = '1'
+
+        # 设置Ultralytics的数据集目录为当前项目目录
+        import json
+        from pathlib import Path
+        settings_path = Path.home() / '.config' / 'Ultralytics' / 'settings.json'
+        os.makedirs(settings_path.parent, exist_ok=True)
+        settings_data = {{'datasets_dir': str(Path.cwd().resolve())}}
+        try:
+            with open(settings_path, 'w') as f:
+                json.dump(settings_data, f)
+            print('\n=== 已设置Ultralytics数据集目录为: ' + str(Path.cwd().resolve()) + ' ===\n')
+        except Exception as e:
+            print('\n=== 警告: 无法设置Ultralytics数据集目录: ' + str(e) + ' ===\n')
+
+        # 如果启用矩形训练，添加rect参数
+        if rect:
+            train_args['rect'] = True
+            print('\n=== 已启用矩形训练模型===')
+
+        # 添加设备参数 - 支持多GPU训练
+        if device_type == 'gpu':
+            # 检查是否有GPU索引环境变量
+            gpu_indices = os.environ.get('GPU_INDICES')
+            if gpu_indices:
+                # 使用指定的GPU索引
+                gpu_list = [int(idx) for idx in gpu_indices.split(',')]
+                train_args['device'] = gpu_list
+                print(f'\n=== 设置设备为多GPU: {gpu_list} ===')
+            elif gpu_memory == -1:
+                # 自动选择GPU，使用特殊值-1
+                train_args['device'] = -1
+                print('\n=== 设置设备为自动选择GPU ===')
+            else:
+                # 使用默认GPU设备
+                train_args['device'] = 0
+                print('\n=== 设置设备为GPU 0 ===')
+        else:
+            # 使用CPU设备
+            train_args['device'] = 'cpu'
+            print('\n=== 设置设备为CPU ===')
+
+        # 开始训练
+        results = model.train(**train_args)
+
+        print('\n\n=== 训练完成 ===')
+        print('\n结果摘要: ' + str(results))
+
+    except Exception as e:
+        import traceback
+        print('\n\n=== 训练过程中出现错误===')
+        print('\n错误信息: ' + str(e))
+        print('\n详细错误堆栈:')
+        traceback.print_exc()
+        sys.exit(1)
+
+if __name__ == '__main__':
+    # 在Windows上必须添加这一行，解决多进程问题
+    multiprocessing.freeze_support()
+    main()

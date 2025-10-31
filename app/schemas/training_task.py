@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, List
 from uuid import UUID
 from pydantic import BaseModel
 
@@ -8,10 +8,19 @@ from app.schemas.model import Model
 
 # 硬件配置模型
 class HardwareConfig(BaseModel):
-    device_type: str = "cpu"  # "cpu" 或 "gpu"
+    device_type: str = "cpu"  # "cpu", "gpu" 或 "ascend"
     cpu_cores: Optional[int] = None  # CPU 核心数
     gpu_memory: Optional[int] = None  # GPU 显存（MB）
+    gpu_index: Optional[int] = None  # 单个GPU索引
+    gpu_indices: Optional[List[int]] = None  # 多个GPU索引
+    auto_select_gpu: Optional[bool] = None  # 是否自动选择GPU
+    ascend_memory: Optional[int] = None  # 昇腾NPU内存（MB）
+    ascend_index: Optional[int] = None  # 昇腾NPU索引
     memory: Optional[int] = None  # 内存（MB）
+
+    model_config = {
+        'protected_namespaces': ()
+    }
 
 class TrainingTaskBase(BaseModel):
     name: str

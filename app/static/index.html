@@ -1915,8 +1915,19 @@
 
                             <div id="gpu-info" style="display: none; background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin-bottom: 15px;">
                                 <div class="mb-3">
-                                    <label for="gpu-select" class="form-label">选择GPU:</label>
-                                    <select class="form-select" id="gpu-select"></select>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="auto-select-gpu">
+                                        <label class="form-check-label" for="auto-select-gpu">
+                                            自动选择空闲GPU训练
+                                        </label>
+                                    </div>
+                                    <div class="form-text text-info mb-3">勾选后将自动选择最空闲的GPU进行训练，不可手动选择GPU</div>
+                                </div>
+
+                                <div class="mb-3" id="manual-gpu-selection">
+                                    <label for="gpu-select" class="form-label">选择GPU (可多选):</label>
+                                    <select class="form-select" id="gpu-select" multiple size="4"></select>
+                                    <div class="form-text">按住 Ctrl 键可多选GPU</div>
                                 </div>
 
                                 <div class="mb-3">
@@ -2351,7 +2362,18 @@
     <script src="static/js/streaming.js"></script>
     <!-- 目录浏览器 -->
     <script src="static/js/directory-browser.js"></script>
+    <!-- 主JS文件 -->
     <script src="static/js/main.js"></script>
+    <!-- 模块化JavaScript文件 -->
+    <script src="static/js/training-manager.js"></script>
+    <script src="static/js/dataset-manager.js"></script>
+    <script src="static/js/model-manager.js"></script>
+    <script src="static/js/user-manager.js"></script>
+    <script src="static/js/opencv-tools.js"></script>
+    <script src="static/js/video-processor.js"></script>
+    <script src="static/js/online-annotation.js"></script>
+    <script src="static/js/detection-manager.js"></script>
+    <script src="static/js/settings-manager.js"></script>
     <script src="static/js/monitoring.js"></script>
 
     <!-- 引入模态框 -->
