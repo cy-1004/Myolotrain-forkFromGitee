@@ -101,8 +101,34 @@ class ProcessMonitor:
                                                 
                                                 # 确定模型类型和任务类型
                                                 model_type = "yolov8"  # 默认为yolov8
-                                                model_task = "detection"  # 默认为检测任务
+                                                model_task = "detect"  # 默认为检测任务
                                                 
+                                                # 从训练参数中获取任务类型
+                                                if parameters and "task" in parameters:
+                                                    model_task = parameters["task"]
+                                                else:
+                                                    # 从模型文件名中提取任务类型
+                                                    if "segment" in best_model_path.lower():
+                                                        model_task = "segment"
+                                                    elif "classify" in best_model_path.lower():
+                                                        model_task = "classify"
+                                                    elif "pose" in best_model_path.lower():
+                                                        model_task = "pose"
+
+                                                # 从模型文件名中推断模型类型
+                                                if "yolov8" in best_model_path.lower():
+                                                    # 提取yolov8n, yolov8s等
+                                                    import re
+                                                    match = re.search(r'yolov8[a-z]\d*', best_model_path.lower())
+                                                    if match:
+                                                        model_type = match.group(0)
+                                                elif "yolov5" in best_model_path.lower():
+                                                    model_type = "yolov5"
+                                                elif "yolov10" in best_model_path.lower():
+                                                    model_type = "yolov10"
+                                                elif "yolo11" in best_model_path.lower():
+                                                    model_type = "yolo11"
+
                                                 # 创建模型记录
                                                 model_in = ModelCreate(
                                                     name=model_name,
@@ -118,11 +144,15 @@ class ProcessMonitor:
                                                 print(f"成功注册模型: {model_name} (ID: {db_model.id})")
                                                 
                                                 # 更新训练任务，关联输出模型
-                                                training_task.update(db, db_obj=task, obj_in={
+                                                update_data = {
                                                     "status": "completed",
                                                     "end_time": datetime.datetime.now(),
                                                     "output_model_id": str(db_model.id)  # 确保使用字符串格式的UUID而不是对象
-                                                })
+                                                }
+                                                updated_task = training_task.update(db, db_obj=task, obj_in=update_data)
+                                                print(f"成功更新训练任务 {task.id}，关联输出模型 {db_model.id}")
+                                                print(f"更新后的任务状态: {updated_task.status}")
+                                                print(f"更新后的输出模型ID: {getattr(updated_task, 'output_model_id', None)}")
                                             else:
                                                 print(f"警告: 未找到训练输出的模型文件")
                                                 # 即使没有找到模型文件，也更新任务状态，但不设置output_model_id

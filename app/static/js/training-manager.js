@@ -393,7 +393,7 @@ class TrainingManager {
                         gpuSelect.selectedIndex = -1; // 清除选择
                     }
                     // 显存限制显示为自动且不可修改
-                    gpuMemoryInput.value = '自动';
+                    gpuMemoryInput.value = '-1';
                     gpuMemoryInput.disabled = true;
                     memoryInfoDiv.innerHTML = '<div class="text-info">自动选择最空闲的GPU进行训练</div>';
                 } else {
@@ -1381,9 +1381,11 @@ class TrainingManager {
         tensorboardBtn.textContent = '打开TensorBoard';
         tensorboardBtn.className = 'btn btn-info';
         tensorboardBtn.style.marginRight = '10px';
+        // 保存TrainingManager实例的引用
+        const self = this;
         tensorboardBtn.onclick = function() {
-            // 直接调用已经实现的openTensorBoard函数
-            this.openTensorBoard(taskId);
+            // 使用保存的实例引用调用openTensorBoard函数
+            self.openTensorBoard(taskId);
         };
         leftButtons.appendChild(tensorboardBtn);
 
