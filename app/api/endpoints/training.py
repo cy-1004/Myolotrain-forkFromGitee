@@ -12,6 +12,7 @@ from app.schemas.training_task import TrainingTask
 from app.services import training_service
 from app.services.training_service import DeviceManager
 from app.services.ascend_service import AscendDeviceManager
+from app.services import model_service
 
 router = APIRouter()
 
@@ -681,7 +682,137 @@ def get_ascend_info():
 
     return response
 
+@router.get("/{task_id}/download-model/{model_type}")
+def download_model_file(
+    task_id: str,
+    model_type: str,  # 'best' 或 'last'
+    db: Session = Depends(get_db)
+):
+    """
+    下载训练任务的模型文件 (best.pt 或 last.pt)
+    """
+    # 获取训练任务
+    task = training_service.get_training_task(db, task_id=task_id)
+    
+    # 检查任务是否存在
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    
+    # 检查任务是否已完成
+    task_status = getattr(task, 'status', None)
+    if task_status != "completed":
+        raise HTTPException(status_code=400, detail="训练任务尚未完成")
+    
+    # 获取输出目录
+    import json
+    parameters = {}
+    if hasattr(task, 'parameters') and task.parameters is not None:
+        parameters = task.parameters if isinstance(task.parameters, dict) else {}
+        # 如果parameters是字符串，尝试解析为JSON
+        if isinstance(task.parameters, str):
+            try:
+                parameters = json.loads(task.parameters)
+            except json.JSONDecodeError:
+                parameters = {}
+    
+    if isinstance(parameters, dict) and "output_dir" in parameters:
+        output_dir = parameters["output_dir"]
+        exp_weights_dir = os.path.join(str(output_dir), "exp", "weights")
+        
+        # 确定模型文件路径
+        if model_type == "best":
+            model_file_path = os.path.join(exp_weights_dir, "best.pt")
+            filename = f"{task.name}_best.pt"
+        elif model_type == "last":
+            model_file_path = os.path.join(exp_weights_dir, "last.pt")
+            filename = f"{task.name}_last.pt"
+        else:
+            raise HTTPException(status_code=400, detail="无效的模型类型，必须是 'best' 或 'last'")
+        
+        # 检查模型文件是否存在
+        if not os.path.exists(model_file_path):
+            raise HTTPException(status_code=404, detail=f"模型文件不存在: {model_file_path}")
+        
+        # 返回文件下载响应
+        return FileResponse(
+            path=model_file_path,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+    else:
+        raise HTTPException(status_code=404, detail="训练任务没有输出目录信息")
 
 
-
-
+@router.post("/{task_id}/upload-model/{model_type}")
+def upload_model_to_management(
+    task_id: str,
+    model_type: str,  # 'best' 或 'last'
+    db: Session = Depends(get_db)
+):
+    """
+    将训练任务的模型文件上传到模型管理
+    """
+    # 获取训练任务
+    task = training_service.get_training_task(db, task_id=task_id)
+    
+    # 检查任务是否存在
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    
+    # 检查任务是否已完成
+    task_status = getattr(task, 'status', None)
+    if task_status != "completed":
+        raise HTTPException(status_code=400, detail="训练任务尚未完成")
+    
+    # 获取输出目录
+    import json
+    parameters = {}
+    if hasattr(task, 'parameters') and task.parameters is not None:
+        parameters = task.parameters if isinstance(task.parameters, dict) else {}
+        # 如果parameters是字符串，尝试解析为JSON
+        if isinstance(task.parameters, str):
+            try:
+                parameters = json.loads(task.parameters)
+            except json.JSONDecodeError:
+                parameters = {}
+    
+    if isinstance(parameters, dict) and "output_dir" in parameters:
+        output_dir = parameters["output_dir"]
+        exp_weights_dir = os.path.join(str(output_dir), "exp", "weights")
+        
+        # 确定模型文件路径
+        if model_type == "best":
+            model_file_path = os.path.join(exp_weights_dir, "best.pt")
+            model_name = f"{task.name}_最佳模型"
+        elif model_type == "last":
+            model_file_path = os.path.join(exp_weights_dir, "last.pt")
+            model_name = f"{task.name}_最后模型"
+        else:
+            raise HTTPException(status_code=400, detail="无效的模型类型，必须是 'best' 或 'last'")
+        
+        # 检查模型文件是否存在
+        if not os.path.exists(model_file_path):
+            raise HTTPException(status_code=404, detail=f"模型文件不存在: {model_file_path}")
+        
+        # 创建模型记录
+        from app.schemas.model import ModelCreate
+        from app.crud import model as model_crud
+        
+        # 准备模型数据
+        model_data = ModelCreate(
+            name=model_name,
+            description=f"由训练任务 '{task.name}' 生成的{ '最佳' if model_type == 'best' else '最后' }模型",
+            type="yolov8",  # 默认模型类型
+            task="detect",  # 默认任务类型
+            path=model_file_path,
+            source="training"
+        )
+        
+        # 创建模型
+        try:
+            db_model = model_crud.create(db, obj_in=model_data)
+            return {"success": True, "model_id": str(db_model.id), "message": "模型已成功上传到模型管理"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"创建模型记录失败: {str(e)}")
+    else:
+        raise HTTPException(status_code=404, detail="训练任务没有输出目录信息")

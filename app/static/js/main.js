@@ -692,5 +692,5 @@ document.addEventListener('DOMContentLoaded', function() {
     window.onlineAnnotation = new OnlineAnnotation();
     window.detectionManager = new DetectionManager();
     window.settingsManager = new SettingsManager();
-    // 注意：Monitoring实例已经在monitoring.js中创建，不需要重复创建
+    window.exportModelsManager = new ExportModelsManager();
 });

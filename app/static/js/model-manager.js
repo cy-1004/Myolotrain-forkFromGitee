@@ -10,6 +10,13 @@ class ModelManager {
             .then(response => response.json())
             .then(models => {
                 const tableBody = document.getElementById('models-table-body');
+                
+                // 检查元素是否存在，避免在不相关页面调用时出错
+                if (!tableBody) {
+                    console.log('模型表格元素不存在，跳过更新');
+                    return;
+                }
+                
                 tableBody.innerHTML = '';
 
                 if (models.length === 0) {
@@ -97,7 +104,10 @@ class ModelManager {
             })
             .catch(error => {
                 console.error('Error loading models:', error);
-                alert('加载模型失败');
+                // 只在模型页面显示错误提示
+                if (document.getElementById('models-table-body')) {
+                    alert('加载模型失败');
+                }
             });
     }
 

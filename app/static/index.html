@@ -99,7 +99,6 @@
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
-                    <button type="button" class="btn btn-primary" id="modalSubmit">确定</button>
                 </div>
             </div>
         </div>
@@ -287,6 +286,55 @@
                     <!-- 训练任务列表将通过JavaScript动态加载 -->
                 </tbody>
             </table>
+        </div>
+    </template>
+
+    <!-- 导出模型模态框内容 -->
+    <template id="export-models-template">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-12">
+                    <p>请选择要导出的模型文件：</p>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>最佳模型 (best.pt)</h6>
+                        </div>
+                        <div class="card-body">
+                            <p>训练过程中表现最好的模型权重</p>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-primary download-best" data-task-id="">
+                                    <i class="bi bi-download"></i> 下载到本地
+                                </button>
+                                <button class="btn btn-success upload-best-to-models" data-task-id="">
+                                    <i class="bi bi-cloud-upload"></i> 上传到模型管理
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <div class="card">
+                        <div class="card-header">
+                            <h6>最后模型 (last.pt)</h6>
+                        </div>
+                        <div class="card-body">
+                            <p>训练完成时的最后一个模型权重</p>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-primary download-last" data-task-id="">
+                                    <i class="bi bi-download"></i> 下载到本地
+                                </button>
+                                <button class="btn btn-success upload-last-to-models" data-task-id="">
+                                    <i class="bi bi-cloud-upload"></i> 上传到模型管理
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </template>
 
@@ -2375,6 +2423,7 @@
     <script src="static/js/detection-manager.js"></script>
     <script src="static/js/settings-manager.js"></script>
     <script src="static/js/monitoring.js"></script>
+    <script src="static/js/export-models.js"></script>
 
     <!-- 引入模态框 -->
     <div id="modals-container"></div>

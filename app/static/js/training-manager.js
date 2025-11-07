@@ -98,6 +98,7 @@ class TrainingManager {
                             ${task.status === 'running' || task.status === 'completed' ? `<button class="btn btn-sm btn-info tensorboard" data-id="${task.id}">TensorBoard</button>` : ''}
                             ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' ? `<button class="btn btn-sm btn-primary view-details" data-id="${task.id}">训练详情</button>` : ''}
                             ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' ? `<button class="btn btn-sm btn-secondary view-logs" data-id="${task.id}">查看日志</button>` : ''}
+                            ${task.status === 'completed' ? `<button class="btn btn-sm btn-success export-models" data-id="${task.id}">导出模型</button>` : ''}
                             ${task.status !== 'running' && task.status !== 'training' && task.status !== 'downloading_model' ? `<button class="btn btn-sm btn-danger delete-training" data-id="${task.id}">删除</button>` : ''}
                         </td>
                     `;
@@ -146,6 +147,19 @@ class TrainingManager {
                     button.addEventListener('click', (e) => {
                         const taskId = e.target.getAttribute('data-id');
                         this.viewTrainingLogs(taskId);
+                    });
+                });
+
+                // 绑定导出模型按钮事件
+                document.querySelectorAll('.export-models').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        const taskId = e.target.getAttribute('data-id');
+                        if (typeof exportModelsManager !== 'undefined') {
+                            exportModelsManager.exportModels(taskId);
+                        } else {
+                            console.error('ExportModelsManager is not available');
+                            alert('导出模型功能不可用');
+                        }
                     });
                 });
 
