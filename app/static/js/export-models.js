@@ -2,6 +2,23 @@
 class ExportModelsManager {
     constructor() {
         // 导出模型相关属性
+        this.initModalEventListeners();
+    }
+
+    // 初始化模态框事件监听器
+    initModalEventListeners() {
+        // 获取模态框元素
+        const modalElement = document.getElementById('mainModal');
+        if (modalElement) {
+            // 监听模态框隐藏事件
+            modalElement.addEventListener('hidden.bs.modal', (event) => {
+                // 模态框关闭时恢复确定按钮的显示
+                const modalSubmit = document.getElementById('modalSubmit');
+                if (modalSubmit) {
+                    modalSubmit.style.display = 'inline-block';
+                }
+            });
+        }
     }
 
     // 导出模型
@@ -26,6 +43,9 @@ class ExportModelsManager {
         const modalSubmit = document.getElementById('modalSubmit');
 
         modalTitle.textContent = '导出模型';
+
+        // 隐藏确定按钮，因为导出模型页面不需要
+        modalSubmit.style.display = 'none';
 
         // 获取模板内容
         const template = document.getElementById('export-models-template');
