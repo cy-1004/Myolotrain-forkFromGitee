@@ -2210,15 +2210,67 @@ class VideoProcessor {
                 streamsList.innerHTML = '<div class="alert alert-danger">加载失败</div>';
             });
     }
+
+    // 启动流媒体
+    startStream(streamId) {
+        // 调用 main.js 中定义的全局函数
+        if (typeof window.startStream === 'function') {
+            window.startStream(streamId);
+        } else {
+            console.error('window.startStream is not a function');
+        }
+    }
+
+    // 停止流媒体
+    stopStream(streamId) {
+        // 调用 main.js 中定义的全局函数
+        if (typeof window.stopStream === 'function') {
+            window.stopStream(streamId);
+        } else {
+            console.error('window.stopStream is not a function');
+        }
+    }
+
+    // 删除流媒体
+    deleteStream(streamId) {
+        // 调用 main.js 中定义的全局函数
+        if (typeof window.deleteStream === 'function') {
+            window.deleteStream(streamId);
+        } else {
+            console.error('window.deleteStream is not a function');
+        }
+    }
 }
 
 // 创建全局实例
 window.videoProcessor = new VideoProcessor();
 
 // 全局暴露函数，以便在HTML中直接调用
-window.startStream = (streamId) => videoProcessor.startStream(streamId);
-window.stopStream = (streamId) => videoProcessor.stopStream(streamId);
-window.deleteStream = (streamId) => videoProcessor.deleteStream(streamId);
+// 注意：这些函数已经在 main.js 中定义，这里只是确保它们存在
+// 如果 main.js 中的函数不存在，则使用 VideoProcessor 实例的方法
+window.startStream = window.startStream || ((streamId) => {
+    if (window.videoProcessor && typeof window.videoProcessor.startStream === 'function') {
+        window.videoProcessor.startStream(streamId);
+    } else {
+        console.error('videoProcessor.startStream is not a function');
+    }
+});
+
+window.stopStream = window.stopStream || ((streamId) => {
+    if (window.videoProcessor && typeof window.videoProcessor.stopStream === 'function') {
+        window.videoProcessor.stopStream(streamId);
+    } else {
+        console.error('videoProcessor.stopStream is not a function');
+    }
+});
+
+window.deleteStream = window.deleteStream || ((streamId) => {
+    if (window.videoProcessor && typeof window.videoProcessor.deleteStream === 'function') {
+        window.videoProcessor.deleteStream(streamId);
+    } else {
+        console.error('videoProcessor.deleteStream is not a function');
+    }
+});
 
 // 导出供其他模块使用
 if (typeof module !== 'undefined' && module.exports) {
