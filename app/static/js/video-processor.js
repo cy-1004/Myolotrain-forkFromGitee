@@ -20,6 +20,33 @@ class VideoProcessor {
         
         // 轨迹记录和预测相关变量
         this.trajectoryEnabled = false;
+        
+        // 添加页面关闭事件监听器
+        this.addPageUnloadListener();
+    }
+    
+    // 添加页面关闭事件监听器
+    addPageUnloadListener() {
+        window.addEventListener('beforeunload', () => {
+            console.log('Page unloading, stopping all video detection');
+            this.stopRealTimeDetection();
+            
+            // 如果使用了流媒体检测器，也停止它
+            if (window.streamDetector && typeof window.streamDetector.stopDetection === 'function') {
+                window.streamDetector.stopDetection();
+            }
+            
+            // 清除所有轮询
+            if (window.PollingManager) {
+                window.PollingManager.clearAllPolls();
+            }
+            
+            // 清理内存管理器中的资源
+            if (window.memoryManager) {
+                // 内存管理器会自动清理，但我们可以记录日志
+                console.log('Memory manager cleaning up resources');
+            }
+        });
     }
 
     // 加载视频处理页面
@@ -1504,9 +1531,17 @@ class VideoProcessor {
 
     // 开始流媒体检测
     startStreamDetection(modelId, streamId) {
+        // 先停止任何正在进行的检测
+        if (this.isDetecting) {
+            this.stopRealTimeDetection();
+        }
+        
         this.isDetecting = true;
-        document.getElementById('start-detection-btn').style.display = 'none';
-        document.getElementById('stop-detection-btn').style.display = 'inline-block';
+        const startBtn = document.getElementById('start-detection-btn');
+        const stopBtn = document.getElementById('stop-detection-btn');
+        
+        if (startBtn) startBtn.style.display = 'none';
+        if (stopBtn) stopBtn.style.display = 'inline-block';
 
         // 更新检测状态
         document.getElementById('detection-status').innerHTML =
@@ -1518,12 +1553,17 @@ class VideoProcessor {
 
         // 定义流媒体检测函数
         const detectStreamFrame = (timestamp) => {
-            if (!this.isDetecting) return;
+            // 检查是否应该继续检测
+            if (!this.isDetecting) {
+                console.log('Detection stopped, exiting detection loop');
+                return;
+            }
 
             // 计算FPS
             if (this.lastFrameTime) {
                 this.fps = 1000 / (timestamp - this.lastFrameTime);
-                document.getElementById('fps-counter').textContent = this.fps.toFixed(1);
+                const fpsCounter = document.getElementById('fps-counter');
+                if (fpsCounter) fpsCounter.textContent = this.fps.toFixed(1);
             }
             this.lastFrameTime = timestamp;
 
@@ -1536,20 +1576,32 @@ class VideoProcessor {
                     return response.blob();
                 })
                 .then(blob => {
+                    // 检查是否应该继续检测
+                    if (!this.isDetecting) return;
+                    
                     // 在画布上显示当前帧
+                    const canvas = document.getElementById('detection-canvas');
+                    if (!canvas) {
+                        throw new Error('检测画布不存在');
+                    }
+                    
                     const img = new Image();
                     img.onload = () => {
-                        const ctx = document.getElementById('detection-canvas').getContext('2d');
-                        document.getElementById('detection-canvas').width = img.width;
-                        document.getElementById('detection-canvas').height = img.height;
+                        // 检查是否应该继续检测
+                        if (!this.isDetecting) return;
+                        
+                        const ctx = canvas.getContext('2d');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
                         ctx.drawImage(img, 0, 0);
                         
                         // 同时在视频元素上显示（如果需要）
-                        if (document.getElementById('video-element')) {
-                            const videoCtx = document.getElementById('video-element').getContext ? document.getElementById('video-element').getContext('2d') : null;
+                        const videoElement = document.getElementById('video-element');
+                        if (videoElement && videoElement.getContext) {
+                            const videoCtx = videoElement.getContext('2d');
                             if (videoCtx) {
-                                document.getElementById('video-element').width = img.width;
-                                document.getElementById('video-element').height = img.height;
+                                videoElement.width = img.width;
+                                videoElement.height = img.height;
                                 videoCtx.drawImage(img, 0, 0);
                             }
                         }
@@ -1573,6 +1625,11 @@ class VideoProcessor {
                     });
                 })
                 .then(response => {
+                    // 检查是否应该继续检测
+                    if (!this.isDetecting) return;
+                    
+                    if (!response) return; // 如果前面的步骤被中断，response可能为undefined
+                    
                     if (!response.ok) {
                         return response.text().then(text => {
                             try {
@@ -1586,24 +1643,38 @@ class VideoProcessor {
                     return response.json();
                 })
                 .then(data => {
+                    // 检查是否应该继续检测
+                    if (!this.isDetecting) return;
+                    
                     if (data && data.id) {
                         // 获取检测结果
                         return fetch(`${API_URL}/detection/${data.id}/result`);
                     }
                 })
-                .then(response => response ? response.json() : null)
+                .then(response => {
+                    // 检查是否应该继续检测
+                    if (!this.isDetecting) return;
+                    
+                    return response ? response.json() : null;
+                })
                 .then(resultData => {
+                    // 检查是否应该继续检测
+                    if (!this.isDetecting) return;
+                    
                     if (resultData && resultData.status === 'completed' && resultData.results && resultData.results.length > 0) {
                         // 获取第一个结果的检测内容
                         const detections = resultData.results[0].detections || [];
 
                         // 更新检测到的目标数量
                         this.detectedObjects = detections.length;
-                        document.getElementById('objects-counter').textContent = this.detectedObjects;
+                        const objectsCounter = document.getElementById('objects-counter');
+                        if (objectsCounter) objectsCounter.textContent = this.detectedObjects;
 
                         // 更新检测状态
-                        document.getElementById('detection-status').innerHTML =
-                            `<span class="badge bg-success">正在检测</span>`;
+                        const statusElement = document.getElementById('detection-status');
+                        if (statusElement) {
+                            statusElement.innerHTML = `<span class="badge bg-success">正在检测</span>`;
+                        }
 
                         // 在画布上绘制检测结果
                         this.drawDetections(detections);
@@ -1618,16 +1689,19 @@ class VideoProcessor {
                 .catch(error => {
                     console.error('流媒体检测错误:', error);
                     if (this.isDetecting) {
-                        document.getElementById('detection-status').innerHTML =
-                            `<span class="badge bg-danger">检测错误</span>`;
+                        const statusElement = document.getElementById('detection-status');
+                        if (statusElement) {
+                            statusElement.innerHTML = `<span class="badge bg-danger">检测错误: ${error.message}</span>`;
+                        }
+                    }
+                })
+                .finally(() => {
+                    // 继续下一帧（如果仍在检测中）
+                    if (this.isDetecting) {
+                        this.animationFrameId = requestAnimationFrame(detectStreamFrame);
                     }
                 });
-
-            // 继续下一帧
-            if (this.isDetecting) {
-                this.animationFrameId = requestAnimationFrame(detectStreamFrame);
-            }
-        }
+        };
 
         // 开始检测循环
         this.animationFrameId = requestAnimationFrame(detectStreamFrame);
@@ -1944,26 +2018,49 @@ class VideoProcessor {
 
         // 重置视频元素
         const videoElement = document.getElementById('video-element');
-        videoElement.srcObject = null;
-        videoElement.src = '';
-        videoElement.pause();
-        videoElement.load(); // 确保清理流媒体连接
+        if (videoElement) {
+            videoElement.srcObject = null;
+            videoElement.src = '';
+            videoElement.pause();
+            videoElement.load(); // 确保清理流媒体连接
+        }
 
         // 重置按钮状态
-        document.getElementById('start-detection-btn').style.display = 'inline-block';
-        document.getElementById('stop-detection-btn').style.display = 'none';
+        const startBtn = document.getElementById('start-detection-btn');
+        const stopBtn = document.getElementById('stop-detection-btn');
+        if (startBtn) startBtn.style.display = 'inline-block';
+        if (stopBtn) stopBtn.style.display = 'none';
 
         // 清除画布
-        const ctx = document.getElementById('detection-canvas').getContext('2d');
-        ctx.clearRect(0, 0, document.getElementById('detection-canvas').width, document.getElementById('detection-canvas').height);
+        const canvas = document.getElementById('detection-canvas');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
 
         // 重置计数器
-        document.getElementById('fps-counter').textContent = '0';
-        document.getElementById('objects-counter').textContent = '0';
+        const fpsCounter = document.getElementById('fps-counter');
+        const objectsCounter = document.getElementById('objects-counter');
+        if (fpsCounter) fpsCounter.textContent = '0';
+        if (objectsCounter) objectsCounter.textContent = '0';
 
         // 清空检测对象列表
         const tableBody = document.getElementById('detection-results-table');
-        tableBody.innerHTML = '<tr><td colspan="3" class="text-center">暂无检测结果</td></tr>';
+        if (tableBody) {
+            tableBody.innerHTML = '<tr><td colspan="3" class="text-center">暂无检测结果</td></tr>';
+        }
+
+        // 清除可能存在的轮询
+        if (window.PollingManager) {
+            // 清除所有与检测相关的轮询
+            window.PollingManager.clearPollsByType('detection');
+        }
+
+        // 如果使用了内存管理器，清理相关资源
+        if (window.memoryManager) {
+            // 内存管理器会自动清理，但我们可以在这里添加日志
+            console.log('Video detection stopped and resources cleaned up');
+        }
     }
 
     // 加载流媒体列表

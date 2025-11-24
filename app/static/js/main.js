@@ -510,6 +510,27 @@ function loadPage(page) {
         stopTrainingTasksAutoRefresh();
     }
     
+    // 清理视频检测页面的资源
+    if (currentPage === 'video' && typeof window.videoProcessor !== 'undefined') {
+        // 停止任何正在进行的检测
+        if (window.videoProcessor.isDetecting) {
+            window.videoProcessor.stopRealTimeDetection();
+        }
+        
+        // 清除轮询管理器中的所有轮询
+        if (window.PollingManager) {
+            window.PollingManager.clearAllPolls();
+        }
+    }
+    
+    // 清理流媒体检测资源
+    if (currentPage === 'video' && typeof window.streamDetector !== 'undefined') {
+        // 停止任何正在进行的流媒体检测
+        if (window.streamDetector.isDetecting) {
+            window.streamDetector.stopDetection();
+        }
+    }
+    
     currentPage = page;
 
     // 更新导航菜单激活状态

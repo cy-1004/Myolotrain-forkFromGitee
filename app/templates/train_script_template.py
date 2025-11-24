@@ -10,20 +10,20 @@ os.environ['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
 # 禁用AMP检查
 os.environ['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
 
-# 设置多进程启动方法，确保与Windows兼容
-import torch
+# 设置多进程启动方法，确保与Windows兼容[主进程与子进程混乱，修改测试]
+# import torch
 # 在导入任何其他模块之前设置多进程启动方法
-torch.multiprocessing.set_start_method('spawn', force=True)
+# torch.multiprocessing.set_start_method('spawn', force=True)
 
 # 覆盖torch.load函数，确保使用weights_only=False
-import torch as torch_for_patch
-original_torch_load = torch_for_patch.load
-def patched_torch_load(*args, **kwargs):
-    if 'weights_only' not in kwargs:
-        kwargs['weights_only'] = False
-        print('\n=== 覆盖torch.load，使用weights_only=False ===')
-    return original_torch_load(*args, **kwargs)
-torch_for_patch.load = patched_torch_load
+# import torch as torch_for_patch
+# original_torch_load = torch_for_patch.load
+# def patched_torch_load(*args, **kwargs):
+#     if 'weights_only' not in kwargs:
+#         kwargs['weights_only'] = False
+#         print('\n=== 覆盖torch.load，使用weights_only=False ===')
+#     return original_torch_load(*args, **kwargs)
+# torch_for_patch.load = patched_torch_load
 
 # 禁用matplotlib字体警告
 logging.getLogger('matplotlib.font_manager').setLevel(logging.ERROR)
@@ -33,6 +33,15 @@ import matplotlib
 
 def main():
     try:
+        import torch
+        original_torch_load = torch.load
+        def patched_torch_load(*args, **kwargs):
+            if 'weights_only' not in kwargs:
+                 kwargs['weights_only'] = False
+                 print('\n=== 覆盖torch.load，使用weights_only=False ===')
+            return original_torch_load(*args, **kwargs)
+        torch.load = patched_torch_load
+
         # 设置字体路径，避免下载 Arial Unicode 字体
         font_path = r'{}'
 
@@ -239,5 +248,5 @@ def main():
 
 if __name__ == '__main__':
     # 在Windows上必须添加这一行，解决多进程问题
-    multiprocessing.freeze_support()
+#    multiprocessing.freeze_support()
     main()

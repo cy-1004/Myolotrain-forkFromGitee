@@ -208,6 +208,25 @@ class StreamDetector {
         this.videoElement = null;
         this.canvasElement = null;
         this.onDetectionResult = null;
+        
+        // 添加页面关闭事件监听器
+        this.addPageUnloadListener();
+    }
+    
+    // 添加页面关闭事件监听器
+    addPageUnloadListener() {
+        window.addEventListener('beforeunload', () => {
+            console.log('Page unloading, stopping stream detection');
+            this.stopDetection();
+        });
+        
+        // 页面隐藏时也停止检测
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden' && this.isDetecting) {
+                console.log('Page hidden, stopping stream detection');
+                this.stopDetection();
+            }
+        });
     }
 
     /**
@@ -254,15 +273,26 @@ class StreamDetector {
         this.isDetecting = false;
         this.currentStreamId = null;
 
+        // 清除检测循环
         if (this.detectionInterval) {
             window.memoryManager.clearInterval(this.detectionInterval);
             this.detectionInterval = null;
         }
 
+        // 清除视频元素
         if (this.videoElement) {
             this.videoElement.src = '';
             this.videoElement.load();
         }
+
+        // 清除画布内容
+        if (this.canvasElement) {
+            const ctx = this.canvasElement.getContext('2d');
+            ctx.clearRect(0, 0, this.canvasElement.width, this.canvasElement.height);
+        }
+
+        // 重置检测结果回调
+        this.onDetectionResult = null;
     }
 
     /**
@@ -271,8 +301,16 @@ class StreamDetector {
      * @param {Object} options - 检测选项
      */
     startDetectionLoop(modelId, options) {
+        // 清除任何现有的检测循环
+        if (this.detectionInterval) {
+            window.memoryManager.clearInterval(this.detectionInterval);
+            this.detectionInterval = null;
+        }
+
         const detectFrame = async () => {
+            // 检查是否应该继续检测
             if (!this.isDetecting || !this.currentStreamId) {
+                console.log('Stream detection stopped, exiting detection loop');
                 return;
             }
 
@@ -281,8 +319,18 @@ class StreamDetector {
                 const frameUrl = this.streamManager.getFrameUrl(this.currentStreamId);
                 const response = await fetch(frameUrl);
                 
+                // 再次检查是否应该继续检测
+                if (!this.isDetecting || !this.currentStreamId) {
+                    return;
+                }
+                
                 if (response.ok) {
                     const blob = await response.blob();
+                    // 再次检查是否应该继续检测
+                    if (!this.isDetecting || !this.currentStreamId) {
+                        return;
+                    }
+                    
                     const file = new File([blob], `frame_${Date.now()}.jpg`, { type: 'image/jpeg' });
 
                     // 发送检测请求
@@ -297,13 +345,28 @@ class StreamDetector {
                         body: formData
                     });
 
+                    // 再次检查是否应该继续检测
+                    if (!this.isDetecting || !this.currentStreamId) {
+                        return;
+                    }
+
                     if (detectionResponse.ok) {
                         const detectionData = await detectionResponse.json();
+                        
+                        // 再次检查是否应该继续检测
+                        if (!this.isDetecting || !this.currentStreamId) {
+                            return;
+                        }
                         
                         if (detectionData && detectionData.id) {
                             // 获取检测结果
                             const resultResponse = await fetch(`/api/detection/${detectionData.id}/result`);
                             const resultData = await resultResponse.json();
+
+                            // 再次检查是否应该继续检测
+                            if (!this.isDetecting || !this.currentStreamId) {
+                                return;
+                            }
 
                             if (resultData.status === 'completed' && this.onDetectionResult) {
                                 this.onDetectionResult(resultData.results);
@@ -313,6 +376,15 @@ class StreamDetector {
                 }
             } catch (error) {
                 console.error('检测帧失败:', error);
+                // 即使出错也继续检测循环（除非明确停止）
+                if (this.isDetecting && this.currentStreamId) {
+                    console.log('Continuing detection despite error');
+                }
+            }
+            
+            // 继续检测循环（如果仍在检测中）
+            if (this.isDetecting && this.currentStreamId) {
+                this.detectionInterval = window.memoryManager.setInterval(detectFrame, 33);
             }
         };
 
