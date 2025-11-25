@@ -96,7 +96,7 @@ class TrainingManager {
                             ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'pending' ? `<button class="btn btn-sm btn-warning stop-training" data-id="${task.id}">停止训练</button>` : ''}
                             ${(task.status === 'cancelled' || task.status === 'failed') ? `<button class="btn btn-sm btn-success resume-training" data-id="${task.id}">继续训练</button>` : ''}
                             ${task.status === 'running' || task.status === 'completed' ? `<button class="btn btn-sm btn-info tensorboard" data-id="${task.id}">TensorBoard</button>` : ''}
-                            ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' ? `<button class="btn btn-sm btn-primary view-details" data-id="${task.id}">训练详情</button>` : ''}
+                            <button class="btn btn-sm btn-primary view-details" data-id="${task.id}">训练详情</button>
                             ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' ? `<button class="btn btn-sm btn-secondary view-logs" data-id="${task.id}">查看日志</button>` : ''}
                             ${task.status === 'completed' ? `<button class="btn btn-sm btn-success export-models" data-id="${task.id}">导出模型</button>` : ''}
                             ${task.status !== 'running' && task.status !== 'training' && task.status !== 'downloading_model' ? `<button class="btn btn-sm btn-danger delete-training" data-id="${task.id}">删除</button>` : ''}
@@ -1717,7 +1717,7 @@ class TrainingManager {
                                 </tr>
                                 <tr>
                                     <th>状态</th>
-                                    <td><span class="badge ${getStatusBadgeClass(task.status)}">${getStatusText(task.status)}</span></td>
+                                    <td><span class="badge ${this.getStatusBadgeClass(task.status)}">${this.getStatusText(task.status)}</span></td>
                                 </tr>
                                 <tr>
                                     <th>开始时间</th>
@@ -1772,8 +1772,8 @@ class TrainingManager {
                                 // 更新状态
                                 const statusCell = detailsContainer.querySelector('span.badge');
                                 if (statusCell) {
-                                    statusCell.className = `badge ${getStatusBadgeClass(updatedTask.status)}`;
-                                    statusCell.textContent = getStatusText(updatedTask.status);
+                                    statusCell.className = `badge ${this.getStatusBadgeClass(updatedTask.status)}`;
+                                    statusCell.textContent = this.getStatusText(updatedTask.status);
                                 }
 
                                 // 更新结束时间

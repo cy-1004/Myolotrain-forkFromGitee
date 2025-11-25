@@ -136,13 +136,26 @@ class ProcessMonitor:
                 "training completed",
                 "Results saved to",
                 "results saved to",
-                "results_dict",  # 新增：训练结果字典输出
-                "best.pt",
-                "last.pt"
+                "results_dict"
+
             ]
             for marker in success_markers:
                 if marker in log_content:
                     print(f"训练日志中发现成功标记: {marker}")
+                    # 更新任务状态为已完成
+                    from app.db.session import SessionLocal
+                    from app.crud import training_task
+                    db = SessionLocal()
+                    try:
+                        task = training_task.get(db, id=task_id)
+                        if task and task.status in ["running", "training", "downloading_model", "pending"]:
+                            training_task.update(db, db_obj=task, obj_in={
+                                "status": "completed",
+                                "end_time": datetime.datetime.now()
+                            })
+                            print(f"训练任务 {task_id} 状态已更新为已完成")
+                    finally:
+                        db.close()
                     return "completed"
 
             # 检查失败标记
