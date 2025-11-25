@@ -894,12 +894,19 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     # 启动训练进程
     print(f"\n=== 等待训练进程启动... ===")
     try:
+        # 显式传递环境变量，确保子进程环境一致性
+        env = os.environ.copy()
+        env['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
+        env['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
+        env['ULTRALYTICS_TENSORBOARD'] = '1'
+        
         training_process = subprocess.Popen(
             [sys.executable, script_path],
             stdout=log_file,
             stderr=log_file,
             text=True,
-            cwd=os.getcwd()  # 使用当前工作目录
+            cwd=os.getcwd(),  # 使用当前工作目录
+            env=env  # 显式传递环境变量
         )
 
         # 等待一段时间，检查进程是否立即退出
