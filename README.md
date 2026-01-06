@@ -4,7 +4,9 @@
 [![Gitee fork](https://gitee.com/rock_kim/Myolotrain//badge/fork.svg?theme=gvp)](https://gitee.com/rock_kim/Myolotrain/members)
 
 
-Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机视觉任务提供了直观的图形界面。该平台集成了数据集管理、模型管理、训练管理和目标检测功能，支持windows、linux、docker等多种部署方式，使用户能够轻松地训练和部署 YOLOv8 模型，支持CPU和GPU，使用tensorboard实时查看训练进度，具备数据集自动分割、数据集增强、实时检测、动态轨迹和预测等。
+Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机视觉任务提供了直观的图形界面。该平台集成了数据集管理、模型管理、训练管理和目标检测功能，支持windows、linux、docker等多种部署方式，使用户能够轻松地训练和部署 YOLOv8 模型， 支持CPU和GPU，使用tensorboard实时查看训练进度，具备数据集自动分割、数据集增强、实时检测、动态轨迹和预测等。
+
+#### :exclamation: 重要提醒：2026年1月6日更新的代码中新功能修改了部分功能的数据结构，如果您有未完成的标注、训练，建议您先完成后再替换新版代码，同时建议您在升级前进行数据备份。
 
 ## 声明
 
@@ -19,6 +21,12 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 感谢所有开发者的帮助与支持
 
 ### 更新日志：
+<details>
+<summary>-20260106  新增增加实例分割、OBB（旋转框）、Pose（关键点）三个类别的在线标注、训练、推理功能</summary>
+> - 1.增加实例分割、OBB（旋转框）、Pose（关键点）三个类别的在线标注、训练、推理功能；
+> - 2.解决了系统BUG；
+</details>
+
 <details>
 <summary>-20251031  拆分main.js文件，增加多GPU/自动GPU训练，增加训练日志下载</summary>
 
