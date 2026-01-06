@@ -71,6 +71,7 @@ async def get_upload_status(file_id: str):
 async def create_dataset(
     name: str = Form(...),
     description: Optional[str] = Form(None),
+    task: str = Form("detect"),  # 任务类型
     file: UploadFile = File(...),
     file_id: Optional[str] = Form(None),
     split_dataset_enabled: bool = Form(False),
@@ -87,6 +88,7 @@ async def create_dataset(
         db=db,
         name=name,
         description=description,
+        task=task,
         file=file,
         file_id=file_id,
         split_dataset_enabled=split_dataset_enabled,
@@ -150,6 +152,7 @@ def register_external_dataset(
     name: str = Body(...),
     description: Optional[str] = Body(None),
     external_path: str = Body(...),
+    task: str = Body("detect"),  # 任务类型
     split_dataset_enabled: bool = Body(False),
     train_ratio: float = Body(0.7),
     val_ratio: float = Body(0.15),
@@ -165,6 +168,7 @@ def register_external_dataset(
         name=name,
         description=description,
         external_path=external_path,
+        task=task,
         split_dataset_enabled=split_dataset_enabled,
         train_ratio=train_ratio,
         val_ratio=val_ratio,
@@ -188,6 +192,7 @@ def import_local_dataset(
     name: str = Body(...),
     description: Optional[str] = Body(None),
     directory_name: str = Body(...),
+    task: str = Body("detect"),  # 任务类型
     split_dataset_enabled: bool = Body(False),
     train_ratio: float = Body(0.7),
     val_ratio: float = Body(0.15),
@@ -203,6 +208,7 @@ def import_local_dataset(
         name=name,
         description=description,
         directory_name=directory_name,
+        task=task,
         split_dataset_enabled=split_dataset_enabled,
         train_ratio=train_ratio,
         val_ratio=val_ratio,
@@ -215,6 +221,7 @@ def import_external_dataset(
     name: str = Body(...),
     description: Optional[str] = Body(None),
     directory_path: str = Body(...),
+    task: str = Body("detect"),  # 任务类型
     split_dataset_enabled: bool = Body(False),
     train_ratio: float = Body(0.7),
     val_ratio: float = Body(0.15),
@@ -230,6 +237,7 @@ def import_external_dataset(
         name=name,
         description=description,
         directory_path=directory_path,
+        task=task,
         split_dataset_enabled=split_dataset_enabled,
         train_ratio=train_ratio,
         val_ratio=val_ratio,

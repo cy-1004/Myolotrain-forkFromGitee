@@ -198,6 +198,23 @@
                     </div>
                 </div>
 
+                <!-- 关键点工具模式选择栏 -->
+                <div id="keypoints-mode-selector" class="toolbar" style="display: none;">
+                    <div class="row align-items-center">
+                        <div class="col-md-12">
+                            <div class="btn-group" role="group" aria-label="关键点工具模式">
+                                <button type="button" class="btn btn-outline-primary" id="keypoints-mode-box" data-mode="box">
+                                    <i class="fas fa-square"></i> 矩形框模式（Q）
+                                </button>
+                                <button type="button" class="btn btn-outline-primary" id="keypoints-mode-keypoints" data-mode="keypoints">
+                                    <i class="fas fa-map-marker-alt"></i> 关键点模式（E）
+                                </button>
+                            </div>
+                            <small class="text-muted ms-3">必须先添加矩形框，切换为关键点模式后添加关键点</small>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="text-center">
                     <div id="canvas-container" style="position: relative; display: inline-block;">
                         <canvas id="annotation-canvas" class="annotation-canvas"></canvas>
@@ -234,7 +251,7 @@
                     <div class="card-body">
                         <div class="btn-group-vertical w-100 gap-2">
                             <button id="ai-auto-annotate" class="btn btn-warning">
-                                <i class="fas fa-robot"></i> AI自动标注
+                                <i class="fas fa-robot"></i> AI自动标注（仅适用目标检测）
                             </button>
                             <button id="stop-auto-annotate" class="btn btn-danger" style="display: none;">
                                 <i class="fas fa-stop"></i> 停止标注
@@ -281,6 +298,9 @@
     </div>
 
     <script src="libs/bootstrap.bundle.min.js"></script>
+    <script src="js/segmentation-tool.js"></script>
+    <script src="js/obb-tool.js"></script>
+    <script src="js/keypoints-tool.js"></script>
     <script src="js/annotation.js"></script>
 </body>
 </html>

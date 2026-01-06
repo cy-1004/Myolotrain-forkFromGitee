@@ -185,8 +185,9 @@ def main():
             'project': output_dir,
             'name': 'exp',
             'exist_ok': True,
-            'workers': 0,  # 禁用多进程数据加载，避免多进程问题
-            'amp': False   # 禁用自动混合精度，避免下载额外模型
+            'workers': int(str(cpu_cores)) if device_type == 'cpu' else 0,  # 根据CPU核心数设置数据加载器进程数，使用用户指定的核心数
+            'amp': False,   # 禁用自动混合精度，避免下载额外模型
+            'task': '{}'  # 任务类型: detect, segment, pose, obb
         }}
 
         # 设置环境变量，确保TensorBoard日志写入到正确的位置

@@ -168,3 +168,62 @@
     0% { transform: rotate(0deg); }
     100% { transform: rotate(360deg); }
 }
+
+/* 关键点列表样式 */
+.keypoints-list {
+    margin-top: 5px;
+    padding-top: 5px;
+    border-top: 1px solid #eee;
+}
+
+.keypoints-container {
+    margin-top: 5px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.keypoint-item {
+    display: flex;
+    align-items: center;
+    margin-bottom: 3px;
+    padding: 2px;
+    font-size: 12px;
+}
+
+.keypoint-label {
+    display: inline-block;
+    min-width: 30px;
+    margin-right: 5px;
+    font-weight: bold;
+}
+
+.keypoint-visibility {
+    width: auto;
+    padding: 1px 3px;
+    margin: 0 5px;
+    font-size: 11px;
+    border-radius: 3px;
+    border: 1px solid #ccc;
+}
+
+.keypoint-visibility-text {
+    margin-left: 5px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    font-size: 11px;
+}
+
+.visibility-visible {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+.visibility-occluded {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.visibility-hidden {
+    background-color: #f8d7da;
+    color: #721c24;
+}

@@ -128,7 +128,8 @@ def init_db():
                     
                     # 首先检查是否有任何用户行存在
                     user_count_result = conn.execute(text("SELECT COUNT(*) FROM users"))
-                    user_count = user_count_result.scalar()
+                    user_count_raw = user_count_result.scalar()
+                    user_count = user_count_raw if user_count_raw is not None else 0
                     
                     if user_count > 0:
                         # 如果有用户行，先添加一个可为NULL的字段
@@ -238,6 +239,108 @@ def init_db():
                     """))
                     conn.commit()
                     logger.info("Added last_login column to users table")
+
+        # 检查并添加 annotation_projects 表的 project_type 列
+        if 'annotation_projects' in tables:
+            with engine.connect() as conn:
+                # 检查 project_type 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'annotation_projects' AND column_name = 'project_type'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding project_type column to annotation_projects table")
+                    conn.execute(text("""
+                        ALTER TABLE annotation_projects
+                        ADD COLUMN project_type VARCHAR(50) DEFAULT 'detection'
+                    """))
+                    conn.commit()
+                    logger.info("Added project_type column to annotation_projects table")
+
+                # 检查 class_keypoints 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'annotation_projects' AND column_name = 'class_keypoints'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding class_keypoints column to annotation_projects table")
+                    conn.execute(text("""
+                        ALTER TABLE annotation_projects
+                        ADD COLUMN class_keypoints JSON
+                    """))
+                    conn.commit()
+                    logger.info("Added class_keypoints column to annotation_projects table")
+
+        # 检查并添加 datasets 表的 task 列
+        if 'datasets' in tables:
+            with engine.connect() as conn:
+                # 检查 task 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'datasets' AND column_name = 'task'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding task column to datasets table")
+                    conn.execute(text("""
+                        ALTER TABLE datasets
+                        ADD COLUMN task VARCHAR(50) DEFAULT 'detect'
+                    """))
+                    conn.commit()
+                    logger.info("Added task column to datasets table")
+
+                # 检查 train_count 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'datasets' AND column_name = 'train_count'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding train_count column to datasets table")
+                    conn.execute(text("""
+                        ALTER TABLE datasets
+                        ADD COLUMN train_count INTEGER DEFAULT 0
+                    """))
+                    conn.commit()
+                    logger.info("Added train_count column to datasets table")
+
+                # 检查 val_count 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'datasets' AND column_name = 'val_count'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding val_count column to datasets table")
+                    conn.execute(text("""
+                        ALTER TABLE datasets
+                        ADD COLUMN val_count INTEGER DEFAULT 0
+                    """))
+                    conn.commit()
+                    logger.info("Added val_count column to datasets table")
+
+                # 检查 test_count 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'datasets' AND column_name = 'test_count'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding test_count column to datasets table")
+                    conn.execute(text("""
+                        ALTER TABLE datasets
+                        ADD COLUMN test_count INTEGER DEFAULT 0
+                    """))
+                    conn.commit()
+                    logger.info("Added test_count column to datasets table")
 
         # 创建初始管理员用户
         create_initial_admin()

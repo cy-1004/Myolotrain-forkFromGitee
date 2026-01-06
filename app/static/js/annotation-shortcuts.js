@@ -68,7 +68,14 @@ class AnnotationShortcuts {
             case 'Backspace':
                 e.preventDefault();
                 if (window.annotationTool) {
-                    window.annotationTool.deleteSelectedAnnotation();
+                    // 如果当前是关键点工具且有选中的关键点，则只删除关键点
+                    if (window.annotationTool.currentTool === 'keypoints' && 
+                        window.annotationTool.keypointsTool && 
+                        window.annotationTool.keypointsTool.selectedKeypoint) {
+                        window.annotationTool.keypointsTool.deleteSelectedKeypoint();
+                    } else {
+                        window.annotationTool.deleteSelectedAnnotation();
+                    }
                 }
                 break;
                 

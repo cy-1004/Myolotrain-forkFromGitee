@@ -11,6 +11,7 @@ class DatasetCreate(DatasetBase):
     path: str
     classes: List[str]
     image_count: int = 0
+    task: str = "detect"
 
 class DatasetUpdate(DatasetBase):
     name: Optional[str] = None
@@ -26,6 +27,7 @@ class DatasetInDBBase(DatasetBase):
     created_at: datetime
     updated_at: datetime
     status: str
+    task: str = "detect"
 
     class Config:
         from_attributes = True

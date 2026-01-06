@@ -354,6 +354,7 @@ def train_model(
     epochs: int,
     batch_size: int,
     image_size: int,
+    task_type: str = 'detect',  # 任务类型: detect, segment, pose, obb
     device_type: str = 'auto',
     gpu_memory: Optional[int] = None,
     gpu_index: int = 0,
@@ -392,6 +393,7 @@ def train_model(
         'epochs': epochs,
         'batch': batch_size,
         'imgsz': image_size,
+        'task': task_type,  # 使用指定的任务类型
         **kwargs
     }
     
@@ -841,6 +843,9 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     with open(template_path, 'r', encoding='utf-8') as f:
         script_content = f.read()
 
+    # 获取任务类型，默认为'detect'
+    task_type = db_task.parameters.get('task_type', 'detect')
+    
     # 格式化脚本内容
     script_content = script_content.format(
         os.path.join(settings.BASE_DIR, 'app', 'static', 'fonts', 'Arial.Unicode.ttf'),
@@ -855,7 +860,8 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         img_size,
         rect_training,
         output_dir_abs,
-        model_file_abs
+        model_file_abs,
+        task_type
     )
 
     # 修改双花括号为单花括号，因为在这里我们不需要转义
@@ -1208,11 +1214,13 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
         print(f"\n=== 没有找到检查点文件，使用原始模型文件: {model_file_abs} ===")
 
     # 准备训练参数字典
+    task_type = db_task.parameters.get('task_type', 'detect')
     train_args = {
         'data': str(dataset_yaml_abs),
         'epochs': epochs,
         'batch': batch_size,
         'imgsz': img_size,
+        'task': task_type,  # 使用指定的任务类型
         'project': str(output_dir_abs),
         'name': 'exp',
         'exist_ok': True,

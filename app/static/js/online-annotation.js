@@ -43,9 +43,13 @@ class OnlineAnnotation {
                         .then(stats => {
                             const progressPercentage = stats.progress_percentage || 0;
                             
+                            // 获取项目类型显示文本
+                            const projectTypeText = this.getProjectTypeText(project.project_type);
+                            
                             row.innerHTML = `
                                 <td>${project.name}</td>
                                 <td>${project.description || '-'}</td>
+                                <td><span class="badge bg-info">${projectTypeText}</span></td>
                                 <td>${project.classes.length}</td>
                                 <td>${stats.total_images || 0}</td>
                                 <td>${stats.completed_images || 0}</td>
@@ -70,9 +74,13 @@ class OnlineAnnotation {
                         })
                         .catch(error => {
                             console.error('Error loading project stats:', error);
+                            // 获取项目类型显示文本
+                            const projectTypeText = this.getProjectTypeText(project.project_type);
+                            
                             row.innerHTML = `
                                 <td>${project.name}</td>
                                 <td>${project.description || '-'}</td>
+                                <td><span class="badge bg-info">${projectTypeText}</span></td>
                                 <td>${project.classes.length}</td>
                                 <td>-</td>
                                 <td>-</td>
@@ -142,6 +150,17 @@ class OnlineAnnotation {
         
         // 绑定图片来源选择事件
         this.bindImageSourceEvents();
+        
+        // 绑定标注类型选择事件
+        this.bindAnnotationTypeEvents();
+        
+        // 绑定类别和关键点配置事件
+        this.bindClassKeypointsEvents();
+        
+        // 为初始的项目绑定事件
+        document.querySelectorAll('.class-keypoints-item').forEach(item => {
+            this.bindKeypointEventsForItem(item);
+        });
 
         modal.show();
 
@@ -154,6 +173,9 @@ class OnlineAnnotation {
         const datasetContainer = document.getElementById('dataset-source-container');
         const directoryContainer = document.getElementById('directory-source-container');
         const uploadContainer = document.getElementById('upload-source-container');
+        
+        // 保存this引用以在事件处理函数中使用
+        const self = this;
         
         imageSourceRadios.forEach(radio => {
             radio.addEventListener('change', function() {
@@ -168,7 +190,7 @@ class OnlineAnnotation {
                 } else if (this.value === 'directory') {
                     directoryContainer.style.display = 'block';
                     // 绑定目录浏览按钮
-                    this.bindDirectoryBrowseButton();
+                    self.bindDirectoryBrowseButton();
                 } else if (this.value === 'upload') {
                     uploadContainer.style.display = 'block';
                 }
@@ -217,20 +239,337 @@ class OnlineAnnotation {
             });
         }
     }
-
+    
+    // 绑定标注类型选择事件
+    bindAnnotationTypeEvents() {
+        const projectTypeSelect = document.getElementById('annotation-project-type');
+        const poseConfigDiv = document.getElementById('pose-configuration');
+        const defaultClassesDiv = document.getElementById('default-classes');
+        
+        projectTypeSelect.addEventListener('change', function() {
+            const selectedType = this.value;
+            
+            if (selectedType === 'pose') {
+                poseConfigDiv.style.display = 'block';
+                defaultClassesDiv.style.display = 'none';
+            } else {
+                poseConfigDiv.style.display = 'none';
+                defaultClassesDiv.style.display = 'block';
+            }
+        });
+    }
+    
+    // 绑定类别和关键点配置事件
+    bindClassKeypointsEvents() {
+        const container = document.getElementById('class-keypoints-container');
+        
+        // 绑定添加类别和关键点按钮事件
+        document.getElementById('add-class-keypoints').addEventListener('click', () => {
+            const item = document.createElement('div');
+            item.className = 'class-keypoints-item mb-3';
+            item.innerHTML = `
+                <div class="row">
+                    <div class="col-md-4">
+                        <input type="text" class="form-control class-name" placeholder="类别名称，如：person">
+                    </div>
+                    <div class="col-md-8">
+                        <div class="keypoints-input-container">
+                            <div class="mb-2">
+                                <label class="form-label">关键点名称列表</label>
+                            </div>
+                            <div class="keypoints-list-container">
+                                <!-- 关键点输入框将动态生成 -->
+                            </div>
+                            <button type="button" class="btn btn-sm btn-outline-secondary mt-2 add-keypoint-btn">+ 添加关键点</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="row mt-2">
+                    <div class="col-md-12 text-end">
+                        <button type="button" class="btn btn-sm btn-outline-danger remove-class-keypoints">删除</button>
+                    </div>
+                </div>
+            `;
+            container.appendChild(item);
+            
+            // 为新添加的项绑定事件
+            this.bindKeypointEventsForItem(item);
+            
+            // 绑定删除按钮事件
+            item.querySelector('.remove-class-keypoints').addEventListener('click', () => {
+                if (document.querySelectorAll('.class-keypoints-item').length > 1) {
+                    item.remove();
+                } else {
+                    alert('至少需要保留一个类别配置');
+                }
+            });
+        });
+        
+        // 为初始项绑定事件
+        document.querySelectorAll('.class-keypoints-item').forEach(item => {
+            this.bindKeypointEventsForItem(item);
+        });
+        
+        // 绑定删除按钮事件（对于初始的项目）
+        document.querySelectorAll('.remove-class-keypoints').forEach(button => {
+            button.addEventListener('click', function() {
+                const item = this.closest('.class-keypoints-item');
+                if (document.querySelectorAll('.class-keypoints-item').length > 1) {
+                    item.remove();
+                } else {
+                    alert('至少需要保留一个类别配置');
+                }
+            });
+        });
+    }
+    
+    // 为单个项绑定关键点事件
+    bindKeypointEventsForItem(item) {
+        // 从全局关键点数量获取数量并更新输入框
+        const globalKeypointsCountInput = document.getElementById('global-keypoints-count');
+        const keypointsListContainer = item.querySelector('.keypoints-list-container');
+        const addKeypointBtn = item.querySelector('.add-keypoint-btn');
+        
+        // 当全局关键点数量改变时，更新所有项的输入框数量
+        if (globalKeypointsCountInput) {
+            globalKeypointsCountInput.addEventListener('change', () => {
+                this.updateKeypointInputs(item);
+            });
+            
+            // 为number输入框添加输入事件，实时更新
+            globalKeypointsCountInput.addEventListener('input', () => {
+                this.updateKeypointInputs(item);
+            });
+        }
+        
+        // 添加关键点按钮事件
+        addKeypointBtn.addEventListener('click', () => {
+            this.addKeypointInput(item);
+        });
+        
+        // 页面加载时，根据全局值更新关键点输入框
+        setTimeout(() => {
+            this.updateKeypointInputs(item);
+        }, 0);
+    }
+    
+    // 更新关键点输入框数量
+    updateKeypointInputs(item) {
+        const globalKeypointsCountInput = document.getElementById('global-keypoints-count');
+        const keypointsListContainer = item.querySelector('.keypoints-list-container');
+        
+        if (!globalKeypointsCountInput) {
+            return;
+        }
+        
+        const count = parseInt(globalKeypointsCountInput.value) || 0;
+        
+        if (count <= 0) {
+            keypointsListContainer.innerHTML = '';
+            return;
+        }
+        
+        // 获取现有的关键点输入框数量
+        const existingInputs = keypointsListContainer.querySelectorAll('.keypoint-input');
+        const existingCount = existingInputs.length;
+        
+        // 如果需要增加输入框
+        if (count > existingCount) {
+            for (let i = existingCount; i < count; i++) {
+                const inputGroup = document.createElement('div');
+                inputGroup.className = 'keypoint-input-group mb-1';
+                inputGroup.innerHTML = `
+                    <div class="input-group">
+                        <span class="input-group-text">关键点${i + 1}</span>
+                        <input type="text" class="form-control keypoint-input" placeholder="如：head" data-index="${i}">
+                        <button class="btn btn-outline-danger remove-keypoint" type="button">删除</button>
+                    </div>
+                `;
+                keypointsListContainer.appendChild(inputGroup);
+                
+                // 绑定删除按钮事件
+                inputGroup.querySelector('.remove-keypoint').addEventListener('click', () => {
+                    if (keypointsListContainer.querySelectorAll('.keypoint-input').length > 1) {
+                        inputGroup.remove();
+                        this.updateKeypointIndices(item);
+                    } else {
+                        alert('至少需要保留一个关键点');
+                    }
+                });
+            }
+        }
+        // 如果需要减少输入框
+        else if (count < existingCount) {
+            const inputsToRemove = Array.from(existingInputs).slice(count);
+            inputsToRemove.forEach(inputGroup => inputGroup.remove());
+        }
+        
+        // 更新所有输入框的索引
+        this.updateKeypointIndices(item);
+    }
+    
+    // 添加单个关键点输入框
+    addKeypointInput(item) {
+        const globalKeypointsCountInput = document.getElementById('global-keypoints-count');
+        const keypointsListContainer = item.querySelector('.keypoints-list-container');
+        const existingInputs = keypointsListContainer.querySelectorAll('.keypoint-input');
+        
+        if (!globalKeypointsCountInput) {
+            return;
+        }
+        
+        const maxCount = parseInt(globalKeypointsCountInput.value) || 0;
+        if (existingInputs.length >= maxCount) {
+            alert(`已达到设定的关键点数量上限（${maxCount}个）！`);
+            return;
+        }
+        
+        const nextIndex = existingInputs.length;
+        
+        const inputGroup = document.createElement('div');
+        inputGroup.className = 'keypoint-input-group mb-1';
+        inputGroup.innerHTML = `
+            <div class="input-group">
+                <span class="input-group-text">关键点${nextIndex + 1}</span>
+                <input type="text" class="form-control keypoint-input" placeholder="如：head" data-index="${nextIndex}">
+                <button class="btn btn-outline-danger remove-keypoint" type="button">删除</button>
+            </div>
+        `;
+        keypointsListContainer.appendChild(inputGroup);
+        
+        // 绑定删除按钮事件
+        inputGroup.querySelector('.remove-keypoint').addEventListener('click', () => {
+            if (keypointsListContainer.querySelectorAll('.keypoint-input').length > 1) {
+                inputGroup.remove();
+                this.updateKeypointIndices(item);
+            } else {
+                alert('至少需要保留一个关键点');
+            }
+        });
+    }
+    
+    // 更新关键点输入框索引
+    updateKeypointIndices(item) {
+        const inputs = item.querySelectorAll('.keypoint-input');
+        inputs.forEach((input, index) => {
+            input.dataset.index = index;
+            // 更新标签文本
+            const label = input.closest('.input-group').querySelector('.input-group-text');
+            label.textContent = `关键点${index + 1}`;
+        });
+    }
+    
+    // 获取类别和关键点配置数据
+    getClassKeypointsData() {
+        const globalKeypointsCountInput = document.getElementById('global-keypoints-count');
+        if (!globalKeypointsCountInput) {
+            alert('请设置关键点数量');
+            return null;
+        }
+        
+        const globalKeypointsCount = parseInt(globalKeypointsCountInput.value) || 0;
+        if (globalKeypointsCount <= 0) {
+            alert('关键点数量必须大于0');
+            return null;
+        }
+        
+        const items = document.querySelectorAll('.class-keypoints-item');
+        const data = [];
+        
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const className = item.querySelector('.class-name').value.trim();
+            const keypointsInputs = item.querySelectorAll('.keypoint-input');
+            
+            if (className) {
+                // 检查实际输入的关键点数量是否与全局设定的数量一致
+                if (keypointsInputs.length !== globalKeypointsCount) {
+                    alert(`类别 "${className}" 设定的关键点数量为 ${globalKeypointsCount}，但实际输入了 ${keypointsInputs.length} 个关键点，请调整数量！`);
+                    return null;
+                }
+                
+                // 收集关键点名称
+                const keypoints = [];
+                let hasEmptyKeypoint = false;
+                
+                keypointsInputs.forEach((kpInput, index) => {
+                    const keypointName = kpInput.value.trim();
+                    if (!keypointName) {
+                        alert(`类别 "${className}" 的第 ${index + 1} 个关键点不能为空！`);
+                        hasEmptyKeypoint = true;
+                    }
+                    keypoints.push(keypointName);
+                });
+                
+                if (hasEmptyKeypoint) {
+                    return null;
+                }
+                
+                data.push({
+                    class_name: className,
+                    keypoints_count: globalKeypointsCount,  // 使用全局关键点数量
+                    keypoints: keypoints
+                });
+            }
+        }
+        
+        if (data.length === 0) {
+            alert('请至少添加一个类别和关键点配置');
+            return null;
+        }
+        
+        return data;
+    }
+    
     // 提交创建标注项目
     submitCreateAnnotationProject() {
         const name = document.getElementById('annotation-project-name').value;
         const description = document.getElementById('annotation-project-description').value;
-        const classesText = document.getElementById('annotation-classes').value;
+        const projectType = document.getElementById('annotation-project-type').value;
         const imageSource = document.querySelector('input[name="image-source"]:checked').value;
         
-        if (!name || !classesText) {
-            alert('请填写项目名称和类别列表');
+        if (!name) {
+            alert('请输入项目名称');
             return;
         }
         
-        const classes = classesText.split('\n').filter(c => c.trim()).map(c => c.trim());
+        let classes = [];
+        let classKeypoints = null;
+        
+        if (projectType === 'pose') {
+            // 关键点项目：验证全局关键点数量输入
+            const globalKeypointsCountInput = document.getElementById('global-keypoints-count');
+            if (!globalKeypointsCountInput) {
+                alert('关键点数量输入框未找到');
+                return;
+            }
+            
+            const globalKeypointsCount = parseInt(globalKeypointsCountInput.value);
+            if (isNaN(globalKeypointsCount) || globalKeypointsCount <= 0) {
+                alert('请输入有效的大于0的关键点数量');
+                return;
+            }
+            
+            // 使用类别和关键点配置
+            classKeypoints = this.getClassKeypointsData();
+            if (!classKeypoints) {
+                // getClassKeypointsData方法会在验证失败时返回null并显示错误信息
+                return;
+            }
+            // 从关键点配置中提取类别列表
+            classes = classKeypoints.map(item => item.class_name);
+        } else {
+            // 非关键点项目：使用默认类别列表
+            const classesTextarea = document.getElementById('annotation-classes');
+            classes = classesTextarea.value.split('\n')
+                .map(cls => cls.trim())
+                .filter(cls => cls);
+            
+            if (classes.length === 0) {
+                alert('请至少输入一个类别');
+                return;
+            }
+        }
         
         if (imageSource === 'upload') {
             const zipFile = document.getElementById('annotation-images-zip').files[0];
@@ -238,14 +577,14 @@ class OnlineAnnotation {
                 alert('请选择图片ZIP文件');
                 return;
             }
-            this.createProjectWithImageUpload(name, description, classes, zipFile);
+            this.createProjectWithImageUpload(name, description, projectType, classes, classKeypoints, zipFile);
         } else {
-            this.createProjectWithExistingImages(name, description, classes, imageSource);
+            this.createProjectWithExistingImages(name, description, projectType, classes, classKeypoints, imageSource);
         }
     }
 
     // 使用上传图片创建项目
-    createProjectWithImageUpload(name, description, classes, zipFile) {
+    createProjectWithImageUpload(name, description, projectType, classes, classKeypoints, zipFile) {
         const progressContainer = document.getElementById('annotation-upload-progress');
         const progressBar = document.getElementById('annotation-progress-bar');
         const statusDiv = document.getElementById('annotation-upload-status');
@@ -259,7 +598,11 @@ class OnlineAnnotation {
         const formData = new FormData();
         formData.append('name', name);
         formData.append('description', description);
+        formData.append('project_type', projectType);
         formData.append('classes', JSON.stringify(classes));
+        if (classKeypoints) {
+            formData.append('class_keypoints', JSON.stringify(classKeypoints));
+        }
         formData.append('images_zip', zipFile);
         
         const xhr = new XMLHttpRequest();
@@ -279,7 +622,7 @@ class OnlineAnnotation {
                 statusDiv.textContent = '创建成功！';
                 setTimeout(() => {
                     modal.hide();
-                    this.loadAnnotationProjects();
+                    onlineAnnotation.loadAnnotationProjects();
                     alert('标注项目创建成功！');
                 }, 1000);
             } else {
@@ -306,12 +649,18 @@ class OnlineAnnotation {
     }
 
     // 使用现有图片创建项目
-    createProjectWithExistingImages(name, description, classes, imageSource) {
+    createProjectWithExistingImages(name, description, projectType, classes, classKeypoints, imageSource) {
         const requestData = {
             name: name,
             description: description,
+            project_type: projectType,
             classes: classes
         };
+        
+        // 添加关键点配置（如果存在）
+        if (classKeypoints) {
+            requestData.class_keypoints = classKeypoints;
+        }
         
         let apiEndpoint = `${API_URL}/annotation/projects/`;
         
@@ -598,6 +947,17 @@ class OnlineAnnotation {
             default:
                 return 'bg-secondary';
         }
+    }
+    
+    // 获取项目类型文本
+    getProjectTypeText(projectType) {
+        const typeMap = {
+            'detection': '目标检测',
+            'segmentation': '实例分割',
+            'obb': '旋转框',
+            'pose': '关键点/姿态估计'
+        };
+        return typeMap[projectType] || projectType || '目标检测';
     }
 }
 

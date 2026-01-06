@@ -32,6 +32,7 @@ def create_annotation_project(
 def create_project_from_directory(
     name: str = Body(...),
     description: str = Body(""),
+    project_type: str = Body("detection"),
     classes: List[str] = Body(...),
     image_directory: str = Body(...),
     db: Session = Depends(get_db)
@@ -40,6 +41,7 @@ def create_project_from_directory(
     project_data = AnnotationProjectCreate(
         name=name,
         description=description,
+        project_type=project_type,
         classes=classes,
         image_directory=image_directory
     )
@@ -74,10 +76,8 @@ def update_annotation_project(
     db: Session = Depends(get_db)
 ):
     """更新标注项目"""
-    project = annotation_project.get(db, id=project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="项目未找到")
-    return annotation_project.update(db, db_obj=project, obj_in=project_update)
+    service = AnnotationService()
+    return service.update_annotation_project(db, project_id, project_update)
 
 @router.delete("/projects/{project_id}")
 def delete_annotation_project(
@@ -113,7 +113,8 @@ def scan_project_images(
         raise HTTPException(status_code=404, detail="项目未找到")
     
     service = AnnotationService()
-    count = service.scan_images(db, project_id, project.image_directory)
+    image_directory_value = str(project.image_directory) if project.image_directory is not None else ""
+    count = service.scan_images(db, project_id, image_directory_value)
     return {"message": f"扫描完成，发现 {count} 张图片"}
 
 @router.get("/projects/{project_id}/images")
@@ -201,7 +202,9 @@ def export_annotations(
 def create_project_with_images(
     name: str = Form(...),
     description: str = Form(""),
+    project_type: str = Form("detection"),
     classes: str = Form(...),
+    class_keypoints: str = Form(None),  # 新增关键点配置参数
     images_zip: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
@@ -213,7 +216,15 @@ def create_project_with_images(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="类别数据格式错误")
     
-    if not images_zip.filename.endswith('.zip'):
+    # 解析关键点配置
+    class_keypoints_config = None
+    if class_keypoints:
+        try:
+            class_keypoints_config = json.loads(class_keypoints)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="关键点配置数据格式错误")
+    
+    if images_zip.filename and not images_zip.filename.endswith('.zip'): 
         raise HTTPException(status_code=400, detail="只支持ZIP文件")
     
     service = AnnotationService()
@@ -221,7 +232,9 @@ def create_project_with_images(
         db=db,
         name=name,
         description=description,
+        project_type=project_type,
         classes=classes_list,
+        class_keypoints=class_keypoints_config,
         zip_file=images_zip
     )
     
@@ -247,6 +260,7 @@ def export_to_dataset(
 def create_project_with_folder(
     name: str = Form(...),
     description: str = Form(""),
+    project_type: str = Form("detection"),
     classes: str = Form(...),
     images: List[UploadFile] = File(...),
     db: Session = Depends(get_db)
@@ -268,7 +282,8 @@ def create_project_with_folder(
                 # 读取文件内容
                 content = image_file.file.read()
                 # 将文件添加到ZIP中
-                zipf.writestr(image_file.filename, content)
+                filename_value = image_file.filename if image_file.filename is not None else "unknown"
+                zipf.writestr(filename_value, content)
                 # 重置文件指针
                 image_file.file.seek(0)
         
@@ -285,6 +300,7 @@ def create_project_with_folder(
                 db=db,
                 name=name,
                 description=description,
+                project_type=project_type,
                 classes=classes_list,
                 zip_file=zip_upload
             )
@@ -300,7 +316,7 @@ def create_project_with_folder(
             pass
 
 @router.get("/browse-directories")
-def browse_directories(path: str = None):
+def browse_directories(path: str = ""): 
     """浏览本地目录"""
     import os
     import platform
@@ -428,19 +444,28 @@ def get_image_file(
     
     # 获取图片信息
     image = image_annotation.get(db, id=image_id)
-    if not image or image.project_id != project_id:
+    # 检查image是否存在
+    if not image:
+        raise HTTPException(status_code=404, detail="图片未找到")
+    
+    # 获取实际的project_id值
+    image_project_id = image.project_id if image.project_id is not None else UUID('00000000-0000-0000-0000-000000000000')
+    if str(image_project_id) != str(project_id):
         raise HTTPException(status_code=404, detail="图片未找到")
     
     # 构建图片文件路径
-    if image.image_path.startswith('datasets/'):
+    image_path_str = str(image.image_path) if image.image_path is not None else ""
+    if image_path_str.startswith('datasets/'):
         # 如果路径已经包含datasets，直接使用
-        image_file_path = Path("app/static") / image.image_path
-    elif Path(image.image_path).is_absolute():
+        image_file_path = Path("app/static") / image_path_str
+    elif Path(image_path_str).is_absolute():
         # 如果是绝对路径，直接使用
-        image_file_path = Path(image.image_path)
+        image_file_path = Path(image_path_str)
     else:
         # 否则使用项目的image_directory
-        image_file_path = Path(project.image_directory) / image.image_name
+        image_directory_str = str(project.image_directory) if project.image_directory is not None else ""
+        image_name_str = str(image.image_name) if image.image_name is not None else ""
+        image_file_path = Path(image_directory_str) / image_name_str
     
     if not image_file_path.exists():
         raise HTTPException(status_code=404, detail="图片文件不存在")
@@ -477,11 +502,14 @@ def auto_annotate_image(
     
     try:
         service = AnnotationService()
+        project_classes_value = project.classes if project.classes is not None else []
+        project_classes_final = project_classes_value if isinstance(project_classes_value, list) else []
+        
         annotations = service.auto_annotate_image(
             db=db,
             image_id=image_id,
-            model_path=db_model.path,
-            project_classes=project.classes,
+            model_path=str(db_model.path) if db_model.path is not None else "",
+            project_classes=project_classes_final,
             confidence=confidence,
             iou=iou,
             overwrite=overwrite
@@ -517,7 +545,8 @@ def mark_all_completed(
         # 批量更新
         updated_count = 0
         for img in images:
-            if not img.is_completed:
+            img_is_completed = img.is_completed if img.is_completed is not None else False
+            if img_is_completed is False:
                 image_annotation.update(db, db_obj=img, obj_in={"is_completed": True})
                 updated_count += 1
         

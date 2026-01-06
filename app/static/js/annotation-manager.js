@@ -17,8 +17,8 @@ class AnnotationManager {
     }
     
     async init() {
-        // 初始化画布
-        this.canvas = new AnnotationCanvas('annotationCanvas', 'currentImage');
+        // 注释掉旧的画布初始化，避免事件冲突
+        // this.canvas = new AnnotationCanvas('annotationCanvas', 'currentImage');
         
         // 初始化快捷键
         this.shortcuts = new AnnotationShortcuts(this);

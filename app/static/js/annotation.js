@@ -53,6 +53,15 @@ class AnnotationTool {
         this.justFinishedDragging = false;
         this.justFinishedResizing = false;
         
+        // 新增属性：实例分割工具
+        this.segmentationTool = new SegmentationTool(this);
+        // 新增属性：旋转框工具
+        this.obbTool = new OBBTool(this);
+        // 新增属性：关键点工具
+        this.keypointsTool = new KeypointsTool(this);
+        // 新增属性：当前工具类型
+        this.currentTool = 'box'; // box, segment, obb, keypoints
+        
         this.init();
     }
     
@@ -67,6 +76,7 @@ class AnnotationTool {
         this.canvas.addEventListener('mousemove', this.onMouseMove.bind(this));
         this.canvas.addEventListener('mouseup', this.stopDrawing.bind(this));
         this.canvas.addEventListener('click', this.onCanvasClick.bind(this));
+        this.canvas.addEventListener('dblclick', this.onCanvasDoubleClick.bind(this));
         
         // 鼠标滚轮缩放事件
         this.canvas.addEventListener('wheel', this.handleWheel.bind(this));
@@ -85,6 +95,27 @@ class AnnotationTool {
         document.getElementById('ai-auto-annotate').addEventListener('click', this.showAutoAnnotateModal.bind(this));
         document.getElementById('stop-auto-annotate').addEventListener('click', this.stopAutoAnnotate.bind(this));
         document.getElementById('delete-image').addEventListener('click', this.deleteCurrentImage.bind(this));
+        
+        // 工具选择按钮事件
+        document.getElementById('tool-box')?.addEventListener('click', () => this.setTool('box'));
+        document.getElementById('tool-segment')?.addEventListener('click', () => this.setTool('segment'));
+        document.getElementById('tool-obb')?.addEventListener('click', () => this.setTool('obb'));
+        document.getElementById('tool-pose')?.addEventListener('click', () => this.setTool('keypoints'));
+        
+        // 关键点工具模式选择事件
+        document.getElementById('keypoints-mode-keypoints')?.addEventListener('click', () => {
+            if (this.currentTool === 'keypoints' && this.keypointsTool) {
+                this.keypointsTool.setMode('keypoints');
+                this.updateKeypointsModeButtons();
+            }
+        });
+        
+        document.getElementById('keypoints-mode-box')?.addEventListener('click', () => {
+            if (this.currentTool === 'keypoints' && this.keypointsTool) {
+                this.keypointsTool.setMode('box');
+                this.updateKeypointsModeButtons();
+            }
+        });
         
         const toggleGuidelinesBtn = document.getElementById('toggle-guidelines');
         if (toggleGuidelinesBtn) {
@@ -121,6 +152,191 @@ class AnnotationTool {
         this.guidelineColor = color;
         this.redraw();
     }
+    
+    // 根据项目类型设置默认工具
+    setDefaultToolByProjectType() {
+        if (!this.projectData || !this.projectData.project_type) return;
+        
+        // 根据项目类型映射到工具类型
+        const toolTypeMap = {
+            'detection': 'box',
+            'segmentation': 'segment',
+            'obb': 'obb',
+            'pose': 'keypoints'
+        };
+        
+        const defaultTool = toolTypeMap[this.projectData.project_type] || 'box';
+        this.setTool(defaultTool);
+        
+        // 根据项目类型隐藏不相关的工具按钮
+        this.hideIrrelevantTools();
+    }
+    
+    // 设置当前工具类型
+    setTool(toolType) {
+        console.log('切换工具到:', toolType);
+        this.currentTool = toolType;
+        
+        // 更新工具按钮的激活状态
+        const toolButtons = document.querySelectorAll('#tool-selector .btn');
+        toolButtons.forEach(btn => {
+            btn.classList.remove('active');
+            btn.classList.remove('btn-primary');
+            btn.classList.add('btn-outline-primary');
+        });
+        
+        // 激活当前工具按钮
+        const activeButton = document.getElementById(`tool-${toolType}`);
+        if (activeButton) {
+            activeButton.classList.remove('btn-outline-primary');
+            activeButton.classList.add('btn-primary');
+            activeButton.classList.add('active');
+        }
+        
+        // 更新关键点模式选择栏的可见性
+        this.updateKeypointsModeSelectorVisibility();
+        
+        // 如果切换到关键点工具，初始化模式按钮状态
+        if (toolType === 'keypoints' && this.keypointsTool) {
+            this.updateKeypointsModeButtons();
+        }
+        
+        // 重绘画布
+        this.redraw();
+        
+        // 重置各工具的状态，确保切换图片时不会保留之前的状态
+        if (this.segmentationTool) {
+            this.segmentationTool.isDrawing = false;
+            this.segmentationTool.isDraggingPoint = false;
+            this.segmentationTool.isDraggingSegment = false;
+            this.segmentationTool.currentPoints = [];
+            this.segmentationTool.tempPoint = null;
+            this.segmentationTool.draggedPointIndex = -1;
+        }
+        
+        if (this.obbTool) {
+            this.obbTool.isDrawing = false;
+            this.obbTool.isRotating = false;
+            this.obbTool.currentBox = null;
+        }
+        
+        if (this.keypointsTool) {
+            this.keypointsTool.isDrawing = false;
+            this.keypointsTool.selectedKeypoint = null;
+            this.keypointsTool.isDraggingKeypoint = false;
+            this.keypointsTool.currentKeypoints = [];
+        }
+    }
+    
+    // 更新关键点模式按钮状态
+    updateKeypointsModeButtons() {
+        if (this.currentTool !== 'keypoints') return;
+        
+        const keypointsMode = this.keypointsTool.currentMode;
+        const keypointsBtn = document.getElementById('keypoints-mode-keypoints');
+        const boxBtn = document.getElementById('keypoints-mode-box');
+        
+        if (keypointsBtn && boxBtn) {
+            if (keypointsMode === 'keypoints') {
+                keypointsBtn.classList.remove('btn-outline-primary');
+                keypointsBtn.classList.add('btn-primary');
+                boxBtn.classList.remove('btn-primary');
+                boxBtn.classList.add('btn-outline-primary');
+            } else {
+                boxBtn.classList.remove('btn-outline-primary');
+                boxBtn.classList.add('btn-primary');
+                keypointsBtn.classList.remove('btn-primary');
+                keypointsBtn.classList.add('btn-outline-primary');
+            }
+        }
+    }
+    
+    // 显示或隐藏关键点模式选择栏
+    updateKeypointsModeSelectorVisibility() {
+        const selector = document.getElementById('keypoints-mode-selector');
+        if (!selector) return;
+        
+        if (this.currentTool === 'keypoints') {
+            selector.style.display = 'block';
+        } else {
+            selector.style.display = 'none';
+        }
+    }
+    
+    // 根据项目类型隐藏不相关的工具按钮
+    hideIrrelevantTools() {
+        if (!this.projectData || !this.projectData.project_type) return;
+        
+        // 获取所有工具按钮
+        const toolButtons = {
+            'box': document.getElementById('tool-box'),
+            'segment': document.getElementById('tool-segment'),
+            'obb': document.getElementById('tool-obb'),
+            'keypoints': document.getElementById('tool-keypoints')
+        };
+        
+        // 根据项目类型决定显示哪些工具
+        const visibleTools = {
+            'detection': ['box'],
+            'segmentation': ['segment'],
+            'obb': ['obb'],
+            'pose': ['keypoints']
+        };
+        
+        const projectType = this.projectData.project_type;
+        const toolsToShow = visibleTools[projectType] || ['box'];
+        
+        // 隐藏所有工具按钮
+        Object.values(toolButtons).forEach(button => {
+            if (button) {
+                button.style.display = 'none';
+            }
+        });
+        
+        // 显示相关的工具按钮
+        toolsToShow.forEach(tool => {
+            if (toolButtons[tool]) {
+                toolButtons[tool].style.display = 'inline-block';
+            }
+        });
+    }
+    
+
+    
+    // 加载图片
+    loadImage() {
+        if (!this.currentImageData) return;
+        
+        // 更新图片列表选中状态
+        this.updateImageListSelection();
+        
+        // 加载图片
+        const img = new Image();
+        img.onload = () => {
+            this.currentImage = img;
+            this.resizeCanvas();
+            // 确保在加载标注之前画布尺寸已经正确设置
+            setTimeout(() => {
+                this.loadAnnotations();
+                this.redraw();
+            }, 0);
+            
+            document.getElementById('current-image-name').textContent = this.currentImageData.image_name;
+            
+            // 切换到新图片后立即更新标注进度
+            // 改进：添加异步处理和错误捕获
+            (async () => {
+                try {
+                    await this.loadProjectStats();
+                } catch (error) {
+                    console.error('更新进度失败:', error);
+                }
+            })();
+        };
+        
+        // 使用API端点获取图片文件
+        img.src = `/api/annotation/projects/${this.projectId}/images/${this.currentImageData.id}/file`;
+    }
 
     onMouseMove(e) {
         // 使用通用坐标转换方法
@@ -128,13 +344,113 @@ class AnnotationTool {
         this.mouseX = mouseX;
         this.mouseY = mouseY;
         
+        // 根据当前工具类型处理鼠标移动
+        if (this.currentTool === 'segment') {
+            // 如果实例分割工具正在绘制中，更新临时点位置
+            if (this.segmentationTool.isDrawing) {
+                // 使用通用坐标转换方法
+                const { x: canvasX, y: canvasY } = this.getCanvasCoordinates(e);
+                this.segmentationTool.tempPoint = { x: canvasX, y: canvasY };
+                this.segmentationTool.redraw();
+                // 不返回，继续执行下面的代码以确保辅助线更新
+            }
+            // 如果正在拖拽点或整体拖动分割区域
+            else if (this.segmentationTool.isDraggingPoint || this.segmentationTool.isDraggingSegment) {
+                this.segmentationTool.onMouseMove(e);
+                return;
+            }
+        } else if (this.currentTool === 'obb' && this.obbTool.isDrawing) {
+            // 如果旋转框工具正在绘制中，更新当前框
+            this.obbTool.onDrawing(e);
+            return;
+        } else if (this.obbTool.isRotating) {
+            // 如果正在旋转旋转框，更新旋转角度
+            console.log('正在旋转旋转框');
+            this.obbTool.onRotating(e);
+            return;
+        } else if (this.currentTool === 'keypoints' && this.keypointsTool.isDraggingKeypoint) {
+            this.keypointsTool.dragKeypoint(e);
+            return;
+        }
+        
+        // 处理关键点工具的拖拽和调整大小
+        if (this.currentTool === 'keypoints' && this.selectedAnnotation) {
+            // 检查是否是关键点标注（包含关键点）
+            if (this.selectedAnnotation.keypoints) {
+                if (this.isDragging && this.selectedAnnotation) {
+                    // 拖拽关键点标注框
+                    const deltaX = canvasX - this.dragStartX;
+                    const deltaY = canvasY - this.dragStartY;
+                    
+                    // 更新标注框位置
+                    this.selectedAnnotation.x += deltaX;
+                    this.selectedAnnotation.y += deltaY;
+                    
+                    // 同时更新框内的所有关键点位置
+                    if (this.selectedAnnotation.keypoints) {
+                        this.selectedAnnotation.keypoints.forEach(kp => {
+                            kp.x += deltaX;
+                            kp.y += deltaY;
+                        });
+                    }
+                    
+                    // 更新拖拽起始位置
+                    this.dragStartX = canvasX;
+                    this.dragStartY = canvasY;
+                    
+                    // 实时更新左侧列表信息
+                    this.updateAnnotationList();
+                    this.redraw();
+                    return;
+                } else if (this.isResizing && this.selectedAnnotation) {
+                    // 调整关键点标注框大小
+                    this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle, canvasX, canvasY);
+                    
+                    // 重新绘制
+                    this.redraw();
+                    return;
+                }
+            } else {
+                // 如果是普通矩形框（在关键点工具的矩形框模式下），也允许拖拽和调整大小
+                if (this.isDragging && this.selectedAnnotation) {
+                    // 拖拽普通矩形框
+                    const deltaX = canvasX - this.dragStartX;
+                    const deltaY = canvasY - this.dragStartY;
+                    
+                    // 更新标注框位置
+                    this.selectedAnnotation.x += deltaX;
+                    this.selectedAnnotation.y += deltaY;
+                    
+                    // 更新拖拽起始位置
+                    this.dragStartX = canvasX;
+                    this.dragStartY = canvasY;
+                    
+                    // 实时更新左侧列表信息
+                    this.updateAnnotationList();
+                    this.redraw();
+                    return;
+                } else if (this.isResizing && this.selectedAnnotation) {
+                    // 调整普通矩形框大小
+                    this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle, canvasX, canvasY);
+                    
+                    // 重新绘制
+                    this.redraw();
+                    return;
+                }
+            }
+        }
+        
         if (this.isDrawing) {
-            this.currentBox = {
-                x: Math.min(this.startX, canvasX),
-                y: Math.min(this.startY, canvasY),
-                width: Math.abs(canvasX - this.startX),
-                height: Math.abs(canvasY - this.startY)
-            };
+            if (this.currentTool === 'obb') {
+                this.obbTool.onDrawing(e);
+            } else {
+                this.currentBox = {
+                    x: Math.min(this.startX, canvasX),
+                    y: Math.min(this.startY, canvasY),
+                    width: Math.abs(canvasX - this.startX),
+                    height: Math.abs(canvasY - this.startY)
+                };
+            }
             
             this.redraw();
         } else if (this.isDragging && this.selectedAnnotation) {
@@ -142,6 +458,7 @@ class AnnotationTool {
             const deltaX = canvasX - this.dragStartX;
             const deltaY = canvasY - this.dragStartY;
             
+            // 更新标注框位置
             this.selectedAnnotation.x += deltaX;
             this.selectedAnnotation.y += deltaY;
             
@@ -175,6 +492,19 @@ class AnnotationTool {
         if (this.showGuidelines) {
             this.redraw();
         }
+        
+        // 如果正在使用实例分割工具绘制，也重绘以更新临时点
+        if (this.currentTool === 'segment' && this.segmentationTool.isDrawing) {
+            this.segmentationTool.redraw();
+        }
+        
+        // 如果正在使用关键点工具绘制矩形框，更新临时框
+        if (this.currentTool === 'keypoints' && this.keypointsTool.isDrawingBox) {
+            this.keypointsTool.onMouseMove(e);
+        }
+        if (this.currentTool === 'keypoints' && (this.keypointsTool.isDraggingKeypoint || this.isDragging || this.isResizing)) {
+            this.keypointsTool.onMouseMove(e);
+        }
     }
     
     updateCursorStyle(canvasX, canvasY) {
@@ -185,6 +515,47 @@ class AnnotationTool {
         
         // 编辑模式下，根据鼠标位置显示不同的光标
         if (this.selectedAnnotation) {
+            // 对于旋转框，先检查旋转控制点
+            let isRotationHandle = false;
+            if (this.selectedAnnotation.hasOwnProperty('angle')) {
+                // 检查是否在旋转控制点上
+                const centerX = this.selectedAnnotation.x + this.selectedAnnotation.width / 2;
+                const centerY = this.selectedAnnotation.y + this.selectedAnnotation.height / 2;
+                const handleSize = 8;
+                
+                // 计算旋转后的控制点位置（右侧）
+                const angle = this.selectedAnnotation.angle || 0;
+                const offsetX = (this.selectedAnnotation.width / 2 - 5);
+                const offsetY = 0;
+                
+                // 应用旋转矩阵
+                const rotatedX = centerX + offsetX * Math.cos(angle) - offsetY * Math.sin(angle);
+                const rotatedY = centerY + offsetX * Math.sin(angle) + offsetY * Math.cos(angle);
+                
+                if (canvasX >= rotatedX - handleSize && canvasX <= rotatedX + handleSize &&
+                    canvasY >= rotatedY - handleSize && canvasY <= rotatedY + handleSize) {
+                    isRotationHandle = true;
+                }
+                
+                // 计算旋转后的控制点位置（左侧）
+                const offsetX2 = -(this.selectedAnnotation.width / 2 - 5);
+                const offsetY2 = 0;
+                
+                // 应用旋转矩阵
+                const rotatedX2 = centerX + offsetX2 * Math.cos(angle) - offsetY2 * Math.sin(angle);
+                const rotatedY2 = centerY + offsetX2 * Math.sin(angle) + offsetY2 * Math.cos(angle);
+                
+                if (canvasX >= rotatedX2 - handleSize && canvasX <= rotatedX2 + handleSize &&
+                    canvasY >= rotatedY2 - handleSize && canvasY <= rotatedY2 + handleSize) {
+                    isRotationHandle = true;
+                }
+                
+                if (isRotationHandle) {
+                    this.canvas.style.cursor = 'grab';
+                    return;
+                }
+            }
+            
             // 检查是否在调整大小的控制点上
             const handle = this.getResizeHandle(this.selectedAnnotation, canvasX, canvasY);
             if (handle) {
@@ -229,6 +600,12 @@ class AnnotationTool {
         const minWidth = 5;
         const minHeight = 5;
         
+        // 如果是旋转框，使用特殊处理
+        if (annotation.hasOwnProperty('angle')) {
+            this.resizeRotatedAnnotation(annotation, handle, canvasX, canvasY);
+            return;
+        }
+        
         switch (handle) {
             case 'right':
                 annotation.width = Math.max(minWidth, canvasX - annotation.x);
@@ -271,6 +648,87 @@ class AnnotationTool {
         }
     }
     
+    // 调整旋转框大小
+    resizeRotatedAnnotation(annotation, handle, canvasX, canvasY) {
+        const minWidth = 5;
+        const minHeight = 5;
+        
+        // 获取旋转框的中心点
+        const centerX = annotation.x + annotation.width / 2;
+        const centerY = annotation.y + annotation.height / 2;
+        
+        // 获取旋转角度
+        const angle = annotation.angle || 0;
+        
+        // 将鼠标坐标转换为相对于旋转框中心的坐标
+        const relativeX = canvasX - centerX;
+        const relativeY = canvasY - centerY;
+        
+        // 应用反向旋转矩阵，将坐标转换为未旋转时的坐标系
+        const unrotatedX = relativeX * Math.cos(-angle) - relativeY * Math.sin(-angle);
+        const unrotatedY = relativeX * Math.sin(-angle) + relativeY * Math.cos(-angle);
+        
+        // 计算未旋转时的边界
+        const left = -annotation.width / 2;
+        const right = annotation.width / 2;
+        const top = -annotation.height / 2;
+        const bottom = annotation.height / 2;
+        
+        // 保存原始尺寸，用于边界检查
+        const originalWidth = annotation.width;
+        const originalHeight = annotation.height;
+        
+        // 根据不同的控制点调整大小
+        switch (handle) {
+            case 'right':
+                annotation.width = Math.max(minWidth, unrotatedX - left);
+                break;
+            case 'bottom':
+                annotation.height = Math.max(minHeight, unrotatedY - top);
+                break;
+            case 'left':
+                const newWidth = Math.max(minWidth, right - unrotatedX);
+                annotation.x = centerX - (newWidth / 2);
+                annotation.width = newWidth;
+                break;
+            case 'top':
+                const newHeight = Math.max(minHeight, bottom - unrotatedY);
+                annotation.y = centerY - (newHeight / 2);
+                annotation.height = newHeight;
+                break;
+            case 'top-right':
+                annotation.width = Math.max(minWidth, unrotatedX - left);
+                annotation.height = Math.max(minHeight, bottom - unrotatedY);
+                break;
+            case 'bottom-left':
+                const newWidthBL = Math.max(minWidth, right - unrotatedX);
+                annotation.x = centerX - (newWidthBL / 2);
+                annotation.width = newWidthBL;
+                annotation.height = Math.max(minHeight, unrotatedY - top);
+                break;
+            case 'top-left':
+                const newWidthTL = Math.max(minWidth, right - unrotatedX);
+                const newHeightTL = Math.max(minHeight, bottom - unrotatedY);
+                annotation.x = centerX - (newWidthTL / 2);
+                annotation.y = centerY - (newHeightTL / 2);
+                annotation.width = newWidthTL;
+                annotation.height = newHeightTL;
+                break;
+            case 'bottom-right':
+                annotation.width = Math.max(minWidth, unrotatedX - left);
+                annotation.height = Math.max(minHeight, unrotatedY - top);
+                break;
+        }
+        
+        // 确保尺寸不会变为负数或过小
+        annotation.width = Math.max(minWidth, annotation.width);
+        annotation.height = Math.max(minHeight, annotation.height);
+        
+        // 更新中心点坐标
+        annotation.x = centerX - annotation.width / 2;
+        annotation.y = centerY - annotation.height / 2;
+    }
+    
     getCanvasCoordinates(e) {
         const rect = this.canvas.getBoundingClientRect();
         const scaleX = this.canvas.width / rect.width;
@@ -308,8 +766,32 @@ class AnnotationTool {
     }
 
     isInAnnotationArea(annotation, canvasX, canvasY) {
+        // 检查是否为实例分割标注（多点区域）
+        if (annotation.points) {
+            // 使用射线投射算法检测点是否在多边形内
+            return this.isPointInPolygon(canvasX, canvasY, annotation.points);
+        }
+        
+        // 默认的矩形区域检测
         return canvasX >= annotation.x && canvasX <= annotation.x + annotation.width &&
                canvasY >= annotation.y && canvasY <= annotation.y + annotation.height;
+    }
+    
+    // 检测点是否在多边形内（射线投射算法）
+    isPointInPolygon(x, y, points) {
+        if (!points || points.length < 3) return false;
+        
+        let inside = false;
+        for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+            const xi = points[i][0], yi = points[i][1];
+            const xj = points[j][0], yj = points[j][1];
+            
+            const intersect = ((yi > y) !== (yj > y)) &&
+                (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+        
+        return inside;
     }
 
     setSelectedAnnotation(annotation, byClick = false) {
@@ -362,13 +844,32 @@ class AnnotationTool {
             }
         }
         
-        // 更新选中的标注框
-        this.setSelectedAnnotation(clickedAnnotation);
-        
-        // 如果点击了标注框，可以在这里添加其他处理逻辑
-        if (clickedAnnotation) {
-            console.log('选中标注框:', clickedIndex);
+        // 如果没有点击任何标注（点击了空白区域）
+        if (!clickedAnnotation) {
+            // 点击空白区域取消选择
+            this.selectedAnnotation = null;
+            this.updateAnnotationList();
+            this.redraw();
+        } else {
+            // 更新选中的标注框
+            this.setSelectedAnnotation(clickedAnnotation);
+            
+            // 如果点击了标注框，可以在这里添加其他处理逻辑
+            if (clickedAnnotation) {
+                console.log('选中标注框:', clickedIndex);
+            }
         }
+    }
+    
+    // 处理画布双击事件
+    onCanvasDoubleClick(e) {
+        // 根据当前工具类型处理双击事件
+        if (this.currentTool === 'segment' && this.segmentationTool.isDrawing) {
+            this.segmentationTool.finishDrawingOnDoubleClick(e);
+            return;
+        }
+        
+        // 其他工具的双击处理可以在这里添加
     }
     
     toggleGuidelines() {
@@ -401,6 +902,13 @@ class AnnotationTool {
             await this.loadProjectStats();
             await this.loadAvailableModels();
             
+            // 根据项目类型设置默认工具
+            this.setDefaultToolByProjectType();
+            
+            // 如果是姿态估计项目，确保关键点工具能获取配置
+            if (this.projectData.project_type === 'pose' && this.keypointsTool) {
+                this.keypointsTool.setClassKeypointsConfig(this.projectData.class_keypoints || []);
+            }
         } catch (error) {
             console.error('加载项目失败:', error);
             alert('加载项目失败');
@@ -410,6 +918,11 @@ class AnnotationTool {
     updateProjectInfo() {
         document.getElementById('project-name').textContent = this.projectData.name;
         document.getElementById('class-count').textContent = this.projectData.classes.length;
+        
+        // 如果是姿态估计项目，确保关键点工具能获取配置
+        if (this.projectData.project_type === 'pose' && this.keypointsTool) {
+            this.keypointsTool.setClassKeypointsConfig(this.projectData.class_keypoints || []);
+        }
     }
     
     loadClasses() {
@@ -498,6 +1011,8 @@ class AnnotationTool {
             const response = await fetch(`/api/annotation/projects/${this.projectId}/images?limit=10000`);
             this.imageList = await response.json();
             
+            console.log('加载图片列表:', this.imageList);
+            
             this.updateImageList();
             
             if (this.imageList.length > 0) {
@@ -562,6 +1077,29 @@ class AnnotationTool {
     async loadImage(index) {
         if (index < 0 || index >= this.imageList.length) return;
         
+        // 重置各工具的状态，确保切换图片时不会保留之前的状态
+        if (this.segmentationTool) {
+            this.segmentationTool.isDrawing = false;
+            this.segmentationTool.isDraggingPoint = false;
+            this.segmentationTool.isDraggingSegment = false;
+            this.segmentationTool.currentPoints = [];
+            this.segmentationTool.tempPoint = null;
+            this.segmentationTool.draggedPointIndex = -1;
+        }
+        
+        if (this.obbTool) {
+            this.obbTool.isDrawing = false;
+            this.obbTool.isRotating = false;
+            this.obbTool.currentBox = null;
+        }
+        
+        if (this.keypointsTool) {
+            this.keypointsTool.isDrawing = false;
+            this.keypointsTool.selectedKeypoint = null;
+            this.keypointsTool.isDraggingKeypoint = false;
+            this.keypointsTool.currentKeypoints = [];
+        }
+        
         // 保存上一张图片的数据引用
         const previousImageData = this.currentImageData;
         const previousImageIndex = this.currentImageIndex;
@@ -618,8 +1156,11 @@ class AnnotationTool {
         img.onload = () => {
             this.currentImage = img;
             this.resizeCanvas();
-            this.loadAnnotations();
-            this.redraw();
+            // 确保在加载标注之前画布尺寸已经正确设置
+            setTimeout(() => {
+                this.loadAnnotations();
+                this.redraw();
+            }, 0);
             
             document.getElementById('current-image-name').textContent = this.currentImageData.image_name;
             
@@ -686,13 +1227,178 @@ class AnnotationTool {
     }
     
     loadAnnotations() {
-        this.annotations = (this.currentImageData.annotations || []).map(ann => ({
-            class_id: ann.class_id,
-            x: ann.x_center * this.canvas.width - (ann.width * this.canvas.width) / 2,
-            y: ann.y_center * this.canvas.height - (ann.height * this.canvas.height) / 2,
-            width: ann.width * this.canvas.width,
-            height: ann.height * this.canvas.height
-        }));
+        console.log('开始加载标注数据:', this.currentImageData.annotations);
+        console.log('画布尺寸:', this.canvas.width, this.canvas.height);
+        this.annotations = (this.currentImageData.annotations || []).map(ann => {
+            // 检查是否为分割标注
+            if (ann.points) {
+                // 实例分割格式: class_id x1 y1 x2 y2 ...
+                // 检查点坐标是否已经是归一化坐标（值在0-1范围内）
+                let isNormalized = true;
+                if (ann.points.length > 0) {
+                    if (Array.isArray(ann.points[0])) {
+                        // 如果是二维数组格式 [[x1, y1], [x2, y2], ...]
+                        for (let i = 0; i < ann.points.length; i++) {
+                            if (ann.points[i][0] > 1 || ann.points[i][1] > 1 || ann.points[i][0] < 0 || ann.points[i][1] < 0) {
+                                isNormalized = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        // 如果是一维数组格式 [x1, y1, x2, y2, ...]
+                        for (let i = 0; i < ann.points.length; i += 2) {
+                            if (ann.points[i] > 1 || ann.points[i+1] > 1 || ann.points[i] < 0 || ann.points[i+1] < 0) {
+                                isNormalized = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                const points = [];
+                if (ann.points.length > 0) {
+                    if (Array.isArray(ann.points[0])) {
+                        // 如果是二维数组格式 [[x1, y1], [x2, y2], ...]
+                        if (isNormalized) {
+                            // 如果是归一化坐标，转换为画布坐标
+                            ann.points.forEach(point => {
+                                points.push([
+                                    point[0] * this.canvas.width,
+                                    point[1] * this.canvas.height
+                                ]);
+                            });
+                        } else {
+                            // 如果不是归一化坐标，直接使用
+                            ann.points.forEach(point => {
+                                points.push([
+                                    point[0],
+                                    point[1]
+                                ]);
+                            });
+                        }
+                    } else {
+                        // 如果是一维数组格式 [x1, y1, x2, y2, ...]
+                        if (isNormalized) {
+                            // 如果是归一化坐标，转换为画布坐标
+                            for (let i = 0; i < ann.points.length; i += 2) {
+                                points.push([
+                                    ann.points[i] * this.canvas.width,
+                                    ann.points[i+1] * this.canvas.height
+                                ]);
+                            }
+                        } else {
+                            // 如果不是归一化坐标，直接使用
+                            for (let i = 0; i < ann.points.length; i += 2) {
+                                points.push([
+                                    ann.points[i],
+                                    ann.points[i+1]
+                                ]);
+                            }
+                        }
+                    }
+                }
+                
+                // 计算边界框
+                if (points.length > 0) {
+                    let minX = points[0][0], maxX = points[0][0];
+                    let minY = points[0][1], maxY = points[0][1];
+                    
+                    points.forEach(point => {
+                        minX = Math.min(minX, point[0]);
+                        maxX = Math.max(maxX, point[0]);
+                        minY = Math.min(minY, point[1]);
+                        maxY = Math.max(maxY, point[1]);
+                    });
+                    
+                    // 确保边界框值是有效的数字
+                    minX = isNaN(minX) ? 0 : minX;
+                    minY = isNaN(minY) ? 0 : minY;
+                    maxX = isNaN(maxX) ? this.canvas.width : maxX;
+                    maxY = isNaN(maxY) ? this.canvas.height : maxY;
+                    
+                    return {
+                        class_id: ann.class_id,
+                        points: points,
+                        x: minX,
+                        y: minY,
+                        width: maxX - minX,
+                        height: maxY - minY
+                    };
+                } else {
+                    return {
+                        class_id: ann.class_id,
+                        points: points
+                    };
+                }
+            }
+            // 检查是否为关键点标注
+            else if (ann.keypoints) {
+                // 关键点格式: class_id x_center y_center width height x1 y1 v1 x2 y2 v2 ...
+                const keypoints = [];
+                
+                // 关键点数据是对象数组格式 [{x: 0.1, y: 0.2, v: 2}, ...]
+                if (Array.isArray(ann.keypoints) && ann.keypoints.length > 0 && typeof ann.keypoints[0] === 'object') {
+                    ann.keypoints.forEach(kp => {
+                        keypoints.push({
+                            x: kp.x * this.canvas.width,      // 归一化x坐标转为画布坐标
+                            y: kp.y * this.canvas.height,     // 归一化y坐标转为画布坐标
+                            v: kp.v || 2                      // 可见性
+                        });
+                    });
+                } else {
+                    // 如果是数值数组格式 [x1, y1, v1, x2, y2, v2, ...]（向后兼容）
+                    for (let i = 0; i < ann.keypoints.length; i += 3) {
+                        if (i + 2 < ann.keypoints.length) {
+                            keypoints.push({
+                                x: ann.keypoints[i] * this.canvas.width,      // 归一化x坐标转为画布坐标
+                                y: ann.keypoints[i + 1] * this.canvas.height, // 归一化y坐标转为画布坐标
+                                v: ann.keypoints[i + 2] || 2                  // 可见性
+                            });
+                        }
+                    }
+                }
+                
+                // 计算矩形框坐标（从中心点和宽高转换为左上角坐标和宽高）
+                const x = ann.x_center * this.canvas.width - (ann.width * this.canvas.width) / 2;
+                const y = ann.y_center * this.canvas.height - (ann.height * this.canvas.height) / 2;
+                const width = ann.width * this.canvas.width;
+                const height = ann.height * this.canvas.height;
+                
+                return {
+                    class_id: ann.class_id,
+                    x: x,
+                    y: y,
+                    width: width,
+                    height: height,
+                    keypoints: keypoints
+                };
+            }
+            // 检查是否为旋转框标注
+            else if (ann.angle !== undefined) {
+                // 旋转框格式: class_id x_center y_center width height angle
+                console.log('处理旋转框标注:', ann);
+                return {
+                    class_id: ann.class_id,
+                    x: ann.x_center * this.canvas.width - (ann.width * this.canvas.width) / 2,
+                    y: ann.y_center * this.canvas.height - (ann.height * this.canvas.height) / 2,
+                    width: ann.width * this.canvas.width,
+                    height: ann.height * this.canvas.height,
+                    angle: ann.angle
+                };
+            }
+            // 默认边界框标注
+            else {
+                return {
+                    class_id: ann.class_id,
+                    x: ann.x_center * this.canvas.width - (ann.width * this.canvas.width) / 2,
+                    y: ann.y_center * this.canvas.height - (ann.height * this.canvas.height) / 2,
+                    width: ann.width * this.canvas.width,
+                    height: ann.height * this.canvas.height
+                };
+            }
+        });
+        
+        console.log('处理后的标注数据:', this.annotations);
         
         // 清除选中状态
         this.selectedAnnotation = null;
@@ -702,14 +1408,209 @@ class AnnotationTool {
     async saveAnnotation() {
         if (!this.currentImageData) return;
         
+        console.log('开始保存标注，当前工具:', this.currentTool);
+        console.log('当前标注数量:', this.annotations.length);
+        console.log('标注内容:', this.annotations);
+        
         // 转换为YOLO格式（相对于画布尺寸）
-        const yoloAnnotations = this.annotations.map(ann => ({
-            class_id: ann.class_id,
-            x_center: (ann.x + ann.width / 2) / this.canvas.width,
-            y_center: (ann.y + ann.height / 2) / this.canvas.height,
-            width: ann.width / this.canvas.width,
-            height: ann.height / this.canvas.height
-        }));
+        const yoloAnnotations = this.annotations.map(ann => {
+            // 检查是否为分割标注
+            if (ann.points) {
+                // 实例分割格式: class_id x1 y1 x2 y2 ...
+                // 检查点坐标是否已经是归一化坐标（值在0-1范围内）
+                let isNormalized = true;
+                if (ann.points.length > 0) {
+                    if (Array.isArray(ann.points[0])) {
+                        // 如果是二维数组格式 [[x1, y1], [x2, y2], ...]
+                        for (let i = 0; i < ann.points.length; i++) {
+                            if (ann.points[i][0] > 1 || ann.points[i][1] > 1 || ann.points[i][0] < 0 || ann.points[i][1] < 0) {
+                                isNormalized = false;
+                                break;
+                            }
+                        }
+                    } else {
+                        // 如果是一维数组格式 [x1, y1, x2, y2, ...]
+                        for (let i = 0; i < ann.points.length; i += 2) {
+                            if (ann.points[i] > 1 || ann.points[i+1] > 1 || ann.points[i] < 0 || ann.points[i+1] < 0) {
+                                isNormalized = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                let points = [];
+                if (ann.points.length > 0) {
+                    if (Array.isArray(ann.points[0])) {
+                        // 如果是二维数组格式 [[x1, y1], [x2, y2], ...]
+                        if (isNormalized) {
+                            // 如果已经是归一化坐标，直接使用
+                            ann.points.forEach(point => {
+                                points.push(point[0]);
+                                points.push(point[1]);
+                            });
+                        } else {
+                            // 如果不是归一化坐标，转换为归一化坐标
+                            ann.points.forEach(point => {
+                                points.push(point[0] / this.canvas.width);
+                                points.push(point[1] / this.canvas.height);
+                            });
+                        }
+                    } else {
+                        // 如果是一维数组格式 [x1, y1, x2, y2, ...]
+                        if (isNormalized) {
+                            // 如果已经是归一化坐标，直接使用
+                            for (let i = 0; i < ann.points.length; i += 2) {
+                                points.push(ann.points[i]);
+                                points.push(ann.points[i+1]);
+                            }
+                        } else {
+                            // 如果不是归一化坐标，转换为归一化坐标
+                            for (let i = 0; i < ann.points.length; i += 2) {
+                                points.push(ann.points[i] / this.canvas.width);
+                                points.push(ann.points[i+1] / this.canvas.height);
+                            }
+                        }
+                    }
+                }
+                
+                // 计算中心点和宽高（相对于画布尺寸）
+                let minX = 1, maxX = 0, minY = 1, maxY = 0;
+                if (points.length > 0) {
+                    minX = points[0];
+                    maxX = points[0];
+                    minY = points[1];
+                    maxY = points[1];
+                    
+                    for (let i = 0; i < points.length; i += 2) {
+                        minX = Math.min(minX, points[i]);
+                        maxX = Math.max(maxX, points[i]);
+                        minY = Math.min(minY, points[i + 1]);
+                        maxY = Math.max(maxY, points[i + 1]);
+                    }
+                }
+                
+                // 确保边界框有有效值
+                if (minX >= maxX) {
+                    maxX = minX + 0.001; // 避免除零错误
+                }
+                if (minY >= maxY) {
+                    maxY = minY + 0.001; // 避免除零错误
+                }
+                
+                // 确保边界框有有效值
+                if (minX >= maxX) {
+                    maxX = minX + 0.001; // 避免除零错误
+                }
+                if (minY >= maxY) {
+                    maxY = minY + 0.001; // 避免除零错误
+                }
+                
+                // 确保所有值都是有效数字
+                minX = isNaN(minX) ? 0 : minX;
+                minY = isNaN(minY) ? 0 : minY;
+                maxX = isNaN(maxX) ? 0.001 : maxX;
+                maxY = isNaN(maxY) ? 0.001 : maxY;
+                
+                const xCenter = (minX + maxX) / 2;
+                const yCenter = (minY + maxY) / 2;
+                const width = maxX - minX;
+                const height = maxY - minY;
+                
+                return {
+                    class_id: ann.class_id,
+                    x_center: parseFloat(isNaN(xCenter) ? 0.5 : xCenter.toFixed(6)),
+                    y_center: parseFloat(isNaN(yCenter) ? 0.5 : yCenter.toFixed(6)),
+                    width: parseFloat(isNaN(width) ? 0.001 : width.toFixed(6)),
+                    height: parseFloat(isNaN(height) ? 0.001 : height.toFixed(6)),
+                    points: points.map(p => parseFloat(isNaN(p) ? 0 : p.toFixed(6)))
+                };
+            }
+            // 检查是否为关键点标注
+            else if (ann.keypoints) {
+                // 关键点格式: class_id x_center y_center width height x1 y1 v1 x2 y2 v2 ...
+                const keypointsData = [];
+                
+                // ann.keypoints 是画布坐标的关键点数组，需要转换为归一化坐标
+                // 检查关键点数据格式，如果已经是对象数组格式
+                if (Array.isArray(ann.keypoints) && ann.keypoints.length > 0 && typeof ann.keypoints[0] === 'object') {
+                    // 如果是对象数组格式 [{x: canvas_x, y: canvas_y, v: visibility}, ...]
+                    ann.keypoints.forEach(kp => {
+                        keypointsData.push({
+                            x: parseFloat((kp.x / this.canvas.width).toFixed(6)),
+                            y: parseFloat((kp.y / this.canvas.height).toFixed(6)),
+                            v: kp.v || 2
+                        });
+                    });
+                } else {
+                    // 如果是数值数组格式 [x1, y1, v1, x2, y2, v2, ...]（这种情况应该不会出现）
+                    for (let i = 0; i < ann.keypoints.length; i += 3) {
+                        if (i + 2 < ann.keypoints.length) {
+                            // 将画布坐标转换为归一化坐标
+                            keypointsData.push(parseFloat((ann.keypoints[i] / this.canvas.width).toFixed(6)));
+                            keypointsData.push(parseFloat((ann.keypoints[i + 1] / this.canvas.height).toFixed(6)));
+                            keypointsData.push(parseInt(ann.keypoints[i + 2]) || 2);
+                        }
+                    }
+                }
+                
+                // 将画布坐标转换为归一化坐标
+                const x_center = (ann.x + ann.width / 2) / this.canvas.width;
+                const y_center = (ann.y + ann.height / 2) / this.canvas.height;
+                const width = ann.width / this.canvas.width;
+                const height = ann.height / this.canvas.height;
+                
+                return {
+                    class_id: ann.class_id,
+                    x_center: parseFloat(x_center.toFixed(6)),
+                    y_center: parseFloat(y_center.toFixed(6)),
+                    width: parseFloat(width.toFixed(6)),
+                    height: parseFloat(height.toFixed(6)),
+                    keypoints: keypointsData // 发送对象数组格式
+                };
+            }
+            // 检查是否为旋转框标注
+            else if (ann.angle !== undefined) {
+                // 旋转框格式: class_id x_center y_center width height angle
+                return {
+                    class_id: ann.class_id,
+                    x_center: parseFloat(((ann.x + ann.width / 2) / this.canvas.width).toFixed(6)),
+                    y_center: parseFloat(((ann.y + ann.height / 2) / this.canvas.height).toFixed(6)),
+                    width: parseFloat((ann.width / this.canvas.width).toFixed(6)),
+                    height: parseFloat((ann.height / this.canvas.height).toFixed(6)),
+                    angle: parseFloat(ann.angle.toFixed(6))
+                };
+            }
+            // 检查是否为关键点工具创建的矩形框标注（具有x, y, width, height但没有keypoints）
+            else if (ann.x !== undefined && ann.y !== undefined && 
+                     ann.width !== undefined && ann.height !== undefined && !ann.keypoints) {
+                // 这是关键点工具创建的矩形框，其坐标是画布坐标，需要转换为归一化坐标
+                const x_center = (ann.x + ann.width / 2) / this.canvas.width;
+                const y_center = (ann.y + ann.height / 2) / this.canvas.height;
+                const width = ann.width / this.canvas.width;
+                const height = ann.height / this.canvas.height;
+                
+                return {
+                    class_id: ann.class_id,
+                    x_center: parseFloat(x_center.toFixed(6)),
+                    y_center: parseFloat(y_center.toFixed(6)),
+                    width: parseFloat(width.toFixed(6)),
+                    height: parseFloat(height.toFixed(6))
+                };
+            }
+            // 默认边界框标注
+            else {
+                return {
+                    class_id: ann.class_id,
+                    x_center: parseFloat(((ann.x + ann.width / 2) / this.canvas.width).toFixed(6)),
+                    y_center: parseFloat(((ann.y + ann.height / 2) / this.canvas.height).toFixed(6)),
+                    width: parseFloat((ann.width / this.canvas.width).toFixed(6)),
+                    height: parseFloat((ann.height / this.canvas.height).toFixed(6))
+                };
+            }
+        });
+        
+        console.log('转换后的YOLO格式标注:', yoloAnnotations);
         
         try {
             const response = await fetch(`/api/annotation/images/${this.currentImageData.id}`, {
@@ -726,8 +1627,10 @@ class AnnotationTool {
                 this.currentImageData.annotations = yoloAnnotations;
                 this.updateImageList();
                 this.showMessage('标注保存成功', 'success');
+                console.log('标注保存成功');
             } else {
                 this.showMessage('保存失败', 'error');
+                console.error('保存失败，服务器响应:', response.status, response.statusText);
             }
             
         } catch (error) {
@@ -744,12 +1647,74 @@ class AnnotationTool {
             const className = this.projectData.classes[ann.class_id] || '未知类别';
             const annItem = document.createElement('div');
             annItem.className = `annotation-list-item ${this.selectedAnnotation === ann ? 'selected' : ''}`;
+            
+            // 根据标注类型显示不同的信息
+            let positionInfo = '';
+            let sizeInfo = '';
+            let keypointsInfo = '';
+            
+            if (ann.points) {
+                // 实例分割标注
+                positionInfo = '<div><strong>类型:</strong> 实例分割</div>';
+            } else if (ann.keypoints) {
+                // 关键点标注
+                positionInfo = '<div><strong>类型:</strong> 关键点</div>';
+                
+                // 生成关键点信息
+                if (ann.keypoints && ann.keypoints.length > 0) {
+                    keypointsInfo = '<div class="keypoints-list"><strong>关键点:</strong><div class="keypoints-container">';
+                    
+                    // 获取当前类别的关键点配置
+                    let classKeypointConfig = null;
+                    if (this.projectData.class_keypoints) {
+                        classKeypointConfig = this.projectData.class_keypoints.find(config => config.class_name === className);
+                    }
+                    
+                    ann.keypoints.forEach((kp, kpIndex) => {
+                        const visibilityText = kp.v === 0 ? '不存在' : (kp.v === 1 ? '可见' : '遮挡');
+                        const visibilityClass = kp.v === 0 ? 'visibility-hidden' : (kp.v === 1 ? 'visibility-visible' : 'visibility-occluded');
+                        
+                        // 获取关键点标签（如果有的话）
+                        let keypointLabel = (kpIndex + 1).toString();
+                        if (classKeypointConfig && classKeypointConfig.keypoints && kpIndex < classKeypointConfig.keypoints.length) {
+                            keypointLabel = classKeypointConfig.keypoints[kpIndex] || keypointLabel;
+                        }
+                        
+                        keypointsInfo += `
+                            <div class="keypoint-item">
+                                <span class="keypoint-label">${keypointLabel}</span>
+                                <select class="keypoint-visibility" 
+                                        data-ann-index="${index}" 
+                                        data-kp-index="${kpIndex}" 
+                                        onchange="annotationTool.updateKeypointVisibility(this, event)">
+                                    <option value="0" ${kp.v === 0 ? 'selected' : ''}>不存在</option>
+                                    <option value="1" ${kp.v === 1 ? 'selected' : ''}>可见</option>
+                                    <option value="2" ${kp.v === 2 ? 'selected' : ''}>遮挡</option>
+                                </select>
+                                <span class="keypoint-visibility-text ${visibilityClass}">${visibilityText}</span>
+                            </div>`;
+                    });
+                    keypointsInfo += '</div></div>';
+                } else {
+                    keypointsInfo = '<div class="keypoints-list"><strong>关键点:</strong> 无</div>';
+                }
+            } else {
+                // 默认边界框标注
+                if (ann.x !== undefined && ann.y !== undefined) {
+                    positionInfo = `<div><strong>位置:</strong> (${Math.round(ann.x)}, ${Math.round(ann.y)})</div>`;
+                }
+                if (ann.width !== undefined && ann.height !== undefined) {
+                    sizeInfo = `<div><strong>尺寸:</strong> ${Math.round(ann.width)} x ${Math.round(ann.height)}</div>`;
+                }
+            }
+            
             annItem.innerHTML = `
                 <div class="annotation-info">
                     <div><strong>ID:</strong> ${index + 1}</div>
                     <div><strong>类别:</strong> ${className}</div>
-                    <div><strong>位置:</strong> (${Math.round(ann.x)}, ${Math.round(ann.y)})</div>
-                    <div><strong>尺寸:</strong> ${Math.round(ann.width)} x ${Math.round(ann.height)}</div>
+                    ${positionInfo}
+                    ${sizeInfo}
+                    ${keypointsInfo}
                 </div>
                 <div class="annotation-actions">
                     <button class="btn btn-sm btn-outline-danger" onclick="annotationTool.removeAnnotation(${index})">
@@ -760,8 +1725,8 @@ class AnnotationTool {
             
             // 方式3：点击标注列表项选中对应的标注框
             annItem.addEventListener('click', (e) => {
-                // 防止点击删除按钮时触发选中
-                if (!e.target.closest('.annotation-actions')) {
+                // 防止点击删除按钮或关键点可见性选择框时触发选中
+                if (!e.target.closest('.annotation-actions') && !e.target.closest('.keypoint-visibility')) {
                     this.selectedAnnotation = ann;
                     this.updateAnnotationList();
                     this.redraw();
@@ -770,6 +1735,41 @@ class AnnotationTool {
             
             annotationList.appendChild(annItem);
         });
+    }
+    
+    // 更新关键点可见性
+    updateKeypointVisibility(selectElement, event) {
+        // 阻止事件冒泡，防止触发列表项的点击事件
+        if (event) {
+            event.stopPropagation();
+        }
+        
+        const annIndex = parseInt(selectElement.dataset.annIndex);
+        const kpIndex = parseInt(selectElement.dataset.kpIndex);
+        const newVisibility = parseInt(selectElement.value);
+        
+        if (annIndex >= 0 && annIndex < this.annotations.length) {
+            const annotation = this.annotations[annIndex];
+            if (annotation.keypoints && kpIndex >= 0 && kpIndex < annotation.keypoints.length) {
+                annotation.keypoints[kpIndex].v = newVisibility;
+                
+                // 更新可见性文本显示
+                const visibilityTextElement = selectElement.nextElementSibling;
+                if (visibilityTextElement) {
+                    const visibilityText = newVisibility === 0 ? '不存在' : (newVisibility === 1 ? '可见' : '遮挡');
+                    const visibilityClass = newVisibility === 0 ? 'visibility-hidden' : (newVisibility === 1 ? 'visibility-visible' : 'visibility-occluded');
+                    
+                    visibilityTextElement.textContent = visibilityText;
+                    visibilityTextElement.className = `keypoint-visibility-text ${visibilityClass}`;
+                }
+                
+                // 重新绘制画布
+                this.redraw();
+                
+                // 保存标注
+                this.saveAnnotation();
+            }
+        }
     }
     
     // 重新设计：优化缩放功能，确保标注框位置稳定
@@ -816,6 +1816,10 @@ class AnnotationTool {
     }
     
     startDrawing(e) {
+        console.log('开始绘制，当前工具:', this.currentTool);
+        // 使用通用坐标转换方法
+        const { x: canvasX, y: canvasY } = this.getCanvasCoordinates(e);
+        
         // 如果准备好进行抓手模式，开始拖拽
         if (this.isPanReady) {
             this.isPanning = true;
@@ -825,65 +1829,219 @@ class AnnotationTool {
             return;
         }
         
-        // 使用通用坐标转换方法
-        const { x: canvasX, y: canvasY, rawX: startX, rawY: startY } = this.getCanvasCoordinates(e);
-        this.startX = startX;
-        this.startY = startY;
-        
-        // 如果有选中的标注框，检查是否点击了控制点
-        if (this.selectedAnnotation) {
-            const handle = this.getResizeHandle(this.selectedAnnotation, canvasX, canvasY);
-            if (handle) {
-                // 点击了控制点，开始调整大小
-                this.isResizing = true;
-                this.resizeHandle = handle;
-                return;
-            }
-            
-            // 检查是否点击了标注框内部（用于拖拽）
-            if (this.isInAnnotationArea(this.selectedAnnotation, canvasX, canvasY)) {
-                // 点击了标注框内部，开始拖拽
-                this.isDragging = true;
-                this.dragStartX = canvasX;
-                this.dragStartY = canvasY;
-                return;
-            }
-        }
-        
-        // 检查是否点击了标注框顶部的文字标题区域
-        let clickedAnnotation = null;
-        for (let i = this.annotations.length - 1; i >= 0; i--) {
-            const ann = this.annotations[i];
-            
-            // 方式1：检查是否点击了标注框左上角的文字标题区域
-            if (this.isInTitleArea(ann, canvasX, canvasY, i)) {
-                clickedAnnotation = ann;
-                break;
-            }
-            
-            // 方式2：按住Ctrl键+点击标注框区域
-            if (e.ctrlKey && this.isInAnnotationArea(ann, canvasX, canvasY)) {
-                clickedAnnotation = ann;
-                break;
-            }
-        }
-        
-        // 如果通过方式1或方式2点击了标注框，则选中它而不是开始绘制
-        if (clickedAnnotation) {
-            this.setSelectedAnnotation(clickedAnnotation, true);
+        // 防止重复触发 - 但允许添加新点
+        if (this.currentTool === 'segment' && this.segmentationTool.isDrawing) {
+            console.log('实例分割工具已在绘制中，添加新点');
+            // 仅在鼠标点击时添加点，而不是在移动时
+            this.segmentationTool.startDrawing(e);
             return;
         }
         
-        // 否则开始绘制新的标注框（转换为画布坐标）
-        this.isDrawing = true;
-        this.selectedAnnotation = null; // 取消之前的选中
-        this.startX = canvasX;
-        this.startY = canvasY;
+        // 根据当前工具类型处理绘制
+        // 对于实例分割、旋转框和关键点工具，也需要支持Ctrl+点击选中已有标注
+        if (this.currentTool === 'segment' || this.currentTool === 'obb' || this.currentTool === 'keypoints') {
+            
+            // 如果按下Ctrl键，检查是否点击了已有标注点或框，用于选中
+            if (e.ctrlKey) {
+                if (this.currentTool === 'keypoints') {
+                    // 检查是否点击了现有的关键点（优先选择关键点）
+                    const clickedKeypoint = this.keypointsTool.getKeypointAtPosition(canvasX, canvasY);
+                    if (clickedKeypoint) {
+                        // 选中关键点所在的标注
+                        this.selectedAnnotation = this.keypointsTool.annotationTool.selectedAnnotation;
+                        this.updateAnnotationList();
+                        this.redraw();
+                        return;
+                    }
+                    
+                    // 检查是否点击了现有关键点标注的矩形框
+                    const clickedBox = this.keypointsTool.getBoxOnlyAtPosition(canvasX, canvasY);
+                    if (clickedBox) {
+                        this.selectedAnnotation = clickedBox;
+                        this.updateAnnotationList();
+                        this.redraw();
+                        return;
+                    }
+                } else if (this.currentTool === 'segment') {
+                    // 检查是否点击了分割标注的边界框
+                    const clickedSeg = this.segmentationTool.getSegmentAtPosition(canvasX, canvasY);
+                    if (clickedSeg) {
+                        this.selectedAnnotation = clickedSeg;
+                        this.updateAnnotationList();
+                        this.redraw();
+                        
+                        // 检查是否点击了标注上的点
+                        const clickedPointIndex = this.segmentationTool.isPointClicked(this.selectedAnnotation, canvasX, canvasY);
+                        if (clickedPointIndex >= 0) {
+                            // 如果点击了点，开始拖拽该点
+                            this.segmentationTool.startDraggingPoint(clickedPointIndex);
+                            this.redraw();
+                            return;
+                        } else {
+                            // 如果没有点击点，而是点击了分割区域的其他部分，开始整体拖动
+                            this.segmentationTool.startDraggingSegment(canvasX, canvasY);
+                            this.redraw();
+                            return;
+                        }
+                    }
+                } else if (this.currentTool === 'obb') {
+                    // 检查是否点击了旋转框标注
+                    const clickedObb = this.obbTool.getObbAtPosition(canvasX, canvasY);
+                    if (clickedObb) {
+                        this.selectedAnnotation = clickedObb;
+                        this.updateAnnotationList();
+                        this.redraw();
+                        return;
+                    }
+                }
+                
+                // 如果没有点击到特定元素，清除选中状态
+                this.selectedAnnotation = null;
+                this.updateAnnotationList();
+                this.redraw();
+                return;
+            }
+        }
+        
+        // 根据当前工具类型处理绘制
+        if (this.currentTool === 'segment') {
+            // 实例分割工具的绘制逻辑
+            this.segmentationTool.startDrawing(e);
+        } else if (this.currentTool === 'obb' && !this.isDragging && !this.isResizing) {
+            // 检查是否点击了现有旋转框
+            const clickedObb = this.obbTool.getObbAtPosition(canvasX, canvasY);
+            if (clickedObb) {
+                // 检查是否点击了旋转控制点
+                const rotationHandle = this.obbTool.isRotationHandleClicked(clickedObb, canvasX, canvasY);
+                if (rotationHandle) {
+                    this.obbTool.startRotation(clickedObb, canvasX, canvasY);
+                    this.redraw();
+                    return;
+                } else {
+                    // 检查是否点击了调整大小的控制点
+                    const resizeHandle = this.getResizeHandle(clickedObb, canvasX, canvasY);
+                    if (resizeHandle) {
+                        this.selectedAnnotation = clickedObb;
+                        this.isResizing = true;
+                        this.resizeHandle = resizeHandle;
+                        this.startX = canvasX;
+                        this.startY = canvasY;
+                        this.redraw();
+                        return;
+                    } else {
+                        // 拖拽整个旋转框
+                        this.selectedAnnotation = clickedObb;
+                        this.isDragging = true;
+                        this.dragStartX = canvasX;
+                        this.dragStartY = canvasY;
+                        this.redraw();
+                        return;
+                    }
+                }
+            }
+            
+            // 开始绘制新的旋转框
+            this.obbTool.startDrawing(e);
+        } else if (this.currentTool === 'keypoints') {
+            // 关键点工具的绘制逻辑
+            this.keypointsTool.startAnnotation(e);
+        } else {
+            // 检查是否点击了现有标注框
+            let clickedAnnotation = null;
+            // 从后往前遍历，优先选中上层的标注
+            for (let i = this.annotations.length - 1; i >= 0; i--) {
+                const ann = this.annotations[i];
+                if (ann.x !== undefined && ann.y !== undefined && 
+                    ann.width !== undefined && ann.height !== undefined &&
+                    !ann.points && !ann.keypoints) { // 排除分割和关键点标注
+                    
+                    if (canvasX >= ann.x && canvasX <= ann.x + ann.width &&
+                        canvasY >= ann.y && canvasY <= ann.y + ann.height) {
+                        
+                        // 检查是否点击了调整大小的控制点
+                        const handle = this.getResizeHandle(ann, canvasX, canvasY);
+                        if (handle) {
+                            this.selectedAnnotation = ann;
+                            this.isResizing = true;
+                            this.resizeHandle = handle;
+                            this.startX = canvasX;
+                            this.startY = canvasY;
+                            this.redraw();
+                            return;
+                        }
+                        
+                        // 选中标注框
+                        clickedAnnotation = ann;
+                        break;
+                    }
+                }
+            }
+            
+            if (clickedAnnotation) {
+                // 开始拖拽标注框
+                this.selectedAnnotation = clickedAnnotation;
+                this.isDragging = true;
+                this.dragStartX = canvasX;
+                this.dragStartY = canvasY;
+            } else {
+                // 开始绘制新的标注框
+                this.isDrawing = true;
+                this.startX = canvasX;
+                this.startY = canvasY;
+            }
+        }
+        
+        this.updateAnnotationList();
         this.redraw();
     }
     
     stopDrawing(e) {
-        this.justFinishedDrawing = this.isDrawing;
+        console.log('停止绘制，当前工具:', this.currentTool);
+        // 根据当前工具类型处理停止绘制
+        if (this.currentTool === 'segment') {
+            // 如果正在拖拽点，则停止拖拽
+            if (this.segmentationTool.isDraggingPoint) {
+                console.log('完成实例分割点拖拽');
+                this.segmentationTool.stopDraggingPoint();
+                return;
+            }
+            // 如果正在整体拖动分割区域，则停止拖动
+            else if (this.segmentationTool.isDraggingSegment) {
+                console.log('完成实例分割整体拖动');
+                this.segmentationTool.stopDraggingSegment();
+                return;
+            }
+            // 如果正在绘制，则不在此处完成绘制
+            else if (this.segmentationTool.isDrawing) {
+                // 对于实例分割工具，我们不在鼠标抬起时完成绘制
+                // 而是在双击或满足条件时完成绘制
+                console.log('实例分割工具正在绘制中，不在此处完成');
+                return;
+            }
+        } else if (this.currentTool === 'obb' && this.obbTool.isDrawing) {
+            console.log('完成旋转框绘制');
+            this.obbTool.finishDrawing();
+            return;
+        } else if (this.obbTool.isRotating) {
+            console.log('完成旋转框旋转');
+            this.obbTool.finishRotation();
+            return;
+        } else if (this.currentTool === 'obb' && this.selectedAnnotation && this.selectedAnnotation.hasOwnProperty('angle')) {
+            // 对于旋转框，如果在stopDrawing时仍有选中状态，可能是旋转操作
+            // 这里不需要额外处理，因为旋转已经在startDrawing中处理过了
+            console.log('旋转框工具结束操作');
+        } else if (this.currentTool === 'keypoints' && this.keypointsTool.isDraggingKeypoint) {
+            console.log('完成关键点拖拽');
+            this.keypointsTool.finishDragging();
+            return;
+        } else if (this.currentTool === 'keypoints' && this.keypointsTool.isDrawingBox) {
+            console.log('完成关键点工具矩形框绘制');
+            this.keypointsTool.finishBoxDrawing();
+            return;
+        } else if (this.currentTool === 'keypoints' && this.keypointsTool) {
+            // 调用关键点工具的鼠标释放处理
+            this.keypointsTool.onMouseUp(e);
+        }
         
         if (this.isDrawing) {
             this.isDrawing = false;
@@ -999,15 +2157,40 @@ class AnnotationTool {
             this.drawGuidelines();
         }
         
-        // 绘制已有标注
-        this.annotations.forEach((ann, index) => {
-            const isSelected = this.selectedAnnotation === ann;
-            this.drawBox(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
-        });
-        
-        // 绘制当前正在绘制的框
-        if (this.currentBox) {
-            this.drawBox(this.currentBox, this.getClassColor(this.selectedClass), true);
+        // 根据当前工具类型绘制标注
+        if (this.currentTool === 'segment') {
+            this.segmentationTool.redraw();
+        } else if (this.currentTool === 'obb') {
+            this.obbTool.redraw();
+        } else if (this.currentTool === 'keypoints') {
+            this.keypointsTool.redraw();
+        } else {
+            // 绘制已有标注
+            // 首先绘制非关键点标注（矩形框、分割等）
+            this.annotations.forEach((ann, index) => {
+                const isSelected = this.selectedAnnotation === ann;
+                // 对于分割标注，使用特殊的绘制方法
+                if (ann.points) {
+                    this.drawSegmentAnnotation(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
+                } else if (!ann.keypoints && ann.x !== undefined && ann.y !== undefined && ann.width !== undefined && ann.height !== undefined) {
+                    // 对于普通矩形框标注，使用drawBox方法
+                    this.drawBox(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
+                }
+            });
+            
+            // 然后绘制关键点标注（确保在最上层）
+            this.annotations.forEach((ann, index) => {
+                const isSelected = this.selectedAnnotation === ann;
+                if (ann.keypoints) {
+                    // 对于关键点标注，使用关键点工具的绘制方法
+                    this.keypointsTool.drawKeypoints(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
+                }
+            });
+            
+            // 绘制当前正在绘制的框
+            if (this.currentBox) {
+                this.drawBox(this.currentBox, this.getClassColor(this.selectedClass), true);
+            }
         }
         
         // 恢复上下文状态
@@ -1109,6 +2292,98 @@ class AnnotationTool {
         }
     }
     
+    // 绘制分割标注
+    drawSegmentAnnotation(segment, color, isDrawing = false, index = null, isSelected = false) {
+        if (!segment.points || segment.points.length < 3) return;
+        
+        this.ctx.save();
+        
+        // 设置边框颜色
+        let borderColor;
+        if (isDrawing) {
+            borderColor = '#2196F3';
+        } else if (isSelected) {
+            borderColor = 'rgba(68, 255, 68, 0.5)'; // 选中时使用半透明绿色
+        } else {
+            // 将十六进制颜色转换为 RGBA 格式，设置 50% 透明度
+            if (color.startsWith('#')) {
+                const r = parseInt(color.substr(1, 2), 16);
+                const g = parseInt(color.substr(3, 2), 16);
+                const b = parseInt(color.substr(5, 2), 16);
+                borderColor = `rgba(${r}, ${g}, ${b}, 0.5)`;
+            } else {
+                // 如果不是十六进制颜色，使用原来的格式
+                borderColor = color + '80';
+            }
+        }
+        
+        // 绘制填充区域
+        this.ctx.fillStyle = borderColor;
+        this.ctx.beginPath();
+        this.ctx.moveTo(segment.points[0][0], segment.points[0][1]);
+        for (let i = 1; i < segment.points.length; i++) {
+            this.ctx.lineTo(segment.points[i][0], segment.points[i][1]);
+        }
+        this.ctx.closePath();
+        this.ctx.fill();
+        
+        // 绘制边框
+        this.ctx.strokeStyle = isSelected ? 'rgba(68, 255, 68, 0.7)' : '#FFFFFF';
+        this.ctx.lineWidth = isSelected ? 3 : 2;
+        this.ctx.stroke();
+        
+        // 绘制点
+        segment.points.forEach((point, i) => {
+            this.ctx.fillStyle = isSelected ? 'rgba(68, 255, 68, 0.7)' : '#FFFFFF';
+            this.ctx.beginPath();
+            this.ctx.arc(point[0], point[1], 4, 0, Math.PI * 2);
+            this.ctx.fill();
+            
+            // 绘制序号
+            if (!isDrawing) {
+                this.ctx.fillStyle = '#FFFFFF';
+                this.ctx.font = '12px Arial';
+                this.ctx.fillText(i + 1, point[0] + 5, point[1] - 5);
+            }
+        });
+        
+        // 绘制序号和类别标签
+        if (!isDrawing) {
+            const className = this.projectData.classes[segment.class_id] || '未知';
+            let label = className;
+            if (index !== null) {
+                label = `${index}. ${className}`;
+            }
+            
+            // 标签背景使用半透明颜色
+            if (isSelected) {
+                this.ctx.fillStyle = 'rgba(68, 255, 68, 0.7)'; // 半透明绿色
+            } else {
+                // 将颜色转换为半透明格式
+                if (color.startsWith('#')) {
+                    const r = parseInt(color.substr(1, 2), 16);
+                    const g = parseInt(color.substr(3, 2), 16);
+                    const b = parseInt(color.substr(5, 2), 16);
+                    this.ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.7)`;
+                } else {
+                    // 如果不是十六进制颜色，使用默认半透明白色背景
+                    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
+                }
+            }
+            
+            const textWidth = this.ctx.measureText(label).width;
+            const textX = segment.points[0][0];
+            const textY = segment.points[0][1] - 25;
+            
+            this.ctx.fillRect(textX, textY - 15, textWidth + 10, 20);
+            this.ctx.fillStyle = 'black';
+            this.ctx.font = '12px Arial';
+            this.ctx.fillText(label, textX + 5, textY);
+        }
+        
+        this.ctx.restore();
+    }
+    
     drawResizeHandles(box) {
         const handleSize = 6;
         const right = box.x + box.width;
@@ -1135,6 +2410,18 @@ class AnnotationTool {
     }
     
     removeAnnotation(index) {
+        // 根据当前工具类型处理删除操作
+        if (this.currentTool === 'segment') {
+            this.segmentationTool.removeSegment(index);
+            return;
+        } else if (this.currentTool === 'obb') {
+            this.obbTool.removeOBB(index);
+            return;
+        } else if (this.currentTool === 'keypoints') {
+            this.keypointsTool.removeKeypoints(index);
+            return;
+        }
+        
         this.annotations.splice(index, 1);
         this.updateAnnotationList();
         this.redraw();
@@ -1269,6 +2556,61 @@ class AnnotationTool {
         
         const key = e.key.toLowerCase();
         
+        // 根据当前工具类型处理特定按键
+        if (this.currentTool === 'segment' && key === 'enter') {
+            e.preventDefault();
+            this.segmentationTool.finishDrawing();
+            return;
+        } else if (this.currentTool === 'segment' && key === 'escape') {
+            e.preventDefault();
+            this.segmentationTool.cancelDrawing();
+            return;
+        } else if (this.currentTool === 'obb') {
+            if (key === 'q') {
+                e.preventDefault();
+                this.obbTool.adjustRotation(-0.0872665); // 左转5度（弧度）
+                return;
+            } else if (key === 'e') {
+                e.preventDefault();
+                this.obbTool.adjustRotation(0.0872665); // 右转5度（弧度）
+                return;
+            }
+        } else if (this.currentTool === 'keypoints' && (key === 'delete' || key === 'backspace')) {
+            e.preventDefault();
+            // 如果有选中的关键点，则删除该关键点
+            if (this.keypointsTool.selectedKeypoint) {
+                this.keypointsTool.deleteSelectedKeypoint();
+            } else {
+                // 如果没有选中的关键点，但有选中的标注，则删除整个标注
+                this.deleteSelectedAnnotation();
+            }
+            return;
+        }
+        
+        // 处理Q和E键的快捷键（用于关键点工具模式切换）
+        if (this.currentTool === 'keypoints') {
+            if (key === 'q') {
+                e.preventDefault();
+                // 切换到矩形框模式
+                this.keypointsTool.setMode('box');
+                this.updateKeypointsModeButtons();
+                return;
+            } else if (key === 'e') {
+                e.preventDefault();
+                // 切换到关键点模式
+                this.keypointsTool.setMode('keypoints');
+                this.updateKeypointsModeButtons();
+                return;
+            } else if (key === 'v') {
+                e.preventDefault();
+                // 切换选中关键点的可见性
+                if (this.keypointsTool.selectedKeypoint) {
+                    this.keypointsTool.toggleKeypointVisibility();
+                }
+                return;
+            }
+        }
+        
         switch(key) {
             case 'a':
             case 'arrowleft':
@@ -1296,7 +2638,11 @@ class AnnotationTool {
             case 'delete':
             case 'backspace':
                 e.preventDefault();
-                this.deleteSelectedAnnotation();
+                // 避免重复处理删除操作，因为关键点工具的删除已在上面处理
+                // 如果不是关键点工具或没有选中的关键点，才执行通用删除
+                if (this.currentTool !== 'keypoints' || !this.keypointsTool.selectedKeypoint) {
+                    this.deleteSelectedAnnotation();
+                }
                 break;
             case 'g':
                 e.preventDefault();
@@ -1426,7 +2772,7 @@ class AnnotationTool {
                 <div class="modal-dialog">
                     <div class="modal-content">
                         <div class="modal-header">
-                            <h5 class="modal-title">AI自动标注</h5>
+                            <h5 class="modal-title">AI自动标注（仅适用目标检测）</h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                         </div>
                         <div class="modal-body">

@@ -54,7 +54,7 @@ class Settings(BaseSettings):
 
     # YOLOv8 Settings
     YOLO_MODEL_TYPES: List[str] = ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
-    YOLO_TASK_TYPES: List[str] = ["detect", "segment", "classify", "pose"]
+    YOLO_TASK_TYPES: List[str] = ["detect", "segment", "pose", "obb", "detection", "segmentation", "keypoints"]
 
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"

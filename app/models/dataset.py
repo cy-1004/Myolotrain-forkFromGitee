@@ -19,6 +19,10 @@ class Dataset(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     status = Column(String, default="processing")  # processing, available, error
     is_external = Column(Boolean, default=False)  # 是否为外部数据集
+    task = Column(String, default="detect")  # 任务类型: detect, segment, pose, classify, obb
+    train_count = Column(Integer, default=0)  # 训练集图像数量
+    val_count = Column(Integer, default=0)    # 验证集图像数量
+    test_count = Column(Integer, default=0)   # 测试集图像数量
     
     # 关联关系
     annotation_projects = relationship("AnnotationProject", back_populates="dataset")

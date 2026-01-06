@@ -6,7 +6,22 @@ class DetectionManager {
 
     // 加载检测表单
     loadDetectionForm() {
-        // 加载模型选项
+        // 监听任务类型选择变化
+        const taskTypeSelect = document.getElementById('model-task-type');
+        if (taskTypeSelect) {
+            taskTypeSelect.addEventListener('change', () => {
+                this.loadModelOptions();
+            });
+        }
+        
+        // 初始加载模型选项
+        this.loadModelOptions();
+    }
+    
+    // 根据任务类型加载模型选项
+    loadModelOptions() {
+        const taskType = document.getElementById('model-task-type')?.value || 'detect';
+        
         fetch(`${API_URL}/models/`)
             .then(response => response.json())
             .then(models => {
@@ -14,17 +29,42 @@ class DetectionManager {
                 select.innerHTML = '<option value="">请选择模型</option>';
 
                 models.forEach(model => {
-                    if (model.task === 'detect') {
+                    if (model.task === taskType) {
                         const option = document.createElement('option');
                         option.value = model.id;
                         option.textContent = `${model.name} (${model.type})`;
                         select.appendChild(option);
                     }
                 });
+                
+                // 如果没有匹配的模型，添加提示
+                if (select.children.length <= 1) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = `没有适用于${this.getTaskTypeText(taskType)}的模型`;
+                    option.disabled = true;
+                    select.appendChild(option);
+                }
             })
             .catch(error => {
                 console.error('Error loading model options:', error);
             });
+    }
+    
+    // 获取任务类型文本
+    getTaskTypeText(taskType) {
+        switch (taskType) {
+            case 'detect':
+                return '目标检测';
+            case 'segment':
+                return '实例分割';
+            case 'pose':
+                return '关键点/姿态估计';
+            case 'obb':
+                return '旋转框检测';
+            default:
+                return taskType;
+        }
     }
 
     // 绑定检测页面事件

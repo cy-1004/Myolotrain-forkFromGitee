@@ -527,6 +527,7 @@ async def create_dataset(
     description: Optional[str],
     file: UploadFile,
     file_id: Optional[str] = None,
+    task: str = "detect",
     split_dataset_enabled: bool = False,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
@@ -657,8 +658,8 @@ async def create_dataset(
                 if item != temp_move_dir:
                     if item.is_file():
                         try:
-                        	os.remove(item)
-                        	print(f"Removed old root file: {item.name}")
+                            os.remove(item)
+                            print(f"Removed old root file: {item.name}")
                         except Exception as e:
                             print(f"Warning: Could not remove old root file {item.name}: {e}")
                     elif item.is_dir():
@@ -818,6 +819,7 @@ async def create_dataset(
         obj_in_data = {
             "name": name,
             "description": description or "",
+            "task": task,
             "path": str(dataset_dir),  # 设置path字段
             "classes": classes,
             "image_count": image_count,
@@ -1243,7 +1245,8 @@ def register_external_dataset(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    random_seed: int = 42
+    random_seed: int = 42,
+    task: str = "detect"
 ) -> Dataset:
     """
     注册外部数据集目录
@@ -1327,6 +1330,7 @@ def register_external_dataset(
     obj_in_data = {
         "name": name,
         "description": description or "",
+        "task": task,
         "path": str(path_obj),
         "classes": classes,
         "image_count": 0,  # 初始化为0，在训练时会自动计算
@@ -1348,7 +1352,8 @@ def import_local_dataset(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    random_seed: int = 42
+    random_seed: int = 42,
+    task: str = "detect"
 ) -> Dataset:
     """
     从本地目录导入数据集
@@ -1494,6 +1499,7 @@ def import_local_dataset(
         obj_in_data = {
             "name": name,
             "description": description or "",
+            "task": task,
             "path": str(source_dir),  # 直接使用原始目录路径
             "classes": classes,
             "image_count": image_count,
@@ -1581,7 +1587,8 @@ def import_external_dataset(
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
-    random_seed: int = 42
+    random_seed: int = 42,
+    task: str = "detect"
 ) -> Dataset:
     """
     从外部目录导入数据集
@@ -1737,6 +1744,7 @@ def import_external_dataset(
         obj_in_data = {
             "name": name,
             "description": description or "",
+            "task": task,
             "path": str(path_obj),  # 直接使用原始目录路径
             "classes": classes,
             "image_count": image_count,

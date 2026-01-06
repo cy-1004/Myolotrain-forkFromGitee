@@ -62,6 +62,49 @@ class TrainingManager {
         }
     }
 
+    // 获取任务类型文本
+    getTaskTypeText(taskType) {
+        switch (taskType) {
+            case 'detection':
+                return '目标检测';
+            case 'segmentation':
+                return '实例分割';
+            case 'pose':
+                return '关键点/姿态估计';
+            case 'obb':
+                return '旋转框检测';
+            case 'detect':
+                return '目标检测';
+            case 'segment':
+                return '实例分割';
+            case 'keypoints':
+                return '关键点/姿态估计';
+            default:
+                return taskType || '目标检测';
+        }
+    }
+
+    // 检查任务类型是否匹配（支持统一的任务类型）
+    isTaskTypeMatch(datasetTask, selectedTask) {
+        // 统一任务类型映射
+        const taskTypeMap = {
+            'detection': ['detection', 'detect'],
+            'segmentation': ['segmentation', 'segment'],
+            'pose': ['pose', 'keypoints'],
+            'obb': ['obb']
+        };
+        
+        // 查找对应的统一任务类型组
+        for (const [unifiedType, variants] of Object.entries(taskTypeMap)) {
+            if (variants.includes(datasetTask) && variants.includes(selectedTask)) {
+                return true;
+            }
+        }
+        
+        // 如果没有找到映射，直接比较
+        return datasetTask === selectedTask;
+    }
+
     // 加载训练任务列表
     loadTrainingTasks() {
         authenticatedFetch(`${API_URL}/training/`)
@@ -78,16 +121,21 @@ class TrainingManager {
                 tableBody.innerHTML = '';
 
                 if (tasks.length === 0) {
-                    tableBody.innerHTML = '<tr><td colspan="7" class="text-center">暂无训练任务</td></tr>';
+                    tableBody.innerHTML = '<tr><td colspan="8" class="text-center">暂无训练任务</td></tr>';
                     return;
                 }
 
                 tasks.forEach(task => {
                     const row = document.createElement('tr');
+                    // 获取任务类型显示文本
+                    const taskType = task.parameters && task.parameters.task_type ? task.parameters.task_type : 'detect';
+                    const taskTypeText = this.getTaskTypeText(taskType);
+
                     row.innerHTML = `
                         <td>${task.name}</td>
                         <td>${task.dataset_id}</td>
                         <td>${task.model_id || '-'}</td>
+                        <td>${taskTypeText}</td>
                         <td><span class="badge ${this.getStatusBadgeClass(task.status)}">${this.getStatusText(task.status)}</span></td>
                         <td>${task.start_time ? new Date(task.start_time).toLocaleString() : '-'}</td>
                         <td>${task.end_time ? new Date(task.end_time).toLocaleString() : '-'}</td>
@@ -235,6 +283,7 @@ class TrainingManager {
         // 绑定设备类型选择事件
         const deviceTypeSelect = document.getElementById('device-type');
         if (deviceTypeSelect) {
+            const self = this; // 保存TrainingManager实例的引用
             deviceTypeSelect.addEventListener('change', function() {
                 const cpuOptions = document.querySelectorAll('.cpu-option');
                 const gpuOptions = document.querySelectorAll('.gpu-option');
@@ -244,10 +293,23 @@ class TrainingManager {
                     cpuOptions.forEach(option => option.style.display = 'block');
                     gpuOptions.forEach(option => option.style.display = 'none');
                     ascendOptions.forEach(option => option.style.display = 'none');
+                    
+                    // 获取系统CPU核心数并显示建议值
+                    self.getSystemCpuCores();
                 } else if (this.value === 'gpu') {
                     cpuOptions.forEach(option => option.style.display = 'none');
                     gpuOptions.forEach(option => option.style.display = 'block');
                     ascendOptions.forEach(option => option.style.display = 'none');
+                    
+                    // 自动获取GPU信息（如果尚未获取）
+                    const gpuInfoDiv = document.getElementById('gpu-info');
+                    if (gpuInfoDiv && gpuInfoDiv.style.display === 'none') {
+                        // 触发获取GPU信息按钮的点击事件
+                        const getGpuInfoBtn = document.getElementById('get-gpu-info');
+                        if (getGpuInfoBtn) {
+                            getGpuInfoBtn.click();
+                        }
+                    }
                 } else if (this.value === 'ascend') {
                     cpuOptions.forEach(option => option.style.display = 'none');
                     gpuOptions.forEach(option => option.style.display = 'none');
@@ -255,6 +317,46 @@ class TrainingManager {
                 }
             });
         }
+        
+        // 绑定任务类型选择事件，用于过滤模型和数据集选项
+        const taskTypeSelect = document.getElementById('training-task-type');
+        if (taskTypeSelect) {
+            taskTypeSelect.addEventListener('change', function() {
+                // 任务类型改变时重新加载模型和数据集选项
+                this.loadModelOptions();
+                this.loadDatasetOptions();
+            }.bind(this));
+        }
+        
+        // 添加获取系统CPU核心数的方法
+        this.getSystemCpuCores = async function() {
+            try {
+                const response = await authenticatedFetch(`${API_URL}/training/device-info`);
+                const data = await response.json();
+                
+                if (data.cpu_cores) {
+                    // 显示当前的核心数
+                    const cpuCurrentValue = document.getElementById('cpu-current-value');
+                    if (cpuCurrentValue) {
+                        cpuCurrentValue.textContent = data.cpu_cores;
+                    }
+                    
+                    // 如果用户尚未修改过CPU核心数，设置为当前值
+                    const cpuCoresInput = document.getElementById('cpu-cores');
+                    if (cpuCoresInput && cpuCoresInput.value === '8') { // 默认值从4改为8
+                        // 只有当值还是默认值8时才更新为当前值
+                        cpuCoresInput.value = data.cpu_cores;
+                    }
+                }
+            } catch (error) {
+                console.error('获取CPU核心数信息失败:', error);
+                // 即使获取失败，也显示一个默认的当前值
+                const cpuCurrentValue = document.getElementById('cpu-current-value');
+                if (cpuCurrentValue) {
+                    cpuCurrentValue.textContent = '4';
+                }
+            }
+        };
 
         // 绑定获取GPU信息按钮事件
         const getGpuInfoBtn = document.getElementById('get-gpu-info');
@@ -653,18 +755,46 @@ class TrainingManager {
             .then(datasets => {
                 const select = document.getElementById('training-dataset');
 
-                // 清空现有选项（保留第一个默认选项）
-                while (select.options.length > 1) {
-                    select.remove(1);
+                // 检查是否存在任务类型选择器
+                const taskTypeSelect = document.getElementById('training-task-type');
+                let selectedTaskType = null;
+                if (taskTypeSelect) {
+                    selectedTaskType = taskTypeSelect.value;
                 }
-
-                // 添加内部数据集组
-                const internalGroup = document.createElement('optgroup');
-                internalGroup.label = '内部数据集';
-
-                // 添加外部数据集组
-                const externalGroup = document.createElement('optgroup');
-                externalGroup.label = '外部数据集';
+                
+                // 清理之前可能添加的提示选项（值为空且被禁用的选项）
+                const previousPlaceholderOptions = Array.from(select.children).filter(option => 
+                    option.value === '' && option.disabled === true && option.textContent.includes('没有适用于')
+                );
+                previousPlaceholderOptions.forEach(option => option.remove());
+                
+                // 清空现有选项（保留第一个默认选项和optgroup）
+                // 先查找现有的optgroup
+                const existingInternalGroup = Array.from(select.children).find(child => 
+                    child.tagName === 'OPTGROUP' && child.label === '内部数据集'
+                );
+                const existingExternalGroup = Array.from(select.children).find(child => 
+                    child.tagName === 'OPTGROUP' && child.label === '外部数据集'
+                );
+                
+                // 清空现有optgroup的内容，而不是删除optgroup本身
+                if (existingInternalGroup) {
+                    existingInternalGroup.innerHTML = '';
+                }
+                if (existingExternalGroup) {
+                    existingExternalGroup.innerHTML = '';
+                }
+                
+                // 使用现有的optgroup或创建新的
+                const internalGroup = existingInternalGroup || document.createElement('optgroup');
+                if (!existingInternalGroup) {
+                    internalGroup.label = '内部数据集';
+                }
+                
+                const externalGroup = existingExternalGroup || document.createElement('optgroup');
+                if (!existingExternalGroup) {
+                    externalGroup.label = '外部数据集';
+                }
 
                 // 计数器
                 let internalCount = 0;
@@ -672,28 +802,33 @@ class TrainingManager {
 
                 datasets.forEach(dataset => {
                     if (dataset.status === 'available') {
+                        // 如果选择了任务类型，则只显示匹配任务类型的数据集
+                        if (selectedTaskType && dataset.task && !this.isTaskTypeMatch(dataset.task, selectedTaskType)) {
+                            return; // 跳过不匹配的数据集
+                        }
+                        
                         const option = document.createElement('option');
                         option.value = dataset.id;
 
                         // 判断是否为外部数据集
                         if (dataset.is_external) {
-                            option.textContent = `${dataset.name}`;
+                            option.textContent = `${dataset.name} - ${dataset.task || '未指定任务类型'}`;
                             externalGroup.appendChild(option);
                             externalCount++;
                         } else {
-                            option.textContent = dataset.name;
+                            option.textContent = `${dataset.name} - ${dataset.task || '未指定任务类型'}`;
                             internalGroup.appendChild(option);
                             internalCount++;
                         }
                     }
                 });
 
-                // 添加组到选择框
-                if (internalCount > 0) {
+                // 添加组到选择框（只有当optgroup不存在时才添加）
+                if (internalCount > 0 && !existingInternalGroup) {
                     select.appendChild(internalGroup);
                 }
 
-                if (externalCount > 0) {
+                if (externalCount > 0 && !existingExternalGroup) {
                     select.appendChild(externalGroup);
                 }
 
@@ -701,7 +836,7 @@ class TrainingManager {
                 if (internalCount === 0 && externalCount === 0) {
                     const option = document.createElement('option');
                     option.value = '';
-                    option.textContent = '没有可用的数据集';
+                    option.textContent = `没有适用于 ${selectedTaskType || '当前任务类型'} 的数据集`;
                     option.disabled = true;
                     select.appendChild(option);
                 }
@@ -717,13 +852,89 @@ class TrainingManager {
             .then(response => response.json())
             .then(models => {
                 const select = document.getElementById('training-model');
+                
+                // 检查是否存在任务类型选择器
+                const taskTypeSelect = document.getElementById('training-task-type');
+                let selectedTaskType = null;
+                if (taskTypeSelect) {
+                    selectedTaskType = taskTypeSelect.value;
+                }
+                
+                // 清理之前可能添加的提示选项（值为空且被禁用的选项）
+                const previousPlaceholderOptions = Array.from(select.children).filter(option => 
+                    option.value === '' && option.disabled === true && option.textContent.includes('没有适用于')
+                );
+                previousPlaceholderOptions.forEach(option => option.remove());
+                
+                // 清空现有选项（保留第一个默认选项和optgroup）
+                // 先查找现有的optgroup
+                const existingInternalGroup = Array.from(select.children).find(child => 
+                    child.tagName === 'OPTGROUP' && child.label === '内部模型'
+                );
+                const existingExternalGroup = Array.from(select.children).find(child => 
+                    child.tagName === 'OPTGROUP' && child.label === '外部模型'
+                );
+                
+                // 清空现有optgroup的内容，而不是删除optgroup本身
+                if (existingInternalGroup) {
+                    existingInternalGroup.innerHTML = '';
+                }
+                if (existingExternalGroup) {
+                    existingExternalGroup.innerHTML = '';
+                }
+                
+                // 使用现有的optgroup或创建新的
+                const internalGroup = existingInternalGroup || document.createElement('optgroup');
+                if (!existingInternalGroup) {
+                    internalGroup.label = '内部模型';
+                }
+                
+                const externalGroup = existingExternalGroup || document.createElement('optgroup');
+                if (!existingExternalGroup) {
+                    externalGroup.label = '外部模型';
+                }
 
+                // 计数器
+                let internalCount = 0;
+                let externalCount = 0;
+                
                 models.forEach(model => {
+                    // 如果选择了任务类型，则只显示匹配任务类型的模型
+                    if (selectedTaskType && model.task && !this.isTaskTypeMatch(model.task, selectedTaskType)) {
+                        return; // 跳过不匹配的模型
+                    }
+                    
                     const option = document.createElement('option');
                     option.value = model.id;
-                    option.textContent = `${model.name} (${model.type})`;
-                    select.appendChild(option);
+                    option.textContent = `${model.name} (${model.type}) - ${model.task || '未指定任务类型'}`;
+                    
+                    // 根据模型来源分组
+                    if (model.source === 'external') {
+                        externalGroup.appendChild(option);
+                        externalCount++;
+                    } else {
+                        internalGroup.appendChild(option);
+                        internalCount++;
+                    }
                 });
+                
+                // 添加组到选择框（只有当optgroup不存在时才添加）
+                if (internalCount > 0 && !existingInternalGroup) {
+                    select.appendChild(internalGroup);
+                }
+                
+                if (externalCount > 0 && !existingExternalGroup) {
+                    select.appendChild(externalGroup);
+                }
+                
+                // 如果没有匹配的模型，添加提示
+                if (internalCount === 0 && externalCount === 0) {
+                    const option = document.createElement('option');
+                    option.value = '';
+                    option.textContent = `没有适用于 ${selectedTaskType || '当前任务类型'} 的模型`;
+                    option.disabled = true;
+                    select.appendChild(option);
+                }
             })
             .catch(error => {
                 console.error('Error loading model options:', error);
@@ -754,12 +965,35 @@ class TrainingManager {
         const datasetId = datasetSelect.value;
 
         const modelSelect = document.getElementById('training-model');
+        const taskTypeSelect = document.getElementById('training-task-type');
 
         // 获取硬件配置参数
         const deviceTypeSelect = document.getElementById('device-type');
         const cpuCoresInput = document.getElementById('cpu-cores');
         const gpuMemoryInput = document.getElementById('gpu-memory');
         const memoryInput = document.getElementById('memory');
+
+        // 创建训练参数对象
+        const parameters = {
+            epochs: parseInt(epochsInput.value),
+            batch_size: parseInt(batchSizeInput.value),
+            lr0: parseFloat(lrInput.value)
+        };
+
+        // 获取矩形训练模式设置
+        const enableRectTraining = document.getElementById('enable-rect-training').checked;
+
+        // 根据矩形训练模式设置图像大小
+        if (enableRectTraining) {
+            // 矩形训练模式，使用宽高数组
+            const imgWidth = parseInt(document.getElementById('training-img-width').value);
+            const imgHeight = parseInt(document.getElementById('training-img-height').value);
+            parameters.img_size = [imgWidth, imgHeight];
+            parameters.rect = true; // 启用矩形训练
+        } else {
+            // 正方形模式，使用单一尺寸
+            parameters.img_size = parseInt(imgSizeInput.value);
+        }
 
         // 创建硬件配置对象
         const hardwareConfig = {
@@ -768,6 +1002,7 @@ class TrainingManager {
 
         // 根据设备类型添加相应的参数
         if (deviceTypeSelect.value === 'cpu') {
+            // CPU核心数添加到硬件配置中，而不是参数中
             hardwareConfig.cpu_cores = parseInt(cpuCoresInput.value);
         } else if (deviceTypeSelect.value === 'gpu') {
             // 处理GPU配置
@@ -816,35 +1051,15 @@ class TrainingManager {
             }
         }
 
-        // 添加内存参数
-        hardwareConfig.memory = parseInt(memoryInput.value);
+        // 添加内存参数（临时删除内存限制20260104）
+        //hardwareConfig.memory = parseInt(memoryInput.value);
 
-        // 获取矩形训练模式设置
-        const enableRectTraining = document.getElementById('enable-rect-training').checked;
-
-        // 创建训练参数对象
-        const parameters = {
-            epochs: parseInt(epochsInput.value),
-            batch_size: parseInt(batchSizeInput.value),
-            lr0: parseFloat(lrInput.value)
-        };
-
-        // 根据矩形训练模式设置图像大小
-        if (enableRectTraining) {
-            // 矩形训练模式，使用宽高数组
-            const imgWidth = parseInt(document.getElementById('training-img-width').value);
-            const imgHeight = parseInt(document.getElementById('training-img-height').value);
-            parameters.img_size = [imgWidth, imgHeight];
-            parameters.rect = true; // 启用矩形训练
-        } else {
-            // 正方形模式，使用单一尺寸
-            parameters.img_size = parseInt(imgSizeInput.value);
-        }
 
         // 创建请求数据
         const data = {
             name: nameInput.value,
             model_id: modelSelect.value || null,
+            task_type: taskTypeSelect.value,  // 任务类型参数
             parameters: parameters,
             hardware_config: hardwareConfig
         };
@@ -1285,7 +1500,19 @@ class TrainingManager {
             })
             .catch(error => {
                 console.error('Error deleting training task:', error);
-                alert('删除训练任务失败');
+                // 检查是否是404错误（任务已被删除）
+                if (error.message.includes('404')) {
+                    // 任务可能已被删除，但仍显示成功消息
+                    alert('训练任务已成功删除');
+                    
+                    // 关闭模态框
+                    document.body.removeChild(modal);
+                    
+                    // 重新加载训练任务列表
+                    this.loadTrainingTasks();
+                } else {
+                    alert('删除训练任务失败');
+                }
                 confirmButton.disabled = false;
                 confirmButton.textContent = '确认删除';
             });

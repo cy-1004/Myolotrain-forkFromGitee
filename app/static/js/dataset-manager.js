@@ -58,6 +58,28 @@ class DatasetManager {
         }
     }
 
+    // 获取任务类型文本
+    getTaskTypeText(taskType) {
+        switch (taskType) {
+            case 'detection':
+                return '目标检测';
+            case 'segmentation':
+                return '实例分割';
+            case 'pose':
+                return '关键点/姿态估计';
+            case 'obb':
+                return '旋转框检测';
+            case 'detect':
+                return '目标检测';
+            case 'segment':
+                return '实例分割';
+            case 'keypoints':
+                return '关键点/姿态估计';
+            default:
+                return taskType || '目标检测';
+        }
+    }
+
     // 加载数据集列表
     loadDatasets() {
         console.log('Loading datasets...');
@@ -114,17 +136,28 @@ class DatasetManager {
                     // 构建数据集名称显示
                     let datasetNameHtml = dataset.name;
 
-                    // 添加验证状态标识
-                    if (isValidated) {
-                        datasetNameHtml += ` <span class="badge bg-success ms-1">已验证</span>`;
-                    } else {
-                        datasetNameHtml += ` <span class="badge bg-warning ms-1">未验证</span>`;
-                    }
+                    // 添加验证状态标识（暂时取消）
+                    //if (isValidated) {
+                    //    datasetNameHtml += ` <span class="badge bg-success ms-1">已验证</span>`;
+                    //} else {
+                    //    datasetNameHtml += ` <span class="badge bg-warning ms-1">未验证</span>`;
+                    //}
 
+                    // 格式化任务类型显示
+                    const taskType = dataset.task || 'detection'; // 默认为检测类型
+                    const taskTypeText = this.getTaskTypeText(taskType);
+                    
+                    // 限制类别显示数量，如果类别过多则显示省略号
+                    const maxDisplayClasses = 5;
+                    const displayedClasses = dataset.classes.length <= maxDisplayClasses 
+                        ? dataset.classes.join(', ') 
+                        : dataset.classes.slice(0, maxDisplayClasses).join(', ') + '... (共' + dataset.classes.length + '个)';
+                    
                     row.innerHTML = `
                         <td>${datasetNameHtml}</td>
                         <td>${dataset.description || '-'}</td>
-                        <td>${dataset.classes.length}</td>
+                        <td title="${dataset.classes.join(', ')}">${displayedClasses}<br><small class="text-muted">共${dataset.classes.length}类</small></td>
+                        <td>${taskTypeText}</td>
                         <td>${trainCount}</td>
                         <td>${valCount}</td>
                         <td>${testCount}</td>
@@ -272,6 +305,7 @@ class DatasetManager {
         const form = document.getElementById('add-dataset-form');
         const nameInput = document.getElementById('dataset-name');
         const descriptionInput = document.getElementById('dataset-description');
+        const taskTypeSelect = document.getElementById('dataset-task');
         const fileInput = document.getElementById('dataset-file');
         const splitEnabled = document.getElementById('split-dataset-enabled');
         const trainRatio = document.getElementById('train-ratio');
@@ -320,6 +354,7 @@ class DatasetManager {
             const formData = new FormData();
             formData.append('name', nameInput.value);
             formData.append('description', descriptionInput.value || '');
+            formData.append('task', taskTypeSelect.value || 'detect');
             formData.append('file', fileInput.files[0]);
             formData.append('file_id', fileId);
 
@@ -783,7 +818,7 @@ class DatasetManager {
                                     console.error('local-dataset-dir-path input not found after modal restore');
                                 }
 
-                                // 显示数据集信息
+                                // 显示数据集信息（不自动填充名称）
                                 this.showLocalDatasetInfo(dirInfo);
                             }, 100);
                         };
@@ -855,11 +890,7 @@ class DatasetManager {
                         console.log('Received directory info:', info);
                         this.updateDatasetInfoDisplay(info);
 
-                        // 如果数据集名称输入框为空，自动填充目录名称
-                        const nameInput = document.getElementById('local-dataset-name');
-                        if (nameInput && !nameInput.value && info.name) {
-                            nameInput.value = info.name;
-                        }
+
                     })
                     .catch(error => {
                         console.error('Error fetching directory info:', error);
@@ -877,11 +908,7 @@ class DatasetManager {
                 console.log('Using provided directory info object');
                 this.updateDatasetInfoDisplay(directoryInfo);
 
-                // 如果数据集名称输入框为空，自动填充目录名称
-                const nameInput = document.getElementById('local-dataset-name');
-                if (nameInput && !nameInput.value && directoryInfo.name) {
-                    nameInput.value = directoryInfo.name;
-                }
+
             }
         } catch (error) {
             console.error('Error processing dataset info:', error);
@@ -1556,6 +1583,7 @@ class DatasetManager {
         console.log('Submitting import local dataset form');
         const nameInput = document.getElementById('local-dataset-name');
         const descriptionInput = document.getElementById('local-dataset-description');
+        const taskTypeSelect = document.getElementById('local-dataset-task');
         const dirPathInput = document.getElementById('local-dataset-dir-path');
         const splitEnabled = document.getElementById('local-split-dataset-enabled');
         const trainRatio = document.getElementById('local-train-ratio');
@@ -1594,7 +1622,8 @@ class DatasetManager {
         const data = {
             name: name,
             description: description,
-            directory_name: directoryName
+            directory_name: directoryName,
+            task: taskTypeSelect ? taskTypeSelect.value : 'detect'
         };
 
         // 添加分割选项

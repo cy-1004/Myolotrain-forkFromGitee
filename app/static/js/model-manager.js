@@ -318,7 +318,15 @@ class ModelManager {
                     submitButton.disabled = false;
                     submitButton.textContent = '确定';
                 }
-                alert('上传模型失败: ' + xhr.statusText);
+                
+                // 尝试解析错误响应
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    alert('上传模型失败: ' + (response.detail || response.message || xhr.statusText));
+                } catch (e) {
+                    // 如果无法解析JSON，显示原始错误文本
+                    alert('上传模型失败: ' + (xhr.statusText || '未知错误'));
+                }
             }
         };
 
@@ -329,7 +337,18 @@ class ModelManager {
                 submitButton.disabled = false;
                 submitButton.textContent = '确定';
             }
-            alert('上传模型失败');
+            
+            // 尝试从响应中获取错误信息
+            if (xhr.responseText) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    alert('上传模型失败: ' + (response.detail || response.message || '网络错误'));
+                } catch (e) {
+                    alert('上传模型失败: 网络错误或服务器无响应');
+                }
+            } else {
+                alert('上传模型失败: 网络错误或服务器无响应');
+            }
         };
 
         // 设置超时处理
@@ -433,13 +452,19 @@ class ModelManager {
     getTaskText(task) {
         switch (task) {
             case 'detect':
-                return '检测 (Detection)';
+                return '目标检测';
             case 'segment':
-                return '分割 (Segmentation)';
-            case 'classify':
-                return '分类 (Classification)';
+                return '实例分割';
             case 'pose':
-                return '姿态估计 (Pose)';
+                return '关键点/姿态估计';
+            case 'obb':
+                return '旋转框检测';
+            case 'detection':
+                return '目标检测';
+            case 'segmentation':
+                return '实例分割';
+            case 'keypoints':
+                return '关键点/姿态估计';
             default:
                 return task;
         }

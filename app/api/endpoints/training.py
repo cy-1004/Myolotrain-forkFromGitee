@@ -22,6 +22,7 @@ class TrainingRequest(BaseModel):
     epochs: int
     batch_size: int
     image_size: int
+    task_type: str = 'detect'  # 任务类型: detect, segment, pose, obb
     device_type: str = 'auto'  # 'auto', 'cpu', 或 'gpu'
     gpu_memory: Optional[int] = None  # GPU显存限制（MB）
 
@@ -36,6 +37,7 @@ async def start_training_api(request: TrainingRequest):
             epochs=request.epochs,
             batch_size=request.batch_size,
             image_size=request.image_size,
+            task_type=request.task_type,
             device_type=request.device_type,
             gpu_memory=request.gpu_memory
         )
@@ -50,6 +52,7 @@ def create_training_task(
     dataset_id: Optional[str] = Body(None),
     local_dataset_path: Optional[str] = Body(None),
     model_id: Optional[str] = Body(None),
+    task_type: str = Body('detect'),  # 任务类型: detect, segment, pose, obb
     parameters: Dict[str, Any] = Body(...),
     hardware_config: Optional[Dict[str, Any]] = Body(None),
     db: Session = Depends(get_db)
@@ -134,6 +137,9 @@ def create_training_task(
                         hardware_config["ascend_memory"] = recommended_memory
                         print(f"自动设置昇腾NPU内存限制为: {hardware_config['ascend_memory']}MB")
 
+    # 将任务类型添加到参数中
+    parameters['task_type'] = task_type
+    
     # 创建训练任务
     task = training_service.create_training_task(
         db=db,
@@ -298,6 +304,55 @@ def get_gpu_memory_info():
 
     return response
 
+@router.get("/device-info")
+def get_device_info():
+    """获取设备信息，包括可用的GPU列表及其显存大小"""
+    gpus = DeviceManager.get_available_gpus()
+    ascends = AscendDeviceManager.get_available_ascends()
+    recommended_memory = None
+    current_device = None
+    gpu_info = None
+    ascend_info = None
+
+    # 如果有可用的GPU
+    if gpus:
+        gpu_info = gpus[0]  # 使用第一个GPU的信息
+
+        # 计算推荐的显存设置（可用显存的80%）
+        free_memory = gpu_info.get("memory_free", 0)
+        if free_memory > 0:
+            recommended_memory = int(free_memory * 0.8)
+
+        # 获取当前活跃的GPU设备
+        try:
+            if torch.cuda.is_available():
+                current_device_index = torch.cuda.current_device()
+                current_device = {
+                    "index": current_device_index,
+                    "name": torch.cuda.get_device_name(current_device_index)
+                }
+        except Exception as e:
+            print(f"获取当前活跃GPU设备失败: {str(e)}")
+
+    # 如果有可用的昇腾NPU
+    if ascends:
+        ascend_info = ascends[0]  # 使用第一个昇腾NPU的信息
+
+    return {
+        "gpus": gpus,
+        "ascends": ascends,
+        "has_cuda": torch.cuda.is_available(),
+        "has_ascend": len(ascends) > 0,
+        "recommended_memory": recommended_memory,
+        "current_device": current_device,
+        "gpu_info": gpu_info,
+        "ascend_info": ascend_info
+    }
+
+class GPUMemoryValidationRequest(BaseModel):
+    gpu_memory: int
+    gpu_index: Optional[int] = 0
+
 @router.get("/{task_id}", response_model=TrainingTask)
 def read_training_task(
     task_id: str,
@@ -316,6 +371,26 @@ def stop_training(
     Stop a training task
     """
     return training_service.stop_training(db, task_id=task_id)
+
+@router.delete("/{task_id}")
+def delete_training_task(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Delete a training task
+    """
+    from app.crud import training_task
+    task = training_task.get(db, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    
+    # 检查任务状态，只允许删除非运行状态的任务
+    if hasattr(task, 'status') and task.status in ["running", "training", "downloading_model"]:
+        raise HTTPException(status_code=400, detail="无法删除正在运行的任务，请先停止任务")
+    
+    training_task.remove(db, id=task_id)
+    return {"message": "训练任务已成功删除"}
 
 @router.get("/{task_id}/logs")
 def get_training_logs(
@@ -471,66 +546,6 @@ def restart_tensorboard():
         return {"success": True, "message": "TensorBoard服务已重启"}
     else:
         return {"success": False, "message": "TensorBoard服务重启失败"}
-
-@router.delete("/{task_id}")
-def delete_training_task(
-    task_id: str,
-    db: Session = Depends(get_db)
-):
-    """
-    Delete a training task and its associated files
-    """
-    training_service.delete_training_task(db, task_id=task_id)
-    return {"success": True, "message": "Training task deleted successfully"}
-
-@router.get("/device-info")
-def get_device_info():
-    """获取设备信息，包括可用的GPU列表及其显存大小"""
-    gpus = DeviceManager.get_available_gpus()
-    ascends = AscendDeviceManager.get_available_ascends()
-    recommended_memory = None
-    current_device = None
-    gpu_info = None
-    ascend_info = None
-
-    # 如果有可用的GPU
-    if gpus:
-        gpu_info = gpus[0]  # 使用第一个GPU的信息
-
-        # 计算推荐的显存设置（可用显存的80%）
-        free_memory = gpu_info.get("memory_free", 0)
-        if free_memory > 0:
-            recommended_memory = int(free_memory * 0.8)
-
-        # 获取当前活跃的GPU设备
-        try:
-            if torch.cuda.is_available():
-                current_device_index = torch.cuda.current_device()
-                current_device = {
-                    "index": current_device_index,
-                    "name": torch.cuda.get_device_name(current_device_index)
-                }
-        except Exception as e:
-            print(f"获取当前活跃GPU设备失败: {str(e)}")
-
-    # 如果有可用的昇腾NPU
-    if ascends:
-        ascend_info = ascends[0]  # 使用第一个昇腾NPU的信息
-
-    return {
-        "gpus": gpus,
-        "ascends": ascends,
-        "has_cuda": torch.cuda.is_available(),
-        "has_ascend": len(ascends) > 0,
-        "recommended_memory": recommended_memory,
-        "current_device": current_device,
-        "gpu_info": gpu_info,
-        "ascend_info": ascend_info
-    }
-
-class GPUMemoryValidationRequest(BaseModel):
-    gpu_memory: int
-    gpu_index: Optional[int] = 0
 
 @router.post("/validate-gpu-memory")
 def validate_gpu_memory(request: GPUMemoryValidationRequest):
@@ -798,12 +813,25 @@ def upload_model_to_management(
         from app.schemas.model import ModelCreate
         from app.crud import model as model_crud
         
+        # 获取训练任务的任务类型
+        task_type = "detect"  # 默认任务类型
+        if hasattr(task, 'parameters') and task.parameters:
+            if isinstance(task.parameters, dict):
+                task_type = task.parameters.get('task_type', 'detect')
+            else:
+                import json
+                try:
+                    params_dict = json.loads(task.parameters)
+                    task_type = params_dict.get('task_type', 'detect')
+                except:
+                    task_type = 'detect'
+        
         # 准备模型数据
         model_data = ModelCreate(
             name=model_name,
             description=f"由训练任务 '{task.name}' 生成的{ '最佳' if model_type == 'best' else '最后' }模型",
             type="yolov8",  # 默认模型类型
-            task="detect",  # 默认任务类型
+            task=task_type,  # 使用训练任务的任务类型
             path=model_file_path,
             source="training"
         )

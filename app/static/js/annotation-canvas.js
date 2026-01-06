@@ -244,8 +244,12 @@ class AnnotationCanvas {
         this.ctx.strokeStyle = transparentColor;
         this.ctx.lineWidth = isSelected ? 3 : 2;
 
-        // 绘制边框
-        this.ctx.strokeRect(canvasAnnotation.x, canvasAnnotation.y, canvasAnnotation.width, canvasAnnotation.height);
+        // 将归一化坐标转换为画布坐标进行绘制
+        const canvasX = canvasAnnotation.x * this.canvas.width;
+        const canvasY = canvasAnnotation.y * this.canvas.height;
+        const canvasWidth = canvasAnnotation.width * this.canvas.width;
+        const canvasHeight = canvasAnnotation.height * this.canvas.height;
+        this.ctx.strokeRect(canvasX, canvasY, canvasWidth, canvasHeight);
         
         // 绘制序号和类别标签
         const className = window.annotationManager?.getClassName(yoloAnnotation.class_id) || `Class ${yoloAnnotation.class_id}`;
@@ -257,11 +261,14 @@ class AnnotationCanvas {
         this.ctx.fillStyle = isSelected ? '#44FF44' : color;
         this.ctx.font = '12px Arial';
         
+        // 将归一化坐标转换为画布坐标进行绘制
+        const labelX = canvasAnnotation.x * this.canvas.width;
+        const labelY = canvasAnnotation.y * this.canvas.height;
         const textWidth = this.ctx.measureText(label).width;
-        this.ctx.fillRect(canvasAnnotation.x, canvasAnnotation.y - 20, textWidth + 8, 18);
+        this.ctx.fillRect(labelX, labelY - 20, textWidth + 8, 18);
         
         this.ctx.fillStyle = 'white';
-        this.ctx.fillText(label, canvasAnnotation.x + 4, canvasAnnotation.y - 6);
+        this.ctx.fillText(label, labelX + 4, labelY - 6);
     }
     
     // 修改：drawCurrentAnnotation函数
@@ -270,8 +277,12 @@ class AnnotationCanvas {
         this.ctx.lineWidth = 2;
         this.ctx.setLineDash([5, 5]);
 
-        // 绘制边框
-        this.ctx.strokeRect(canvasAnnotation.x, canvasAnnotation.y, canvasAnnotation.width, canvasAnnotation.height);
+        // 将归一化坐标转换为画布坐标进行绘制
+        const canvasX = canvasAnnotation.x * this.canvas.width;
+        const canvasY = canvasAnnotation.y * this.canvas.height;
+        const canvasWidth = canvasAnnotation.width * this.canvas.width;
+        const canvasHeight = canvasAnnotation.height * this.canvas.height;
+        this.ctx.strokeRect(canvasX, canvasY, canvasWidth, canvasHeight);
         
         this.ctx.setLineDash([]);
     }

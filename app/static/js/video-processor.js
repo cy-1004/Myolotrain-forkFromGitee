@@ -48,6 +48,22 @@ class VideoProcessor {
             }
         });
     }
+    
+    // 获取任务类型文本
+    getTaskTypeText(taskType) {
+        switch (taskType) {
+            case 'detect':
+                return '目标检测';
+            case 'segment':
+                return '实例分割';
+            case 'pose':
+                return '关键点/姿态估计';
+            case 'obb':
+                return '旋转框检测';
+            default:
+                return taskType;
+        }
+    }
 
     // 加载视频处理页面
     loadVideoPage() {
@@ -68,35 +84,52 @@ class VideoProcessor {
                 element.style.display = 'none';
             }
         });
-
+        
+        // 获取任务类型选择器并添加变化监听
+        const taskTypeSelect = document.getElementById('rt-model-task-type');
+        if (taskTypeSelect) {
+            taskTypeSelect.addEventListener('change', () => {
+                this.loadRealTimeDetectionModelOptions();
+            });
+        }
+        
         // 加载模型列表（用于实时检测功能）
+        this.loadRealTimeDetectionModelOptions();
+    }
+    
+    // 加载实时检测模型选项
+    loadRealTimeDetectionModelOptions() {
         fetch(`${API_URL}/models/`)
             .then(response => response.json())
             .then(models => {
                 console.log('Loaded models for video detection:', models.length);
 
                 const modelSelect = document.getElementById('rt-model-select');
+                const taskTypeSelect = document.getElementById('rt-model-task-type');
+                
                 if (modelSelect) {
+                    // 获取当前选择的任务类型，默认为detect
+                    const currentTaskType = taskTypeSelect ? taskTypeSelect.value : 'detect';
+                    
                     // 清空现有选项（除了第一个默认选项）
                     while (modelSelect.options.length > 1) {
                         modelSelect.remove(1);
                     }
 
-                    // 添加检测模型选项
-                    models.forEach(model => {
-                        if (model.task === 'detect') {
+                    // 根据任务类型添加模型选项
+                    const filteredModels = models.filter(model => model.task === currentTaskType);
+                    
+                    if (filteredModels.length > 0) {
+                        filteredModels.forEach(model => {
                             const option = document.createElement('option');
                             option.value = model.id;
                             option.textContent = `${model.name} (${model.type})`;
                             modelSelect.appendChild(option);
-                        }
-                    });
-
-                    // 如果没有检测模型，显示提示
-                    if (modelSelect.options.length <= 1) {
+                        });
+                    } else {
                         const option = document.createElement('option');
                         option.value = "";
-                        option.textContent = "没有可用的检测模型";
+                        option.textContent = `没有适用于${this.getTaskTypeText(currentTaskType)}的模型`;
                         option.disabled = true;
                         modelSelect.appendChild(option);
                     }
@@ -822,22 +855,18 @@ class VideoProcessor {
         const objectsCounter = document.getElementById('objects-counter');
 
         if (startDetectionBtn && stopDetectionBtn && rtModelSelect) {
-            // 加载模型列表
-            authenticatedFetch(`${API_URL}/models/?type=detection`)
-                .then(response => response.json())
-                .then(models => {
-                    rtModelSelect.innerHTML = '<option value="">\u8bf7\u9009\u62e9\u6a21\u578b</option>';
-                    models.forEach(model => {
-                        const option = document.createElement('option');
-                        option.value = model.id;
-                        option.textContent = model.name;
-                        rtModelSelect.appendChild(option);
-                    });
-                })
-                .catch(error => {
-                    console.error('加载模型列表失败:', error);
-                    rtModelSelect.innerHTML = '<option value="">\u52a0\u8f7d\u6a21\u578b\u5931\u8d25</option>';
+            // 获取任务类型选择器
+            const rtTaskTypeSelect = document.getElementById('rt-model-task-type');
+            
+            // 监听任务类型选择变化
+            if (rtTaskTypeSelect) {
+                rtTaskTypeSelect.addEventListener('change', () => {
+                    this.loadRealTimeDetectionModelOptions();
                 });
+            }
+            
+            // 初始加载模型选项
+            this.loadRealTimeDetectionModelOptions();
 
             // 流媒体管理按钮事件
             const refreshStreamsBtn = document.getElementById('refresh-streams-btn');
