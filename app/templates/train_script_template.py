@@ -5,6 +5,23 @@ import warnings
 import logging
 import multiprocessing
 
+# ====== CPU 并行强制配置（测试）======
+import os
+
+cpu_cores = int({})
+
+os.environ["OMP_NUM_THREADS"] = str(cpu_cores)
+os.environ["MKL_NUM_THREADS"] = str(cpu_cores)
+os.environ["OPENBLAS_NUM_THREADS"] = str(cpu_cores)
+os.environ["NUMEXPR_NUM_THREADS"] = str(cpu_cores)
+
+import torch
+torch.set_num_threads(cpu_cores)
+torch.set_num_interop_threads(cpu_cores)
+
+print("[CPU CONFIG] cores: " + str(cpu_cores))
+# =====================================
+
 # 禁用自动下载
 os.environ['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
 # 禁用AMP检查
@@ -47,7 +64,7 @@ def main():
 
         # 设置硬件资源限制
         device_type = '{}'
-        cpu_cores = {}
+        # cpu_cores 已在脚本顶部定义
         gpu_memory = {}
         memory_limit = {}
 
@@ -60,11 +77,8 @@ def main():
             # 手动设置GPU或CPU
             os.environ['CUDA_VISIBLE_DEVICES'] = '0' if device_type == 'gpu' else '-1'
 
-        # 如果使用 CPU，设置线程数
+        # 如果使用 CPU
         if device_type == 'cpu':
-            # 使用全局导入的torch模块
-            import torch as torch_local  # 使用不同的名称避免混淆
-            torch_local.set_num_threads(int(str(cpu_cores)))
             print('\n=== 使用 CPU 训练，线程数: ' + str(cpu_cores) + ' ===')
         else:
             if gpu_memory == -1:
@@ -185,7 +199,7 @@ def main():
             'project': output_dir,
             'name': 'exp',
             'exist_ok': True,
-            'workers': int(str(cpu_cores)) if device_type == 'cpu' else 0,  # 根据CPU核心数设置数据加载器进程数，使用用户指定的核心数
+            'workers': max(1, cpu_cores // 2) if device_type == 'cpu' else 0,  # CPU训练时workers为CPU核心数的一半，避免进程与线程冲突
             'amp': False,   # 禁用自动混合精度，避免下载额外模型
             'task': '{}'  # 任务类型: detect, segment, pose, obb
         }}

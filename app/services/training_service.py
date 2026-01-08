@@ -8,6 +8,7 @@ import uuid
 import json
 import threading
 import torch
+import psutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, List
@@ -338,15 +339,34 @@ class DeviceManager:
         # 处理CPU设备
         if device_type == 'cpu':
             # 获取CPU核心数
-            cpu_cores = os.cpu_count()
-            if cpu_cores:
-                # 使用75%的CPU核心进行训练
-                recommended_cores = max(1, int(cpu_cores * 0.75))
-                torch.set_num_threads(recommended_cores)
-                device_info['cpu_cores'] = recommended_cores
+            physical_cores = psutil.cpu_count(logical=False) or os.cpu_count() // 2
+            if physical_cores:
+                device_info['cpu_cores'] = physical_cores
 
 
         return device_info
+
+
+def resolve_cpu_cores(requested_cores: int) -> int:
+    """
+    统一的CPU核心数裁决逻辑，确保安全有效的CPU使用
+    """
+    import os
+    import psutil
+
+    logical = psutil.cpu_count(logical=True)
+    physical = psutil.cpu_count(logical=False) or logical // 2
+
+    # 规则 1：不能超过物理核
+    max_safe = physical
+
+    # 规则 2：最少 1 核
+    requested = max(1, int(requested_cores))
+
+    # 规则 3：最终裁决
+    final_cores = min(requested, max_safe)
+
+    return final_cores
 
 def train_model(
     model_type: str,
@@ -743,7 +763,10 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     # 获取硬件配置
     hardware_config = db_task.hardware_config or {}
     device_type = hardware_config.get("device_type", "cpu")
-    cpu_cores = hardware_config.get("cpu_cores", 4)
+    raw_cpu_cores = hardware_config.get("cpu_cores", os.cpu_count())
+    cpu_cores = resolve_cpu_cores(raw_cpu_cores)
+    # 更新硬件配置，确保使用经过裁决的CPU核心数
+    hardware_config["cpu_cores"] = cpu_cores
     gpu_memory = hardware_config.get("gpu_memory", 4096)  # 默认 4GB
     memory_limit = hardware_config.get("memory", 8192)  # 默认 8GB
 
@@ -848,9 +871,9 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     
     # 格式化脚本内容
     script_content = script_content.format(
+        cpu_cores,  # 为模板开头的CPU核心数设置添加的参数
         os.path.join(settings.BASE_DIR, 'app', 'static', 'fonts', 'Arial.Unicode.ttf'),
         device_type,
-        cpu_cores,
         gpu_memory,
         memory_limit,
         model_type,
@@ -1187,7 +1210,10 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     # 获取硬件配置
     hardware_config = db_task.hardware_config or {}
     device_type = hardware_config.get("device_type", "cpu")
-    cpu_cores = hardware_config.get("cpu_cores", 4)
+    raw_cpu_cores = hardware_config.get("cpu_cores", os.cpu_count())
+    cpu_cores = resolve_cpu_cores(raw_cpu_cores)
+    # 更新硬件配置，确保使用经过裁决的CPU核心数
+    hardware_config["cpu_cores"] = cpu_cores
     gpu_memory = hardware_config.get("gpu_memory", 4096)  # 默认 4GB
     memory_limit = hardware_config.get("memory", 8192)  # 默认 8GB
 
@@ -1278,6 +1304,22 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     python_code = f"""
 import os
 import sys
+import torch
+
+# ====== CPU 并行强制配置（最前）======
+cpu_cores = {cpu_cores}
+
+os.environ["OMP_NUM_THREADS"] = str(cpu_cores)
+os.environ["MKL_NUM_THREADS"] = str(cpu_cores)
+os.environ["OPENBLAS_NUM_THREADS"] = str(cpu_cores)
+os.environ["NUMEXPR_NUM_THREADS"] = str(cpu_cores)
+
+torch.set_num_threads(cpu_cores)
+torch.set_num_interop_threads(cpu_cores)
+
+print(f"[CPU CONFIG] cores={cpu_cores}")
+# =====================================
+
 from ultralytics import YOLO
 
 # 设置环境变量
@@ -1292,6 +1334,10 @@ model = YOLO(model_file)
 
 # 训练参数
 train_args = {train_args}
+
+# 为CPU训练更新workers参数
+if train_args.get('device') == 'cpu':
+    train_args['workers'] = max(1, {cpu_cores} // 2)
 
 print(f"开始恢复训练，参数: {{train_args}}")
 
