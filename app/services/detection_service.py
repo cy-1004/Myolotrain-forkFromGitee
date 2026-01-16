@@ -167,27 +167,143 @@ async def create_detection_task(
                 else:
                     print("No inference time patterns matched, using default 0")
 
-        # 保存结果
-        for i, result in enumerate(results):
-            # 保存带有检测框的图像
-            result_path = output_dir / f"result_{i}.jpg"
-            result.save(filename=str(result_path))
+        # 保存结果 - 根据模型任务类型分发处理
+        import numpy as np
+        import json
+        
+        if db_model.task == 'detect':
+            # ===== 目标检测 (矩形框) =====
+            for i, result in enumerate(results):
+                # 保存可视化结果
+                result_path = output_dir / f"result_{i}.jpg"
+                result.save(filename=str(result_path))
+                
+                # 保存JSON
+                json_path = output_dir / f"result_{i}.json"
+                with open(json_path, 'w') as f:
+                    json_results = []
+                    for box in result.boxes:
+                        json_results.append({
+                            'class_id': int(box.cls.item()),
+                            'class_name': result.names[int(box.cls.item())],
+                            'confidence': float(box.conf.item()),
+                            'bbox': [round(x, 2) for x in box.xyxy.tolist()[0]],  # [x1,y1,x2,y2]
+                        })
+                    json.dump(json_results, f, indent=2)
 
-            # 保存JSON结果
-            json_path = output_dir / f"result_{i}.json"
-            with open(json_path, 'w') as f:
-                import json
-                # 将检测结果转换为JSON格式
-                boxes = result.boxes
-                json_results = []
-                for box in boxes:
-                    json_results.append({
-                        'class': int(box.cls.item()),
-                        'class_name': result.names[int(box.cls.item())],
-                        'confidence': float(box.conf.item()),
-                        'bbox': box.xyxy.tolist()[0],
-                    })
-                json.dump(json_results, f, indent=2)
+        elif db_model.task == 'segment':
+            # ===== 实例分割 (掩码+框) =====
+            for i, result in enumerate(results):
+                result_path = output_dir / f"result_{i}.jpg"
+                result.save(filename=str(result_path))  # 自动叠加掩码
+                
+                json_path = output_dir / f"result_{i}.json"
+                with open(json_path, 'w') as f:
+                    json_results = []
+                    for j, box in enumerate(result.boxes):
+                        # 基础检测信息
+                        result_dict = {
+                            'class_id': int(box.cls.item()),
+                            'class_name': result.names[int(box.cls.item())],
+                            'confidence': float(box.conf.item()),
+                            'bbox': [round(x, 2) for x in box.xyxy.tolist()[0]],
+                        }
+                        
+                        # 添加掩码数据 (压缩为边界坐标)
+                        if result.masks:
+                            mask = result.masks[j].xy[0].astype(float).tolist()  # 轮廓点集
+                            result_dict['mask_polygon'] = [[round(x,2), round(y,2)] for x,y in mask]
+                        
+                        json_results.append(result_dict)
+                    json.dump(json_results, f, indent=2)
+
+        elif db_model.task == 'obb':
+            # ===== 旋转框 (OBB) =====
+            for i, result in enumerate(results):
+                result_path = output_dir / f"result_{i}.jpg"
+                result.save(filename=str(result_path))  # 绘制旋转框
+                
+                json_path = output_dir / f"result_{i}.json"
+                with open(json_path, 'w') as f:
+                    json_results = []
+                    for obb in result.obb:  # 注意：使用obb属性
+                        # OBB核心参数: [x_center, y_center, width, height, angle(radians)]
+                        obb_params = obb.xywhr.cpu().numpy().flatten().tolist()
+                        
+                        json_results.append({
+                            'class_id': int(obb.cls.item()),
+                            'class_name': result.names[int(obb.cls.item())],
+                            'confidence': float(obb.conf.item()),
+                            'obb': {
+                                'center': [round(obb_params[0],2), round(obb_params[1],2)],
+                                'size': [round(obb_params[2],2), round(obb_params[3],2)],
+                                'angle_deg': round(np.degrees(obb_params[4]), 2)  # 转角度
+                            }
+                        })
+                    json.dump(json_results, f, indent=2)
+
+        elif db_model.task == 'pose':
+            # ===== 姿态估计 (关键点) =====
+            for i, result in enumerate(results):
+                result_path = output_dir / f"result_{i}.jpg"
+                result.save(filename=str(result_path))  # 绘制骨架
+                
+                json_path = output_dir / f"result_{i}.json"
+                with open(json_path, 'w') as f:
+                    json_results = []
+                    for j, kpt in enumerate(result.keypoints):  # 注意：使用keypoints属性
+                        # 获取对应检测框
+                        if result.boxes and j < len(result.boxes):
+                            box = result.boxes[j]
+                        else:
+                            # 如果没有对应的检测框，跳过此关键点
+                            continue
+                        
+                        # 提取关键点 (x,y,confidence)
+                        points = []
+                        if kpt is not None and kpt.xy.shape[1] > 0:
+                            for idx, pt in enumerate(kpt.xy[0].cpu().numpy()):
+                                conf_val = 0.0
+                                if kpt.conf is not None and idx < kpt.conf.shape[1]:
+                                    conf_val = float(kpt.conf[0][idx])
+                                points.append({
+                                    'x': round(float(pt[0]), 2),
+                                    'y': round(float(pt[1]), 2),
+                                    'confidence': round(conf_val, 2)
+                                })
+                        
+                        json_results.append({
+                            'class_id': int(box.cls.item()),
+                            'class_name': result.names[int(box.cls.item())],
+                            'confidence': float(box.conf.item()),
+                            'bbox': [round(x,2) for x in box.xyxy.tolist()[0]],
+                            'keypoints': points,  # N个关键点
+                            'skeleton': result.skeleton if hasattr(result, 'skeleton') else []  # 骨架连接关系
+                        })
+                    json.dump(json_results, f, indent=2)
+
+        else:
+            # 默认按目标检测处理
+            for i, result in enumerate(results):
+                # 保存带有检测框的图像
+                result_path = output_dir / f"result_{i}.jpg"
+                result.save(filename=str(result_path))
+
+                # 保存JSON结果
+                json_path = output_dir / f"result_{i}.json"
+                with open(json_path, 'w') as f:
+                    import json
+                    # 将检测结果转换为JSON格式
+                    boxes = result.boxes
+                    json_results = []
+                    for box in boxes:
+                        json_results.append({
+                            'class_id': int(box.cls.item()),
+                            'class_name': result.names[int(box.cls.item())],
+                            'confidence': float(box.conf.item()),
+                            'bbox': [round(x, 2) for x in box.xyxy.tolist()[0]],
+                        })
+                    json.dump(json_results, f, indent=2)
 
         # 更新任务状态为已完成，包含推理时间
         db_task = detection_task.update(db, db_obj=db_task, obj_in={
