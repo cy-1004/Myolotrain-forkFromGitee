@@ -61,13 +61,111 @@ async def create_detection_task(
     try:
         # 导入YOLO模型
         from ultralytics import YOLO
+        import io
+        import sys
+        from contextlib import redirect_stdout, redirect_stderr
 
         # 加载模型
         model_path = db_model.path
         yolo_model = YOLO(model_path)
 
-        # 执行检测
-        results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45))
+        # 捕获YOLO的输出信息
+        # 通过重定向系统级输出来捕获YOLO的详细输出信息
+        import time
+        import sys
+        import tempfile
+                
+        output_log = ""  # 初始化变量
+        temp_filename = None  # 初始化变量
+                
+        import subprocess
+        import threading
+        from io import StringIO
+        import contextlib
+        
+        # 使用subprocess方法来更可靠地捕获所有输出
+        def run_detection_with_capture():
+            # 创建一个线程安全的字符串缓冲区来捕获输出
+            import io
+            old_stdout, old_stderr = sys.stdout, sys.stderr
+            stdout_buffer = io.StringIO()
+            stderr_buffer = io.StringIO()
+            
+            try:
+                # 重定向输出
+                sys.stdout, sys.stderr = stdout_buffer, stderr_buffer
+                
+                # 执行检测
+                results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45), verbose=True)
+                
+                # 获取输出
+                stdout_str = stdout_buffer.getvalue()
+                stderr_str = stderr_buffer.getvalue()
+                
+                return results, stdout_str + stderr_str
+            finally:
+                # 恢复原始输出
+                sys.stdout, sys.stderr = old_stdout, old_stderr
+        
+        # 执行检测并捕获输出
+        results, output_log = run_detection_with_capture()
+                
+        # 如果输出日志为空，使用回退方法测量时间
+        if not output_log.strip():
+            # 只有在日志为空时才执行第二次检测并测量时间
+            start_time = time.time()
+            results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45), verbose=False)
+            execution_time = (time.time() - start_time) * 1000  # 转换为毫秒
+            output_log = f"image 1/1 {input_path}: 480x640 1 object, {execution_time:.1f}ms\nSpeed: 1.0ms preprocess, {execution_time:.1f}ms inference, 1.0ms postprocess per image at shape (1, 3, 480, 640)\n"
+        else:
+            # 如果日志不为空，我们已经获得了结果，不需要再次运行
+            # 但需要确保results变量已设置（已经在上面设置了）
+            pass  # 输出已被成功捕获，无需其他操作
+        
+        # 从输出日志中提取推理时间
+        import re
+        inference_time = 0
+        
+        # 打印日志内容用于调试
+        print(f"Detection output log: {output_log}")
+        
+        # 尝试多种模式匹配推理时间
+        print(f"Looking for inference time in log: {repr(output_log)}")
+        
+        # 模式1: 直接匹配 'X.Xms inference'
+        inference_matches = re.findall(r'(\d+(?:\.\d+)?)ms\s+inference', output_log)
+        print(f"Pattern 1 - Direct 'ms inference' matches: {inference_matches}")
+        
+        if inference_matches:
+            # 取最后一个匹配项（通常是最新的推理时间）
+            try:
+                inference_time = float(inference_matches[-1])
+                print(f"Extracted inference time from direct pattern: {inference_time}ms")
+            except (ValueError, IndexError):
+                print("Failed to convert direct pattern inference time, using default 0")
+                inference_time = 0
+        else:
+            # 模式2: 匹配 'Speed: X.Xms preprocess, Y.Yms inference, Z.Zms postprocess' 格式
+            speed_match = re.search(r'Speed:.*?(\d+(?:\.\d+)?)ms\s+inference', output_log)
+            if speed_match:
+                try:
+                    inference_time = float(speed_match.group(1))
+                    print(f"Extracted inference time from Speed pattern: {inference_time}ms")
+                except (ValueError, IndexError):
+                    print("Failed to convert Speed pattern inference time, using default 0")
+                    inference_time = 0
+            else:
+                # 模式3: 匹配 'preprocess, X.Xms inference' 格式
+                speed_match2 = re.search(r'preprocess,\s*(\d+(?:\.\d+)?)ms\s+inference', output_log)
+                if speed_match2:
+                    try:
+                        inference_time = float(speed_match2.group(1))
+                        print(f"Extracted inference time from preprocess-inference pattern: {inference_time}ms")
+                    except (ValueError, IndexError):
+                        print("Failed to convert preprocess-inference pattern inference time, using default 0")
+                        inference_time = 0
+                else:
+                    print("No inference time patterns matched, using default 0")
 
         # 保存结果
         for i, result in enumerate(results):
@@ -91,9 +189,10 @@ async def create_detection_task(
                     })
                 json.dump(json_results, f, indent=2)
 
-        # 更新任务状态为已完成
+        # 更新任务状态为已完成，包含推理时间
         db_task = detection_task.update(db, db_obj=db_task, obj_in={
-            "status": "completed"
+            "status": "completed",
+            "parameters": {**parameters, "inference_time_ms": inference_time}
         })
     except Exception as e:
         # 如果发生错误，更新任务状态为失败
@@ -187,9 +286,22 @@ def get_detection_result(db: Session, task_id: str) -> Dict[str, Any]:
         except Exception as e:
             print(f"Error loading detection result {json_path}: {e}")
 
+    # 获取推理时间
+    inference_time_ms = 0
+    if hasattr(db_task, 'parameters') and db_task.parameters:
+        try:
+            inference_time_ms = db_task.parameters.get('inference_time_ms', 0)
+            print(f"Retrieved inference time from parameters: {inference_time_ms}ms")
+        except Exception as e:
+            print(f"Error getting inference time from parameters: {e}")
+            inference_time_ms = 0
+    else:
+        print("No parameters found or parameters is None")
+    
     return {
         "status": "completed",
         "message": "Detection completed successfully",
         "results": results,
-        "input_image": str(Path(db_task.input_path).name)
+        "input_image": str(Path(db_task.input_path).name),
+        "inference_time_ms": inference_time_ms
     }

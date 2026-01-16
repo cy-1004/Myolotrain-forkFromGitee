@@ -1,6 +1,8 @@
 # 所有说明文档
 *.md
 
+# 开发测试文件
+dev-test/
 
 # Python
 __pycache__/
@@ -30,6 +32,7 @@ app/static/augmented_datasets/*
 app/static/advanced_augmentations/*
 app/static/processed_images/*
 bak/
+models/
 
 # 数据库
 postgres_data/

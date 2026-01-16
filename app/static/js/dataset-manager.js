@@ -101,7 +101,9 @@ class DatasetManager {
 
                 const tableBody = document.getElementById('datasets-table-body');
                 if (!tableBody) {
-                    console.error('datasets-table-body element not found');
+                    // 如果找不到数据集表格体，说明当前不在数据集管理页面
+                    // 这是正常情况，不记录错误
+                    console.log('datasets-table-body element not found, skipping dataset update');
                     return;
                 }
 

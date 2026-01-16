@@ -350,7 +350,16 @@
         </div>
         <div class="card">
             <div class="card-body">
-                <form id="detection-form">
+                <!-- 对比测试切换开关 -->
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="compare-mode-toggle">
+                        <label class="form-check-label" for="compare-mode-toggle">启用对比测试</label>
+                    </div>
+                </div>
+                
+                <!-- 单模型检测表单 -->
+                <form id="detection-form" class="single-detection-form">
                     <div class="mb-3">
                         <label for="model-task-type" class="form-label">选择任务类型</label>
                         <select class="form-select" id="model-task-type" required>
@@ -385,12 +394,129 @@
                     </div>
                     <button type="submit" class="btn btn-primary">开始检测</button>
                 </form>
+                
+                <!-- 对比测试表单 -->
+                <div id="compare-detection-form" class="compare-detection-form" style="display: none;">
+                    <div class="mb-3">
+                        <label class="form-label">选择任务类型</label>
+                        <select class="form-select" id="compare-model-task-type" required>
+                            <option value="detect">目标检测(Detection)</option>
+                            <option value="segment">实例分割 (Segmentation)</option>
+                            <option value="pose">关键点/姿态估计(Pose)</option>
+                            <option value="obb">旋转框检测(OBB)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-primary text-white">
+                                    <h5 class="mb-0">模型 A</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="model-select-a" class="form-label">选择模型 A</label>
+                                        <select class="form-select" id="model-select-a" required>
+                                            <option value="">请选择模型 A</option>
+                                            <!-- 模型选项将通过JavaScript动态加载 -->
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="conf-threshold-a" class="form-label">置信度阈值 A</label>
+                                        <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.25" id="conf-threshold-a">
+                                        <div class="text-center"><span id="conf-value-a">0.25</span></div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="iou-threshold-a" class="form-label">IoU阈值 A</label>
+                                        <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.45" id="iou-threshold-a">
+                                        <div class="text-center"><span id="iou-value-a">0.45</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header bg-success text-white">
+                                    <h5 class="mb-0">模型 B</h5>
+                                </div>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="model-select-b" class="form-label">选择模型 B</label>
+                                        <select class="form-select" id="model-select-b" required>
+                                            <option value="">请选择模型 B</option>
+                                            <!-- 模型选项将通过JavaScript动态加载 -->
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="conf-threshold-b" class="form-label">置信度阈值 B</label>
+                                        <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.25" id="conf-threshold-b">
+                                        <div class="text-center"><span id="conf-value-b">0.25</span></div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="iou-threshold-b" class="form-label">IoU阈值 B</label>
+                                        <input type="range" class="form-range" min="0.1" max="1.0" step="0.05" value="0.45" id="iou-threshold-b">
+                                        <div class="text-center"><span id="iou-value-b">0.45</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        <label for="compare-detection-file" class="form-label">上传图片或视频（用于两个模型）</label>
+                        <input class="form-control" type="file" id="compare-detection-file" accept="image/*,video/*" required>
+                    </div>
+                    
+                    <button type="button" id="start-compare-detection" class="btn btn-primary">开始对比检测</button>
+                </div>
             </div>
         </div>
+        
+        <!-- 检测结果容器 -->
         <div class="mt-4" id="detection-result" style="display: none;">
             <h3>检测结果</h3>
             <div class="text-center">
                 <div id="result-container"></div>
+            </div>
+        </div>
+        
+        <!-- 对比检测结果容器 -->
+        <div class="mt-4" id="compare-detection-result" style="display: none;">
+            <h3>对比检测结果</h3>
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0">模型 A 结果 <span id="model-a-name"></span></h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="result-container-a"></div>
+                            <div id="timing-info-a" class="mt-2 text-muted"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="card">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0">模型 B 结果 <span id="model-b-name"></span></h5>
+                        </div>
+                        <div class="card-body">
+                            <div id="result-container-b"></div>
+                            <div id="timing-info-b" class="mt-2 text-muted"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 对比总结 -->
+            <div class="card mt-4">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0">检测时间对比</h5>
+                </div>
+                <div class="card-body">
+                    <div id="timing-comparison"></div>
+                </div>
             </div>
         </div>
     </template>

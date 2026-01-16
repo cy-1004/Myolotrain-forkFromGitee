@@ -371,7 +371,7 @@ def split_dataset(
 
                 # 复制标签到临时目录（文件名与图像严格匹配，仅替换后缀为 .txt）
                 src_label_dir = img_path.parent.parent / "labels"
-                label_name = img_path.name.replace(img_path.suffix, '.txt')
+                label_name = img_path.stem + '.txt'
                 label_path = src_label_dir / label_name
                 if label_path.exists():
                     temp_label_path = temp_labels_dir / label_name
@@ -417,7 +417,7 @@ def split_dataset(
                     shutil.copy2(str(temp_img_path), str(target_img_path))
 
                     # 复制标签（使用原始文件名匹配）
-                    label_name = img_path.name.replace(img_path.suffix, '.txt')
+                    label_name = img_path.stem + '.txt'
                     temp_label_path = temp_labels_dir / label_name
                     if temp_label_path.exists():
                         target_label_path = train_labels_dir / label_name
@@ -439,7 +439,7 @@ def split_dataset(
                     shutil.copy2(str(temp_img_path), str(target_img_path))
 
                     # 复制标签（使用原始文件名匹配）
-                    label_name = img_path.name.replace(img_path.suffix, '.txt')
+                    label_name = img_path.stem + '.txt'
                     temp_label_path = temp_labels_dir / label_name
                     if temp_label_path.exists():
                         target_label_path = val_labels_dir / label_name
@@ -462,7 +462,7 @@ def split_dataset(
                     shutil.copy2(str(temp_img_path), str(target_img_path))
 
                     # 复制标签（使用原始文件名匹配）
-                    label_name = img_path.name.replace(img_path.suffix, '.txt')
+                    label_name = img_path.stem + '.txt'
                     temp_label_path = temp_labels_dir / label_name
                     if temp_label_path.exists():
                         target_label_path = test_labels_dir / label_name
