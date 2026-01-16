@@ -21,6 +21,18 @@ Myolotrain是一个可视化管理yolo视觉模型训练的系统，为计算机
 感谢所有开发者的帮助与支持
 
 ### 更新日志：
+
+<details>
+<summary>-20260116  新增模型结构剪枝、对比测试功能，修复部分错误</summary>
+
+> - 1.增加模型测试对比功能，可选择两个同类型模型进行检测并对比；
+> - 2.更新ultralytics，已支持yolo26推理和训练，手动更新：pip install --upgrade ultralytics；
+> - 3.增加模型剪枝功能，支持非结构化剪枝和自定义的结构化剪枝，手动安装：pip install torch-pruning；
+> - 4.修复数据集分割时特定名称的图片会出现名称错误、推理时json格式不全的问题。
+
+</details>
+
+
 <details>
 <summary>-20260106  新增增加实例分割、OBB（旋转框）、Pose（关键点）三个类别的在线标注、训练、推理功能</summary>
 
