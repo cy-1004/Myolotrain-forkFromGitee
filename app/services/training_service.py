@@ -347,7 +347,7 @@ class DeviceManager:
         return device_info
 
 
-def resolve_cpu_cores(requested_cores: int) -> int:
+def resolve_cpu_cores(requested_cores: Optional[int]) -> int:
     """
     统一的CPU核心数裁决逻辑，确保安全有效的CPU使用
     """
@@ -360,8 +360,11 @@ def resolve_cpu_cores(requested_cores: int) -> int:
     # 规则 1：不能超过物理核
     max_safe = physical
 
-    # 规则 2：最少 1 核
-    requested = max(1, int(requested_cores))
+    # 规则 2：最少 1 核，如果requested_cores为None则使用默认值
+    if requested_cores is None:
+        requested = max(1, os.cpu_count() or 1)
+    else:
+        requested = max(1, int(requested_cores))
 
     # 规则 3：最终裁决
     final_cores = min(requested, max_safe)
