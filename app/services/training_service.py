@@ -14,12 +14,33 @@ from pathlib import Path
 from typing import Dict, Any, Optional, List
 from fastapi import HTTPException, Depends
 from sqlalchemy.orm import Session
+import re
 
 from app.core.config import settings
 from app.crud import training_task, dataset, model
 from app.models.training_task import TrainingTask
 from app.schemas.training_task import TrainingTaskCreate, TrainingTaskUpdate
 from app.services.ascend_service import AscendDeviceManager
+
+# UUID验证正则表达式
+UUID_PATTERN = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+
+def is_valid_uuid(uuid_str):
+    """验证字符串是否为有效的UUID格式"""
+    if not isinstance(uuid_str, str):
+        return False
+    return bool(UUID_PATTERN.match(uuid_str))
+
+# 屏蔽 NVIDIA 特有 API
+# 昇腾环境禁用CUDA显存限制函数，改由环境变量或CANN层级控制显存
+try:
+    import torch
+    if not hasattr(torch, 'npu') or not torch.npu.is_available():
+        # 只有在非昇腾环境下才执行CUDA相关的代码
+        torch.cuda.empty_cache()  # 仅在CUDA环境下清理缓存
+except AttributeError:
+    # torch.npu不存在，说明不是昇腾环境
+    pass
 
 # 设置TensorBoard为True
 # 使用Python解释器运行yolo模块，确保使用虚拟环境中的ultralytics
@@ -607,6 +628,13 @@ def get_training_task(db: Session, task_id: str) -> TrainingTask:
     """
     获取训练任务
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     db_task = training_task.get(db, id=task_id)
     if not db_task:
         raise HTTPException(
@@ -625,6 +653,13 @@ def delete_training_task(db: Session, task_id: str) -> TrainingTask:
     """
     删除训练任务
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     db_task = training_task.get(db, id=task_id)
     if not db_task:
         raise HTTPException(
@@ -666,6 +701,13 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     """
     启动训练任务
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     db_task = training_task.get(db, id=task_id)
     if not db_task:
         raise HTTPException(
@@ -932,6 +974,28 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         env['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
         env['ULTRALYTICS_TENSORBOARD'] = '1'
         
+        # 如果是昇腾NPU设备，添加昇腾相关环境变量
+        if device_type == 'ascend' or device_type == 'npu':
+            # 如果用户已经在系统环境里配好了，不覆盖
+            
+            # 1. 处理 ASCEND_HOME (CANN 根目录)
+            if 'ASCEND_HOME' not in os.environ:
+                env['ASCEND_HOME'] = '/usr/local/Ascend/ascend-toolkit/latest'
+            
+            # 2. 处理运行时的关键变量 (LD_LIBRARY_PATH 等通常在用户的 set_env.sh 里)
+            # 提示：如果用户执行过 source /path/to/ascend/set_env.sh，
+            # 那么 os.environ.copy() 已经包含了所有的库路径。
+            
+            # 3. 必须注入的动态变量 (因为这是前端用户在界面选的，必须由代码控制)
+            # 就算用户在系统里设了 DEVICE_ID=0，但如果他在网页选了 NPU 1，
+            # 这里的代码必须强制覆盖为 1，否则点击就没意义了。
+            ascend_idx = str(hardware_config.get('ascend_index', '0'))
+            env['ASCEND_VISIBLE_DEVICES'] = ascend_idx
+            env['DEVICE_ID'] = ascend_idx
+            
+            # 4. 协议实现 (Ultralytics 在 NPU 上建议设置这个)
+            env['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'cpp'
+        
         training_process = subprocess.Popen(
             [sys.executable, script_path],
             stdout=log_file,
@@ -1020,6 +1084,13 @@ def stop_training(db: Session, task_id: str) -> TrainingTask:
     """
     停止训练任务
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     db_task = training_task.get(db, id=task_id)
     if not db_task:
         raise HTTPException(
@@ -1108,6 +1179,13 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     """
     恢复训练任务
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     # 获取训练任务
     db_task = training_task.get(db, id=task_id)
     if not db_task:
@@ -1531,6 +1609,13 @@ def get_training_results(db: Session, task_id: str) -> Dict[str, Any]:
     """
     获取训练结果
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     db_task = training_task.get(db, id=task_id)
     if not db_task:
         raise HTTPException(

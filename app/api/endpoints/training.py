@@ -10,7 +10,7 @@ import torch
 from app.db.session import get_db
 from app.schemas.training_task import TrainingTask
 from app.services import training_service
-from app.services.training_service import DeviceManager
+from app.services.training_service import DeviceManager, is_valid_uuid
 from app.services.ascend_service import AscendDeviceManager
 from app.services import model_service
 
@@ -353,12 +353,22 @@ class GPUMemoryValidationRequest(BaseModel):
     gpu_memory: int
     gpu_index: Optional[int] = 0
 
+# 注意：为了确保路由匹配正确，所有静态路径必须在动态路径之前定义
+# /ascend-info 路由在文件较后部分定义，这里只是注释提醒
+
 @router.get("/{task_id}", response_model=TrainingTask)
 def read_training_task(
     task_id: str,
     db: Session = Depends(get_db)
 ):
     """Get a specific training task by id"""
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     task = training_service.get_training_task(db, task_id=task_id)
     return task
 
@@ -370,6 +380,13 @@ def stop_training(
     """
     Stop a training task
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     return training_service.stop_training(db, task_id=task_id)
 
 @router.delete("/{task_id}")
@@ -381,6 +398,14 @@ def delete_training_task(
     Delete a training task
     """
     from app.crud import training_task
+    
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     task = training_task.get(db, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="训练任务不存在")
@@ -400,6 +425,13 @@ def get_training_logs(
     """
     Get the logs for a training task
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     return training_service.get_training_logs(db, task_id=task_id)
 
 @router.get("/{task_id}/results")
@@ -410,6 +442,13 @@ def get_training_results(
     """
     Get the training results for a training task
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     return training_service.get_training_results(db, task_id=task_id)
 
 @router.get("/{task_id}/tensorboard")
@@ -421,6 +460,13 @@ def get_tensorboard_url(
     """
     Get the TensorBoard URL for a training task
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     # 导入TensorBoard管理器
     from app.services.tensorboard_service import tensorboard_manager
 
@@ -453,6 +499,13 @@ def open_logs_folder(
     """
     打开TensorBoard日志目录
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     # 获取训练任务
     task = training_service.get_training_task(db, task_id=task_id)
 
@@ -502,6 +555,13 @@ def download_training_logs(
     """
     下载训练日志文件
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     # 获取训练任务
     task = training_service.get_training_task(db, task_id=task_id)
 
@@ -706,6 +766,13 @@ def download_model_file(
     """
     下载训练任务的模型文件 (best.pt 或 last.pt)
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     # 获取训练任务
     task = training_service.get_training_task(db, task_id=task_id)
     
@@ -767,6 +834,13 @@ def upload_model_to_management(
     """
     将训练任务的模型文件上传到模型管理
     """
+    # 验证task_id是否为有效的UUID格式
+    if not is_valid_uuid(task_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid task ID format. Expected a valid UUID.",
+        )
+    
     # 获取训练任务
     task = training_service.get_training_task(db, task_id=task_id)
     

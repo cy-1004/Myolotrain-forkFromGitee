@@ -2,6 +2,7 @@
 import os
 import sys
 import platform
+import torch
 from typing import List, Dict, Any, Optional
 
 class AscendDeviceManager:
@@ -176,10 +177,10 @@ class AscendDeviceManager:
                 print(f"\n=== 设置昇腾NPU {ascend_index} 内存限制为 {ascend_memory}MB ===")
 
                 # 设置昇腾NPU内存限制
-                try:
-                    # 这里需要根据实际的昇腾NPU API进行实现
-                    # 以下是示例代码，实际使用时需要替换为真实的API调用
-                    # torch_npu.npu.set_memory_limit(ascend_memory * 1024 * 1024)  # 转换为字节
+                try:                
+                    # 昇腾环境禁用CUDA显存限制函数，使用NPU对应函数
+                    if torch.npu.is_available():
+                        torch.npu.empty_cache()  # 使用 NPU 对应的清理函数
                     device_info['ascend_memory'] = ascend_memory
                 except Exception as e:
                     print(f'\n=== 警告: 无法设置昇腾NPU内存限制: {str(e)} ===')

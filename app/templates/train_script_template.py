@@ -77,8 +77,15 @@ def main():
             # 手动设置GPU或CPU
             os.environ['CUDA_VISIBLE_DEVICES'] = '0' if device_type == 'gpu' else '-1'
 
-        # 如果使用 CPU
-        if device_type == 'cpu':
+        # 处理设备类型
+        if device_type == 'ascend' or device_type == 'npu':
+            try:
+                import torch_npu  # 显式触发 NPU 注册
+                print('\n=== 已激活华为昇腾 NPU 训练模式 ===')
+            except ImportError:
+                print('\n=== 错误: 环境未安装 torch_npu，回退至 CPU ===')
+                device_type = 'cpu'
+        elif device_type == 'cpu':
             print('\n=== 使用 CPU 训练，线程数: ' + str(cpu_cores) + ' ===')
         else:
             if gpu_memory == -1:
@@ -225,8 +232,25 @@ def main():
             train_args['rect'] = True
             print('\n=== 已启用矩形训练模型===')
 
-        # 添加设备参数 - 支持多GPU训练
-        if device_type == 'gpu':
+        # 添加设备参数 - 支持多GPU和NPU训练
+        if device_type == 'ascend' or device_type == 'npu':
+            try:
+                import torch_npu  # 显式触发 NPU 注册
+                train_args['device'] = 'npu' # Ultralytics 会自动映射 npu:0
+                print('\n=== 已激活华为昇腾 NPU 训练模式 ===')
+                
+                # 设置昇腾NPU内存限制
+                if hasattr(torch_npu.npu, 'set_device'):
+                    torch_npu.npu.set_device(0)  # 设置默认NPU设备
+                if hasattr(torch_npu.npu, 'set_compile_mode'):
+                    torch_npu.npu.set_compile_mode(jit_compile=False)  # 关闭JIT编译以提高兼容性
+                # 注意：昇腾环境禁用CUDA显存限制函数，应跳过该逻辑，改由环境变量或CANN层级进行显存管理
+                print('\n=== 昇腾NPU设备配置完成 ===')
+            except ImportError:
+                print('\n=== 错误: 环境未安装 torch_npu，回退至 CPU ===')
+                train_args['device'] = 'cpu'
+                print('\n=== 设置设备为CPU ===')
+        elif device_type == 'gpu':
             # 检查是否有GPU索引环境变量
             gpu_indices = os.environ.get('GPU_INDICES')
             if gpu_indices:
