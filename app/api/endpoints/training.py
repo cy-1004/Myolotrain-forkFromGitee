@@ -353,8 +353,39 @@ class GPUMemoryValidationRequest(BaseModel):
     gpu_memory: int
     gpu_index: Optional[int] = 0
 
-# 注意：为了确保路由匹配正确，所有静态路径必须在动态路径之前定义
-# /ascend-info 路由在文件较后部分定义，这里只是注释提醒
+@router.get("/ascend-info", response_model=Dict)
+def get_ascend_info():
+    """获取所有可用的昇腾NPU信息，用于前端显示和选择"""
+    ascends = AscendDeviceManager.get_available_ascends()
+
+    response = {
+        "has_ascend": len(ascends) > 0,
+        "ascends": [],
+        "current_device": None
+    }
+
+    # 如果有可用的昇腾NPU，添加到响应中
+    if ascends:
+        for i, ascend in enumerate(ascends):
+            # 添加display_name字段用于显示
+            ascend_info = {
+                "index": ascend.get("index", i),
+                "name": ascend.get("name", f"Ascend NPU {i}"),
+                "display_name": f"NPU {i}: {ascend.get('name', 'Unknown')}",
+                "total_memory": ascend.get("memory", 0),
+                "used_memory": ascend.get("memory_used", 0),
+                "free_memory": ascend.get("memory_free", 0),
+                "recommended_memory": ascend.get("recommended_memory", 0)
+            }
+            response["ascends"].append(ascend_info)
+
+        # 设置当前设备为第一个昇腾NPU
+        response["current_device"] = {
+            "index": ascends[0].get("index", 0),
+            "name": ascends[0].get("name", "Unknown")
+        }
+
+    return response
 
 @router.get("/{task_id}", response_model=TrainingTask)
 def read_training_task(
@@ -722,40 +753,6 @@ def validate_ascend_memory(request: AscendMemoryValidationRequest):
         "has_ascend": has_ascend,
         "ascend_index": request.ascend_index
     }
-
-@router.get("/ascend-info", response_model=Dict)
-def get_ascend_info():
-    """获取所有可用的昇腾NPU信息，用于前端显示和选择"""
-    ascends = AscendDeviceManager.get_available_ascends()
-
-    response = {
-        "has_ascend": len(ascends) > 0,
-        "ascends": [],
-        "current_device": None
-    }
-
-    # 如果有可用的昇腾NPU，添加到响应中
-    if ascends:
-        for i, ascend in enumerate(ascends):
-            # 添加display_name字段用于显示
-            ascend_info = {
-                "index": ascend.get("index", i),
-                "name": ascend.get("name", f"Ascend NPU {i}"),
-                "display_name": f"NPU {i}: {ascend.get('name', 'Unknown')}",
-                "total_memory": ascend.get("memory", 0),
-                "used_memory": ascend.get("memory_used", 0),
-                "free_memory": ascend.get("memory_free", 0),
-                "recommended_memory": ascend.get("recommended_memory", 0)
-            }
-            response["ascends"].append(ascend_info)
-
-        # 设置当前设备为第一个昇腾NPU
-        response["current_device"] = {
-            "index": ascends[0].get("index", 0),
-            "name": ascends[0].get("name", "Unknown")
-        }
-
-    return response
 
 @router.get("/{task_id}/download-model/{model_type}")
 def download_model_file(
