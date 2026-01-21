@@ -60,13 +60,18 @@ async def sync_detect(
 
         # Import YOLO model - suppress lint warning
         from ultralytics import YOLO  # type: ignore
+        import torch
+        
+        # 自动检测设备：如果有CUDA则使用GPU，否则使用CPU
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"Sync detection using device: {device}")
 
         # Load model
         model_path = str(db_model.path)  # Convert Column to string
         yolo_model = YOLO(model_path)
 
-        # 检测临时文件
-        results = yolo_model(str(temp_path), conf=conf_thres, iou=iou_thres)
+        # 检测临时文件 - 指定设备
+        results = yolo_model(str(temp_path), conf=conf_thres, iou=iou_thres, device=device)
 
         # Collect results
         all_detections = []

@@ -64,7 +64,12 @@ async def create_detection_task(
         import io
         import sys
         from contextlib import redirect_stdout, redirect_stderr
-
+        import torch
+        
+        # 自动检测设备：如果有CUDA则使用GPU，否则使用CPU
+        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        print(f"Detection using device: {device}")
+        
         # 加载模型
         model_path = db_model.path
         yolo_model = YOLO(model_path)
@@ -95,8 +100,8 @@ async def create_detection_task(
                 # 重定向输出
                 sys.stdout, sys.stderr = stdout_buffer, stderr_buffer
                 
-                # 执行检测
-                results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45), verbose=True)
+                # 执行检测 - 指定设备
+                results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45), device=device, verbose=True)
                 
                 # 获取输出
                 stdout_str = stdout_buffer.getvalue()
@@ -114,7 +119,7 @@ async def create_detection_task(
         if not output_log.strip():
             # 只有在日志为空时才执行第二次检测并测量时间
             start_time = time.time()
-            results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45), verbose=False)
+            results = yolo_model(str(input_path), conf=parameters.get('conf_thres', 0.25), iou=parameters.get('iou_thres', 0.45), device=device, verbose=False)
             execution_time = (time.time() - start_time) * 1000  # 转换为毫秒
             output_log = f"image 1/1 {input_path}: 480x640 1 object, {execution_time:.1f}ms\nSpeed: 1.0ms preprocess, {execution_time:.1f}ms inference, 1.0ms postprocess per image at shape (1, 3, 480, 640)\n"
         else:
