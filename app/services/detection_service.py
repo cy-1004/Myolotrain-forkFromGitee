@@ -28,6 +28,15 @@ async def create_detection_task(
             detail="Model not found",
         )
 
+    # Validate file type - only allow image files
+    allowed_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif', '.webp'}
+    file_extension = Path(file.filename).suffix.lower()
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的文件类型: {file_extension}. 只允许上传图片文件 ({', '.join(allowed_extensions)})"
+        )
+
     # Generate unique ID for the detection task
     task_id = str(uuid.uuid4())
 
@@ -38,7 +47,6 @@ async def create_detection_task(
     os.makedirs(output_dir, exist_ok=True)
 
     # Save the uploaded file
-    file_extension = Path(file.filename).suffix
     input_path = input_dir / f"input{file_extension}"
     with open(input_path, "wb") as buffer:
         content = await file.read()

@@ -1166,6 +1166,9 @@ class OnlineAnnotation {
 
                 Promise.all(projectPromises)
                     .then(statsArray => {
+                        // 清空列表以避免重复添加
+                        projectsList.innerHTML = '';
+                        
                         filteredProjects.forEach((project, index) => {
                             const stats = statsArray[index];
                             const projectTypeText = this.getProjectTypeText(project.project_type);
@@ -1190,6 +1193,9 @@ class OnlineAnnotation {
                     })
                     .catch(error => {
                         console.error('Error getting project stats:', error);
+                        // 清空列表以避免重复添加
+                        projectsList.innerHTML = '';
+                        
                         // 即使获取统计信息失败，也要显示项目列表（使用0作为默认值）
                         filteredProjects.forEach(project => {
                             const projectTypeText = this.getProjectTypeText(project.project_type);
@@ -1224,9 +1230,15 @@ class OnlineAnnotation {
     
     // 绑定项目复选框事件
     bindProjectCheckboxes() {
+        // 先移除所有已存在的change事件监听器
         const checkboxes = document.querySelectorAll('.project-checkbox');
         checkboxes.forEach(checkbox => {
-            checkbox.addEventListener('change', () => {
+            // 移除之前的事件监听器，然后添加新的
+            const newCheckbox = checkbox.cloneNode(true);
+            checkbox.parentNode.replaceChild(newCheckbox, checkbox);
+            
+            // 为新元素绑定事件
+            newCheckbox.addEventListener('change', () => {
                 this.validateProjectSelection();
             });
         });
