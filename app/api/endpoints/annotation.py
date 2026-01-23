@@ -684,6 +684,30 @@ def mark_all_completed(
         raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
 
 
+# 扩展数据功能
+@router.post("/projects/{project_id}/expand-data")
+async def expand_annotation_project(
+    project_id: UUID,
+    import_original_annotations: bool = Form(...),
+    zip_file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """为现有标注项目扩展数据"""
+    project = annotation_project.get(db, id=project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目未找到")
+    
+    service = AnnotationService()
+    result = service.expand_project_data(
+        db=db,
+        project_id=project_id,
+        import_original_annotations=import_original_annotations,
+        zip_file=zip_file
+    )
+    
+    return result
+
+
 @router.post("/merge-projects")
 def merge_annotation_projects(
     request: MergeProjectsRequest,

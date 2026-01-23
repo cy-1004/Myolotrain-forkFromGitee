@@ -67,6 +67,7 @@ class OnlineAnnotation {
                                         <button class="btn btn-sm btn-info" onclick="onlineAnnotation.scanProjectImages('${project.id}')">扫描图片</button>
                                         <button class="btn btn-sm btn-success" onclick="onlineAnnotation.exportAnnotations('${project.id}')">导出标注</button>
                                         <button class="btn btn-sm btn-warning" onclick="onlineAnnotation.exportToDataset('${project.id}')">导出为数据集</button>
+                                        <button class="btn btn-sm btn-secondary" onclick="onlineAnnotation.showExpandDataModal('${project.id}', '${project.name}')">扩充数据</button>
                                         <button class="btn btn-sm btn-danger" onclick="onlineAnnotation.deleteAnnotationProject('${project.id}')">删除</button>
                                     </div>
                                 </td>
@@ -92,6 +93,7 @@ class OnlineAnnotation {
                                         <button class="btn btn-sm btn-info" onclick="onlineAnnotation.scanProjectImages('${project.id}')">扫描图片</button>
                                         <button class="btn btn-sm btn-success" onclick="onlineAnnotation.exportAnnotations('${project.id}')">导出</button>
                                         <button class="btn btn-sm btn-warning" onclick="onlineAnnotation.exportToDataset('${project.id}')">导出为数据集</button>
+                                        <button class="btn btn-sm btn-secondary" onclick="onlineAnnotation.showExpandDataModal('${project.id}', '${project.name}')">扩充数据</button>
                                         <button class="btn btn-sm btn-danger" onclick="onlineAnnotation.deleteAnnotationProject('${project.id}')">删除</button>
                                     </div>
                                 </td>
@@ -1465,6 +1467,144 @@ class OnlineAnnotation {
             modalSubmit.disabled = false;
             modalSubmit.textContent = '开始合并';
         });
+    }
+    
+    // 显示扩充数据模态框
+    showExpandDataModal(projectId, projectName) {
+        const modalTitle = document.querySelector('.modal-title');
+        const modalBody = document.querySelector('.modal-body');
+        const modalSubmit = document.getElementById('modalSubmit');
+
+        modalTitle.textContent = `为项目扩充数据 - ${projectName}`;
+
+        // 创建扩充数据表单HTML
+        const expandFormHtml = `
+            <form id="expand-data-form">
+                <div class="mb-3">
+                    <label for="expand-zip-file" class="form-label">上传ZIP文件</label>
+                    <input type="file" class="form-control" id="expand-zip-file" accept=".zip" required>
+                    <div class="form-text">支持ZIP格式，包含图片和可选的标注文件</div>
+                </div>
+                
+                <div class="mb-3 form-check">
+                    <input type="checkbox" class="form-check-input" id="expand-import-original-annotations">
+                    <label class="form-check-label" for="expand-import-original-annotations">
+                        保留原标注（如果ZIP中包含标注文件）
+                    </label>
+                </div>
+                
+                <div class="mb-3">
+                    <div class="progress d-none" id="expand-progress-container">
+                        <div class="progress-bar" role="progressbar" style="width: 0%" id="expand-progress-bar"></div>
+                    </div>
+                    <div class="text-center d-none" id="expand-status"></div>
+                </div>
+            </form>
+        `;
+        
+        modalBody.innerHTML = expandFormHtml;
+        
+        // 绑定提交事件
+        const submitButton = document.getElementById('modalSubmit');
+        submitButton.textContent = '开始扩充';
+        submitButton.onclick = () => this.expandProjectData(projectId);
+        
+        // 显示模态框
+        const modalElement = document.getElementById('mainModal');
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+    }
+    
+    // 扩展项目数据
+    expandProjectData(projectId) {
+        const zipFileInput = document.getElementById('expand-zip-file');
+        const importOriginalAnnotationsCheckbox = document.getElementById('expand-import-original-annotations');
+        const progressContainer = document.getElementById('expand-progress-container');
+        const progressBar = document.getElementById('expand-progress-bar');
+        const statusDiv = document.getElementById('expand-status');
+        const modalSubmit = document.getElementById('modalSubmit');
+        
+        const zipFile = zipFileInput.files[0];
+        const importOriginalAnnotations = importOriginalAnnotationsCheckbox.checked;
+        
+        if (!zipFile) {
+            alert('请选择ZIP文件');
+            return;
+        }
+        
+        if (!zipFile.name.toLowerCase().endsWith('.zip')) {
+            alert('请选择ZIP格式的文件');
+            return;
+        }
+        
+        // 显示进度
+        progressContainer.classList.remove('d-none');
+        statusDiv.classList.remove('d-none');
+        modalSubmit.disabled = true;
+        modalSubmit.textContent = '扩充中...';
+        
+        const formData = new FormData();
+        formData.append('zip_file', zipFile);
+        formData.append('import_original_annotations', importOriginalAnnotations);
+        
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_URL}/annotation/projects/${projectId}/expand-data`, true);
+        
+        xhr.upload.onprogress = function(e) {
+            if (e.lengthComputable) {
+                const percentComplete = (e.loaded / e.total) * 100;
+                progressBar.style.width = percentComplete + '%';
+                progressBar.textContent = Math.round(percentComplete) + '%';
+                statusDiv.textContent = '上传中...';
+            }
+        };
+        
+        xhr.onload = function() {
+            // 隐藏进度
+            progressContainer.classList.add('d-none');
+            statusDiv.classList.add('d-none');
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '开始扩充';
+            
+            if (xhr.status === 200) {
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    alert(response.message || '项目数据扩充成功！');
+                    
+                    // 关闭模态框
+                    const modalElement = document.getElementById('mainModal');
+                    const modal = bootstrap.Modal.getInstance(modalElement);
+                    if (modal) {
+                        modal.hide();
+                    }
+                    
+                    // 刷新项目列表
+                    onlineAnnotation.loadAnnotationProjects();
+                } catch (e) {
+                    console.error('解析响应失败:', e);
+                    alert('扩充成功，但解析响应失败');
+                }
+            } else {
+                try {
+                    const error = JSON.parse(xhr.responseText);
+                    alert('扩充失败: ' + (error.detail || '未知错误'));
+                } catch (e) {
+                    alert('扩充失败: ' + xhr.statusText);
+                }
+            }
+        };
+        
+        xhr.onerror = function() {
+            // 隐藏进度
+            progressContainer.classList.add('d-none');
+            statusDiv.classList.add('d-none');
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '开始扩充';
+            
+            alert('请求失败，请检查网络连接');
+        };
+        
+        xhr.send(formData);
     }
 }
 

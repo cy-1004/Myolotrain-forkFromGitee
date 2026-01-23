@@ -1687,3 +1687,151 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                         self.save_annotations(db, img.id, annotations)
                 except Exception as e:
                     logging.error(f"处理 {img.image_name} 的标注时出错: {str(e)}")
+
+    def expand_project_data(
+        self,
+        db: Session,
+        project_id: UUID,
+        import_original_annotations: bool,
+        zip_file: UploadFile
+    ) -> Dict[str, Any]:
+        """为现有项目扩展数据"""
+        # 获取项目信息
+        project = annotation_project.get(db, id=project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="项目未找到")
+        
+        # 获取项目目录
+        project_dir = Path(project.image_directory) if project.image_directory else None
+        if not project_dir:
+            raise HTTPException(status_code=400, detail="项目目录未设置")
+        
+        # 确保是images目录，如果不是，则添加images子目录
+        if project_dir.name != "images":
+            images_dir = project_dir / "images"
+            if not images_dir.exists():
+                images_dir = project_dir  # 如果不存在images子目录，就使用当前目录
+        else:
+            images_dir = project_dir
+        
+        # 如果不存在，创建labels目录用于存放标注文件
+        labels_dir = images_dir.parent / "labels" if images_dir.name == "images" else images_dir / "labels"
+        labels_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 保存并解压ZIP文件
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.zip') as temp_file:
+            content = zip_file.file.read()
+            temp_file.write(content)
+            temp_file_path = temp_file.name
+        
+        # 统计变量
+        extracted_images_count = 0
+        extracted_labels_count = 0
+        
+        try:
+            with zipfile.ZipFile(temp_file_path, 'r') as zip_ref:
+                # 支持的图片格式
+                image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
+                label_extensions = {'.txt'}  # 标注文件格式
+                
+                # 检查ZIP中的顶级目录结构
+                root_items = set()
+                for file_info in zip_ref.filelist:
+                    if not file_info.is_dir():
+                        file_path = Path(file_info.filename)
+                        # 获取顶级目录或文件
+                        if len(file_path.parts) > 0:
+                            root_items.add(file_path.parts[0])
+                    else:
+                        dir_path = Path(file_info.filename)
+                        if len(dir_path.parts) > 0:
+                            root_items.add(dir_path.parts[0])
+                
+                # 检查是否是标准结构（images、labels）
+                has_standard_structure = (
+                    'images' in root_items or 'Images' in root_items or 
+                    'img' in root_items or 'IMG' in root_items
+                ) and (
+                    'labels' in root_items or 'Labels' in root_items or 
+                    'ann' in root_items or 'Ann' in root_items
+                )
+                
+                for file_info in zip_ref.filelist:
+                    if not file_info.is_dir():
+                        file_path = Path(file_info.filename)
+                        
+                        if has_standard_structure:
+                            # 如果是标准结构，根据目录分类处理
+                            if file_path.parts[0] in ['images', 'Images', 'img', 'IMG']:
+                                # 提取到images目录，但要去掉顶级目录前缀
+                                relative_path = Path(*file_path.parts[1:])  # 去掉第一个部分（images/）
+                                if relative_path:  # 确保有剩余路径
+                                    target_path = images_dir / relative_path
+                                    # 确保目标目录存在
+                                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                                    # 提取文件到目标路径
+                                    with zip_ref.open(file_info) as source:
+                                        with open(target_path, 'wb') as target:
+                                            target.write(source.read())
+                                extracted_images_count += 1
+                            elif file_path.parts[0] in ['labels', 'Labels', 'ann', 'Ann']:
+                                # 提取到labels目录，但要去掉顶级目录前缀
+                                relative_path = Path(*file_path.parts[1:])  # 去掉第一个部分（labels/）
+                                if relative_path:  # 确保有剩余路径
+                                    target_path = labels_dir / relative_path
+                                    # 确保目标目录存在
+                                    target_path.parent.mkdir(parents=True, exist_ok=True)
+                                    # 提取文件到目标路径
+                                    with zip_ref.open(file_info) as source:
+                                        with open(target_path, 'wb') as target:
+                                            target.write(source.read())
+                                extracted_labels_count += 1
+                            elif file_path.suffix.lower() in image_extensions:
+                                # 如果不在标准目录中，但扩展名是图片，也提取到images目录
+                                zip_ref.extract(file_info, images_dir)
+                                extracted_images_count += 1
+                            elif file_path.suffix.lower() in label_extensions:
+                                # 如果不在标准目录中，但扩展名是标签，也提取到labels目录
+                                if import_original_annotations:
+                                    zip_ref.extract(file_info, labels_dir)
+                                    extracted_labels_count += 1
+                        else:
+                            # 如果不是标准结构，按扩展名分类
+                            if file_path.suffix.lower() in image_extensions:
+                                # 提取图片文件到images目录
+                                zip_ref.extract(file_info, images_dir)
+                                extracted_images_count += 1
+                            elif file_path.suffix.lower() in label_extensions:
+                                # 如果开启了导入原标注，提取标注文件到labels目录
+                                if import_original_annotations:
+                                    zip_ref.extract(file_info, labels_dir)
+                                    extracted_labels_count += 1
+        
+        finally:
+            os.unlink(temp_file_path)
+        
+        if extracted_images_count == 0:
+            raise HTTPException(status_code=400, detail="ZIP文件中没有找到支持的图片文件")
+        
+        # 扫描图片目录，更新数据库记录
+        self._scan_images(db, project, str(images_dir))
+        
+        # 如果开启了导入原标注，执行导入
+        import_result = None
+        if import_original_annotations:
+            import_result = self._import_existing_annotations_with_stats(db, project)
+        
+        # 返回结果
+        result = {
+            "message": f"成功扩展项目数据，添加了 {extracted_images_count} 张图片",
+            "added_images_count": extracted_images_count,
+            "added_labels_count": extracted_labels_count,
+            "import_original_annotations": import_original_annotations,
+            "project_id": project_id,
+            "project_name": project.name
+        }
+        
+        if import_result:
+            result["import_result"] = import_result
+        
+        return result
