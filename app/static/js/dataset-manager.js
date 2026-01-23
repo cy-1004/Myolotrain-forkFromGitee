@@ -1465,6 +1465,10 @@ class DatasetManager {
                     progressBar.textContent = '100%';
                     statusContainer.textContent = '导入成功！正在刷新数据集列表...';
 
+                    // 重置按钮状态
+                    modalSubmit.disabled = false;
+                    modalSubmit.textContent = '确定';
+                    
                     // 关闭模态框
                     modal.hide();
 
@@ -1669,6 +1673,11 @@ class DatasetManager {
             console.log('Import successful:', result);
             // 清除localStorage中的选择
             localStorage.removeItem('selectedDirectory');
+            // 重置按钮状态
+            if (modalSubmit) {
+                modalSubmit.disabled = false;
+                modalSubmit.textContent = '确定';
+            }
             // 关闭模态框
             const mainModal = bootstrap.Modal.getInstance(document.getElementById('mainModal'));
             if (mainModal) {
@@ -1846,6 +1855,12 @@ class DatasetManager {
             }
         })
         .then(result => {
+            // 重置按钮状态
+            const modalSubmit = document.getElementById('modalSubmit');
+            if (modalSubmit) {
+                modalSubmit.disabled = false;
+                modalSubmit.textContent = '确定';
+            }
             // 关闭模态框
             modal.hide();
             // 重新加载数据集列表

@@ -1,14 +1,16 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Dict, Any
 from uuid import UUID
+from app.core.config import settings
 from app.db.session import get_db
 from app.crud import annotation_project, image_annotation
 from app.crud.crud_model import model
 from app.schemas.annotation import (
     AnnotationProjectCreate, AnnotationProjectResponse, AnnotationProjectUpdate,
     ImageAnnotationCreate, ImageAnnotation, ImageAnnotationUpdate,
-    ProjectStats, ExportRequest
+    ProjectStats, ExportRequest, MergeProjectsRequest
 )
 from app.services.annotation_service import AnnotationService
 
@@ -26,7 +28,40 @@ def create_annotation_project(
 ):
     """创建标注项目"""
     service = AnnotationService()
-    return service.create_project(db=db, project_data=project)
+    
+    # 提取import_original_annotations并从project中排除
+    import_original_annotations = getattr(project, 'import_original_annotations', False)
+    
+    # 创建项目数据字典，排除import_original_annotations
+    project_data_dict = project.model_dump()
+    project_data_dict.pop('import_original_annotations', None)
+    
+    # 创建项目
+    project_data = AnnotationProjectCreate(**project_data_dict)
+    proj = service.create_project(db=db, project_data=project_data)
+    
+    # 如果需要导入原标注，则执行导入
+    if import_original_annotations:
+        import_result = service._import_existing_annotations_with_stats(db, proj)
+        # 构建完整的响应数据，确保所有字段都正确序列化
+        result = {
+            'id': proj.id,
+            'name': proj.name,
+            'description': proj.description,
+            'dataset_id': proj.dataset_id,
+            'classes': proj.classes,
+            'class_keypoints': proj.class_keypoints,
+            'image_directory': proj.image_directory,
+            'project_type': proj.project_type,
+            'import_original_annotations': proj.import_original_annotations,
+            'created_at': proj.created_at,
+            'updated_at': proj.updated_at,
+            'status': proj.status,
+        }
+        result['import_result'] = import_result
+        return result
+    else:
+        return proj
 
 @router.post("/projects/from-directory", response_model=AnnotationProjectResponse)
 def create_project_from_directory(
@@ -35,9 +70,11 @@ def create_project_from_directory(
     project_type: str = Body("detection"),
     classes: List[str] = Body(...),
     image_directory: str = Body(...),
+    import_original_annotations: bool = Body(False),
     db: Session = Depends(get_db)
 ):
     """从目录创建标注项目"""
+    # 创建项目数据对象，不包含import_original_annotations
     project_data = AnnotationProjectCreate(
         name=name,
         description=description,
@@ -47,7 +84,31 @@ def create_project_from_directory(
     )
     
     service = AnnotationService()
-    return service.create_project(db=db, project_data=project_data)
+    # 调用服务方法，传入额外的导入标志
+    project = service.create_project(db=db, project_data=project_data)
+    
+    # 如果需要导入原标注，则执行导入
+    if import_original_annotations:
+        import_result = service._import_existing_annotations_with_stats(db, project)
+        # 构建完整的响应数据，确保所有字段都正确序列化
+        result = {
+            'id': project.id,
+            'name': project.name,
+            'description': project.description,
+            'dataset_id': project.dataset_id,
+            'classes': project.classes,
+            'class_keypoints': project.class_keypoints,
+            'image_directory': project.image_directory,
+            'project_type': project.project_type,
+            'import_original_annotations': project.import_original_annotations,
+            'created_at': project.created_at,
+            'updated_at': project.updated_at,
+            'status': project.status,
+        }
+        result['import_result'] = import_result
+        return result
+    else:
+        return project
 
 @router.get("/projects/")
 def get_annotation_projects(
@@ -88,6 +149,25 @@ def delete_annotation_project(
     project = annotation_project.get(db, id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
+    
+    # 获取项目目录并删除实际文件
+    import shutil
+    import os
+    from pathlib import Path
+    
+    if project.image_directory:
+        project_dir = Path(project.image_directory)
+        # 如果image_directory指向的是项目的images子目录，则获取父目录
+        if project_dir.name == "images":
+            project_dir = project_dir.parent
+        if project_dir.exists() and str(project_dir).startswith(str(settings.STATIC_DIR / "annotations")):
+            # 确保只删除annotations目录下的项目目录，防止误删其他目录
+            try:
+                shutil.rmtree(project_dir)
+                logging.info(f"成功删除项目目录: {project_dir}")
+            except Exception as e:
+                logging.error(f"删除项目目录失败 {project_dir}: {str(e)}")
+    
     annotation_project.remove(db, id=project_id)
     return {"message": "项目删除成功"}
 
@@ -203,18 +283,28 @@ def create_project_with_images(
     name: str = Form(...),
     description: str = Form(""),
     project_type: str = Form("detection"),
-    classes: str = Form(...),
+    classes: str = Form(None),  # 可选参数，因为当import_original_annotations为True时可能不需要
     class_keypoints: str = Form(None),  # 新增关键点配置参数
+    import_original_annotations: bool = Form(False),
     images_zip: UploadFile = File(...),
     db: Session = Depends(get_db)
 ):
     """创建标注项目并上传图片ZIP"""
     import json
     
-    try:
-        classes_list = json.loads(classes)
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="类别数据格式错误")
+    # 根据import_original_annotations决定是否需要classes
+    if not import_original_annotations:
+        # 如果没勾选导入原标注，则classes是必需的
+        if not classes:
+            raise HTTPException(status_code=400, detail="类别列表是必需的")
+        
+        try:
+            classes_list = json.loads(classes)
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="类别数据格式错误")
+    else:
+        # 如果勾选了导入原标注，classes将从ZIP文件中解析
+        classes_list = []
     
     # 解析关键点配置
     class_keypoints_config = None
@@ -228,13 +318,14 @@ def create_project_with_images(
         raise HTTPException(status_code=400, detail="只支持ZIP文件")
     
     service = AnnotationService()
-    project = service.create_project_with_zip(
+    project = service.create_project_with_zip_and_import(
         db=db,
         name=name,
         description=description,
         project_type=project_type,
         classes=classes_list,
         class_keypoints=class_keypoints_config,
+        import_original_annotations=import_original_annotations,
         zip_file=images_zip
     )
     
@@ -262,6 +353,7 @@ def create_project_with_folder(
     description: str = Form(""),
     project_type: str = Form("detection"),
     classes: str = Form(...),
+    import_original_annotations: bool = Form(False),
     images: List[UploadFile] = File(...),
     db: Session = Depends(get_db)
 ):
@@ -296,12 +388,13 @@ def create_project_with_folder(
             zip_upload = UploadFile(filename=f"{name}.zip", file=f)
             
             service = AnnotationService()
-            project = service.create_project_with_zip(
+            project = service.create_project_with_zip_and_import(
                 db=db,
                 name=name,
                 description=description,
                 project_type=project_type,
                 classes=classes_list,
+                import_original_annotations=import_original_annotations,
                 zip_file=zip_upload
             )
             
@@ -455,20 +548,50 @@ def get_image_file(
     
     # 构建图片文件路径
     image_path_str = str(image.image_path) if image.image_path is not None else ""
+    image_name_str = str(image.image_name) if image.image_name is not None else ""
+    image_directory_str = str(project.image_directory) if project.image_directory is not None else ""
+    
+    logging.info(f"get_image_file: image_path={image_path_str}, image_name={image_name_str}, project_directory={image_directory_str}")
+    
+    image_file_path = None
+    
     if image_path_str.startswith('datasets/'):
         # 如果路径已经包含datasets，直接使用
         image_file_path = Path("app/static") / image_path_str
+        logging.info(f"get_image_file: Using datasets path: {image_file_path}")
     elif Path(image_path_str).is_absolute():
         # 如果是绝对路径，直接使用
         image_file_path = Path(image_path_str)
+        logging.info(f"get_image_file: Using absolute path: {image_file_path}")
     else:
-        # 否则使用项目的image_directory
-        image_directory_str = str(project.image_directory) if project.image_directory is not None else ""
-        image_name_str = str(image.image_name) if image.image_name is not None else ""
-        image_file_path = Path(image_directory_str) / image_name_str
+        # 首先检查image_path是否只包含文件名（没有路径分隔符）
+        if Path(image_path_str).name == image_path_str:
+            # 如果image_path只包含文件名，则使用项目的image_directory和image_path组合
+            # 注意：这里使用image_path而不是image_name，因为两者应该是相同的
+            if image_directory_str and image_path_str:
+                image_file_path = Path(image_directory_str) / image_path_str
+                logging.info(f"get_image_file: Using project_dir + image_path: {image_file_path}")
+        else:
+            # 否则先尝试直接使用image_path作为相对路径
+            image_file_path = Path(image_path_str)
+            logging.info(f"get_image_file: Using direct image_path: {image_file_path}")
+            
+        # 如果文件不存在，尝试使用项目的image_directory和image_path组合
+        if not image_file_path or not image_file_path.exists():
+            image_path_str_fallback = str(image.image_name) if image.image_name is not None else ""
+            if image_directory_str and image_path_str_fallback:
+                fallback_path = Path(image_directory_str) / image_path_str_fallback
+                logging.info(f"get_image_file: Trying fallback path: {fallback_path}")
+                if fallback_path.exists():
+                    image_file_path = fallback_path
+                else:
+                    logging.info(f"get_image_file: Fallback path does not exist")
     
-    if not image_file_path.exists():
+    if not image_file_path or not image_file_path.exists():
+        logging.info(f"get_image_file: Final path does not exist: {image_file_path}")
         raise HTTPException(status_code=404, detail="图片文件不存在")
+    else:
+        logging.info(f"get_image_file: Final path exists: {image_file_path}")
     
     return FileResponse(image_file_path)
 
@@ -559,4 +682,20 @@ def mark_all_completed(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
+
+
+@router.post("/merge-projects")
+def merge_annotation_projects(
+    request: MergeProjectsRequest,
+    db: Session = Depends(get_db)
+):
+    """合并多个标注项目"""
+    service = AnnotationService()
+    return service.merge_projects(
+        db=db,
+        target_project_name=request.target_project_name,
+        source_project_ids=request.source_project_ids,
+        delete_source_projects=request.delete_source_projects,
+        duplicate_handling=request.duplicate_handling
+    )
 

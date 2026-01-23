@@ -80,6 +80,7 @@ class AnnotationProjectBase(BaseModel):
 
 class AnnotationProjectCreate(AnnotationProjectBase):
     dataset_id: Optional[UUID] = None
+    import_original_annotations: Optional[bool] = False
 
 class AnnotationProjectUpdate(BaseModel):
     name: Optional[str] = None
@@ -141,3 +142,10 @@ class ExportRequest(BaseModel):
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     test_ratio: float = 0.15
+
+
+class MergeProjectsRequest(BaseModel):
+    target_project_name: str
+    source_project_ids: List[UUID]
+    delete_source_projects: bool = False
+    duplicate_handling: str = 'rename'  # rename, overwrite, skip

@@ -2203,7 +2203,10 @@
                 <p class="lead">创建和管理标注项目，进行图像标注</p>
             </div>
             <div class="col-auto">
-                <button class="btn btn-primary" id="create-annotation-project-btn">创建标注项目</button>
+                <div class="btn-group">
+                    <button class="btn btn-primary" id="create-annotation-project-btn">创建标注项目</button>
+                    <button class="btn btn-success" id="merge-annotation-projects-btn">合并标注项目</button>
+                </div>
             </div>
         </div>
 
@@ -2404,6 +2407,74 @@
         </div>
     </template>
 
+    <!-- 合并标注项目模态框内容 -->
+    <template id="merge-annotation-projects-template">
+        <form id="merge-annotation-projects-form">
+            <div class="mb-3">
+                <label for="target-project-name" class="form-label">新项目名称</label>
+                <input type="text" class="form-control" id="target-project-name" placeholder="请输入合并后的新项目名称" required>
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">合并项目类型筛选</label>
+                <div class="row">
+                    <div class="col-md-6">
+                        <select class="form-select" id="project-type-filter">
+                            <option value="">全部类型</option>
+                            <option value="detection">目标检测</option>
+                            <option value="segmentation">实例分割</option>
+                            <option value="obb">旋转框</option>
+                            <option value="pose">关键点/姿态估计</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <button type="button" class="btn btn-outline-secondary w-100" id="refresh-projects-btn">
+                            <i class="bi bi-arrow-repeat"></i> 刷新项目列表
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">选择要合并的项目</label>
+                <div class="form-text mb-2">必须选择相同类型的项目进行合并</div>
+                <div class="card">
+                    <div class="card-body" style="max-height: 300px; overflow-y: auto;">
+                        <div id="projects-list">
+                            <!-- 项目列表将通过JavaScript动态加载 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" id="delete-source-projects">
+                    <label class="form-check-label" for="delete-source-projects">
+                        删除被合并的项目（剪切模式）
+                    </label>
+                </div>
+                <div class="form-text">
+                    如果勾选，则合并后删除被合并的原始项目；如果不勾选，则保留原始项目（复制模式）
+                </div>
+                
+                <div class="mb-3">
+                    <label class="form-label">重名文件处理方法</label>
+                    <select class="form-select" id="duplicate-handling">
+                        <option value="rename" selected>改名（自动添加数字后缀）</option>
+                        <option value="overwrite">覆盖（替换已有文件，以基准项目为准）</option>
+                        <option value="skip">跳过（不合并重名文件）</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div class="alert alert-info" id="merge-summary" style="display: none;">
+                <strong>合并摘要：</strong>
+                <div id="merge-summary-content"></div>
+            </div>
+        </form>
+    </template>
+
     <!-- 创建标注项目模态框内容 -->
     <template id="create-annotation-project-template">
         <form id="create-annotation-project-form">
@@ -2471,6 +2542,16 @@
                 <label for="annotation-classes" class="form-label">类别列表</label>
                 <textarea class="form-control" id="annotation-classes" rows="4" placeholder="每行一个类别名称，例如：\ncar\nperson\nbike" required></textarea>
                 <div class="form-text">每行输入一个类别名称（非关键点项目使用）</div>
+                <div id="original-classes-info" class="alert alert-info mt-2" style="display: none;">将使用原类别</div>
+            </div>
+            
+            <!-- 导入原标注开关 -->
+            <div class="mb-3 form-check">
+                <input class="form-check-input" type="checkbox" id="import-original-annotations">
+                <label class="form-check-label" for="import-original-annotations">
+                    导入原标注
+                </label>
+                <div class="form-text">勾选此项可在创建项目时保留已有的标注信息</div>
             </div>
             
             <!-- 图片来源选择 -->

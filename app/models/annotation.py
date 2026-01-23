@@ -17,6 +17,7 @@ class AnnotationProject(Base):
     class_keypoints = Column(JSON, nullable=True)  # 类别和关键点的映射关系
     image_directory = Column(String, nullable=False)  # 图片目录路径
     project_type = Column(String, default="detection")  # detection, segmentation, obb, keypoints
+    import_original_annotations = Column(Boolean, default=False)  # 是否导入原标注
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     status = Column(String, default="active")  # active, completed, archived

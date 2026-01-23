@@ -275,6 +275,22 @@ def init_db():
                     conn.commit()
                     logger.info("Added class_keypoints column to annotation_projects table")
 
+                # 检查 import_original_annotations 列是否存在
+                result = conn.execute(text("""
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'annotation_projects' AND column_name = 'import_original_annotations'
+                """))
+                column_exists = result.fetchone()
+                if not column_exists:
+                    logger.info("Adding import_original_annotations column to annotation_projects table")
+                    conn.execute(text("""
+                        ALTER TABLE annotation_projects
+                        ADD COLUMN import_original_annotations BOOLEAN DEFAULT FALSE
+                    """))
+                    conn.commit()
+                    logger.info("Added import_original_annotations column to annotation_projects table")
+
         # 检查并添加 datasets 表的 task 列
         if 'datasets' in tables:
             with engine.connect() as conn:

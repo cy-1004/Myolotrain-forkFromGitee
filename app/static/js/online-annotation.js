@@ -117,6 +117,11 @@ class OnlineAnnotation {
             createProjectBtn.addEventListener('click', () => this.showCreateAnnotationProjectModal());
         }
         
+        const mergeProjectBtn = document.getElementById('merge-annotation-projects-btn');
+        if (mergeProjectBtn) {
+            mergeProjectBtn.addEventListener('click', () => this.showMergeAnnotationProjectsModal());
+        }
+        
         const projectSelect = document.getElementById('annotation-project-select');
         if (projectSelect) {
             projectSelect.addEventListener('change', function() {
@@ -157,13 +162,18 @@ class OnlineAnnotation {
         // 绑定类别和关键点配置事件
         this.bindClassKeypointsEvents();
         
+        // 绑定导入原标注开关事件
+        this.bindImportOriginalAnnotationsEvent();
+        
         // 为初始的项目绑定事件
         document.querySelectorAll('.class-keypoints-item').forEach(item => {
             this.bindKeypointEventsForItem(item);
         });
 
         modal.show();
-
+        
+        // 设置提交按钮文字为确定
+        modalSubmit.textContent = '确定';
         modalSubmit.onclick = () => this.submitCreateAnnotationProject();
     }
 
@@ -527,6 +537,7 @@ class OnlineAnnotation {
         const description = document.getElementById('annotation-project-description').value;
         const projectType = document.getElementById('annotation-project-type').value;
         const imageSource = document.querySelector('input[name="image-source"]:checked').value;
+        const importOriginalAnnotations = document.getElementById('import-original-annotations').checked;
         
         if (!name) {
             alert('请输入项目名称');
@@ -561,14 +572,19 @@ class OnlineAnnotation {
         } else {
             // 非关键点项目：使用默认类别列表
             const classesTextarea = document.getElementById('annotation-classes');
-            classes = classesTextarea.value.split('\n')
-                .map(cls => cls.trim())
-                .filter(cls => cls);
             
-            if (classes.length === 0) {
-                alert('请至少输入一个类别');
-                return;
+            // 如果是上传ZIP且勾选了导入原标注，则不需要类别列表
+            if (!(imageSource === 'upload' && importOriginalAnnotations)) {
+                classes = classesTextarea.value.split('\n')
+                    .map(cls => cls.trim())
+                    .filter(cls => cls);
+                
+                if (classes.length === 0) {
+                    alert('请至少输入一个类别');
+                    return;
+                }
             }
+            // 如果勾选了导入原标注且是上传ZIP，则classes将在后端解析
         }
         
         if (imageSource === 'upload') {
@@ -577,14 +593,14 @@ class OnlineAnnotation {
                 alert('请选择图片ZIP文件');
                 return;
             }
-            this.createProjectWithImageUpload(name, description, projectType, classes, classKeypoints, zipFile);
+            this.createProjectWithImageUpload(name, description, projectType, classes, classKeypoints, zipFile, importOriginalAnnotations);
         } else {
             this.createProjectWithExistingImages(name, description, projectType, classes, classKeypoints, imageSource);
         }
     }
 
     // 使用上传图片创建项目
-    createProjectWithImageUpload(name, description, projectType, classes, classKeypoints, zipFile) {
+    createProjectWithImageUpload(name, description, projectType, classes, classKeypoints, zipFile, importOriginalAnnotations) {
         const progressContainer = document.getElementById('annotation-upload-progress');
         const progressBar = document.getElementById('annotation-progress-bar');
         const statusDiv = document.getElementById('annotation-upload-status');
@@ -599,10 +615,14 @@ class OnlineAnnotation {
         formData.append('name', name);
         formData.append('description', description);
         formData.append('project_type', projectType);
-        formData.append('classes', JSON.stringify(classes));
+        // 只有在未勾选导入原标注时才发送classes
+        if (!importOriginalAnnotations) {
+            formData.append('classes', JSON.stringify(classes));
+        }
         if (classKeypoints) {
             formData.append('class_keypoints', JSON.stringify(classKeypoints));
         }
+        formData.append('import_original_annotations', importOriginalAnnotations);
         formData.append('images_zip', zipFile);
         
         const xhr = new XMLHttpRequest();
@@ -619,11 +639,37 @@ class OnlineAnnotation {
         
         xhr.onload = () => {
             if (xhr.status === 200 || xhr.status === 201) {
+                const response = JSON.parse(xhr.responseText);
                 statusDiv.textContent = '创建成功！';
                 setTimeout(() => {
+                    // 重置按钮状态
+                    modalSubmit.disabled = false;
+                    modalSubmit.textContent = '确定';
+                    progressContainer.style.display = 'none';
+                    
                     modal.hide();
                     onlineAnnotation.loadAnnotationProjects();
-                    alert('标注项目创建成功！');
+                    
+                    // 检查是否有导入结果
+                    let successMessage = '标注项目创建成功！';
+                    if (response.import_result) {
+                        const importResult = response.import_result;
+                        successMessage += `\n\n导入结果：`;
+                        successMessage += `\n- 发现图片: ${importResult.total_images}`;
+                        successMessage += `\n- 成功匹配标注图片: ${importResult.matched_image_count || importResult.matched_annotations || 0}`;
+                        successMessage += `\n- 无标注图片: ${importResult.unannotated_images}`;
+                        if (importResult.parsed_classes && importResult.parsed_classes.length > 0) {
+                            successMessage += `\n- 解析类别: ${importResult.parsed_classes.join(', ')}`;
+                        }
+                        if (importResult.errors && importResult.errors.length > 0) {
+                            successMessage += `\n- 导入错误: ${importResult.errors.length} 项`;
+                        }
+                        // 如果有总的处理标注数量，也显示
+                        if (importResult.total_processed_annotations !== undefined) {
+                            successMessage += `\n- 总标注数量: ${importResult.total_processed_annotations}`;
+                        }
+                    }
+                    alert(successMessage);
                 }, 1000);
             } else {
                 try {
@@ -650,6 +696,9 @@ class OnlineAnnotation {
 
     // 使用现有图片创建项目
     createProjectWithExistingImages(name, description, projectType, classes, classKeypoints, imageSource) {
+        // 获取导入原标注选项
+        const importOriginalAnnotations = document.getElementById('import-original-annotations').checked;
+        
         const requestData = {
             name: name,
             description: description,
@@ -671,6 +720,7 @@ class OnlineAnnotation {
                 return;
             }
             requestData.dataset_id = datasetId;
+            requestData.import_original_annotations = importOriginalAnnotations;
         } else if (imageSource === 'directory') {
             const imageDirectory = document.getElementById('annotation-image-directory').value;
             if (!imageDirectory) {
@@ -678,6 +728,7 @@ class OnlineAnnotation {
                 return;
             }
             requestData.image_directory = imageDirectory;
+            requestData.import_original_annotations = importOriginalAnnotations;
             apiEndpoint = `${API_URL}/annotation/projects/from-directory`;
         }
         
@@ -697,7 +748,24 @@ class OnlineAnnotation {
         .then(data => {
             modal.hide();
             this.loadAnnotationProjects();
-            alert('标注项目创建成功！');
+            
+            // 检查是否有导入结果
+            let successMessage = '标注项目创建成功！';
+            if (data.import_result) {
+                const importResult = data.import_result;
+                successMessage += `\n\n导入结果：`;
+                successMessage += `\n- 发现图片: ${importResult.total_images}`;
+                successMessage += `\n- 成功匹配标注图片: ${importResult.matched_image_count || importResult.matched_annotations || 0}`;
+                successMessage += `\n- 无标注图片: ${importResult.unannotated_images}`;
+                if (importResult.errors && importResult.errors.length > 0) {
+                    successMessage += `\n- 导入错误: ${importResult.errors.length} 项`;
+                }
+                // 如果有总的处理标注数量，也显示
+                if (importResult.total_processed_annotations !== undefined) {
+                    successMessage += `\n- 总标注数量: ${importResult.total_processed_annotations}`;
+                }
+            }
+            alert(successMessage);
         })
         .catch(error => {
             console.error('Error creating annotation project:', error);
@@ -958,6 +1026,445 @@ class OnlineAnnotation {
             'pose': '关键点/姿态估计'
         };
         return typeMap[projectType] || projectType || '目标检测';
+    }
+    
+    // 绑定导入原标注开关事件
+    bindImportOriginalAnnotationsEvent() {
+        const importOriginalAnnotationsCheckbox = document.getElementById('import-original-annotations');
+        const defaultClassesDiv = document.getElementById('default-classes');
+        const annotationClassesTextarea = document.getElementById('annotation-classes');
+        const originalClassesInfo = document.getElementById('original-classes-info');
+        const imageSourceRadios = document.querySelectorAll('input[name="image-source"]');
+        
+        if (importOriginalAnnotationsCheckbox) {
+            // 更新UI状态的函数
+            function updateImportOriginalAnnotationsUI() {
+                const isChecked = importOriginalAnnotationsCheckbox.checked;
+                const selectedImageSource = document.querySelector('input[name="image-source"]:checked').value;
+                
+                // 当选择服务器目录时，导入原标注功能不可用
+                if (selectedImageSource === 'directory') {
+                    importOriginalAnnotationsCheckbox.disabled = true;
+                    // 如果当前已勾选，则取消勾选
+                    if (isChecked) {
+                        importOriginalAnnotationsCheckbox.checked = false;
+                    }
+                    // 启用类别输入（因为导入原标注不可用）
+                    annotationClassesTextarea.disabled = false;
+                    annotationClassesTextarea.required = true;
+                    defaultClassesDiv.classList.remove('disabled-area');
+                    originalClassesInfo.style.display = 'none';
+                } else {
+                    // 其他情况：上传ZIP或关联数据集
+                    importOriginalAnnotationsCheckbox.disabled = false;
+                    
+                    // 如果勾选了导入原标注且选择了上传ZIP，则禁用类别输入
+                    if (isChecked && selectedImageSource === 'upload') {
+                        annotationClassesTextarea.disabled = true;
+                        annotationClassesTextarea.required = false;
+                        defaultClassesDiv.classList.add('disabled-area');
+                        originalClassesInfo.style.display = 'block';
+                    } else {
+                        annotationClassesTextarea.disabled = false;
+                        annotationClassesTextarea.required = true;
+                        defaultClassesDiv.classList.remove('disabled-area');
+                        originalClassesInfo.style.display = 'none';
+                    }
+                }
+            }
+            
+            // 初始状态检查
+            updateImportOriginalAnnotationsUI();
+            
+            // 监听导入原标注复选框变化
+            importOriginalAnnotationsCheckbox.addEventListener('change', function() {
+                updateImportOriginalAnnotationsUI();
+            });
+            
+            // 监听图片来源选择的变化
+            imageSourceRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    updateImportOriginalAnnotationsUI();
+                });
+            });
+        }
+    }
+    
+    // 显示合并标注项目模态框
+    showMergeAnnotationProjectsModal() {
+        const modalTitle = document.querySelector('.modal-title');
+        const modalBody = document.querySelector('.modal-body');
+        const modalSubmit = document.getElementById('modalSubmit');
+
+        modalTitle.textContent = '合并标注项目';
+
+        // 获取模板内容
+        const template = document.getElementById('merge-annotation-projects-template');
+        if (!template) {
+            console.error('merge-annotation-projects-template not found');
+            return;
+        }
+
+        modalBody.innerHTML = template.innerHTML;
+        
+        // 加载项目列表
+        this.loadProjectsForMerge();
+        
+        // 绑定事件
+        this.bindMergeProjectsEvents();
+
+        modal.show();
+        
+        // 确保提交按钮状态正确
+        modalSubmit.disabled = false;
+        modalSubmit.textContent = '开始合并';
+        modalSubmit.onclick = () => this.submitMergeAnnotationProjects();
+    }
+    
+    // 加载用于合并的项目列表
+    loadProjectsForMerge(filterType = '') {
+        // 存储项目数据以便后续使用
+        this.mergedProjectsData = {};
+        
+        authenticatedFetch(API_URL + '/annotation/projects/')
+            .then(response => response.json())
+            .then(projects => {
+                const projectsList = document.getElementById('projects-list');
+                if (!projectsList) {
+                    console.error('projects-list element not found');
+                    return;
+                }
+
+                // 过滤指定类型的项目
+                const filteredProjects = filterType ? 
+                    projects.filter(p => p.project_type === filterType) : projects;
+
+                projectsList.innerHTML = '';
+
+                if (filteredProjects.length === 0) {
+                    projectsList.innerHTML = '<div class="alert alert-info">没有找到符合条件的项目</div>';
+                    return;
+                }
+
+                // 存储项目数据以便后续获取图片数量
+                filteredProjects.forEach(project => {
+                    this.mergedProjectsData[project.id] = project;
+                });
+
+                // 为每个项目获取统计信息
+                const projectPromises = filteredProjects.map(project => {
+                    return authenticatedFetch(API_URL + `/annotation/projects/${project.id}/stats`)
+                        .then(response => response.json())
+                        .catch(error => {
+                            // 如果获取统计信息失败，返回默认值
+                            console.warn(`Failed to get stats for project ${project.id}:`, error);
+                            return { total_images: 0 };
+                        });
+                });
+
+                Promise.all(projectPromises)
+                    .then(statsArray => {
+                        filteredProjects.forEach((project, index) => {
+                            const stats = statsArray[index];
+                            const projectTypeText = this.getProjectTypeText(project.project_type);
+                            
+                            const projectItem = document.createElement('div');
+                            projectItem.className = 'form-check mb-2';
+                            projectItem.innerHTML = '<input class="form-check-input project-checkbox" type="checkbox" value="' + project.id + '" id="project-' + project.id + '" data-total-images="' + (stats?.total_images || 0) + '" data-completed-images="' + (stats?.completed_images || 0) + '">' +
+                                '<label class="form-check-label d-flex justify-content-between w-100" for="project-' + project.id + '">' +
+                                    '<span>' +
+                                        '<strong>' + project.name + '</strong> ' +
+                                        '<span class="badge bg-info ms-2">' + projectTypeText + '</span>' +
+                                    '</span>' +
+                                    '<span class="text-muted">' +
+                                        project.classes.length + ' 类别, ' + (stats?.total_images || 0) + ' 图片 (' + (stats?.completed_images || 0) + ' 已标注)' +
+                                    '</span>' +
+                                '</label>';
+                            projectsList.appendChild(projectItem);
+                        });
+                        
+                        // 绑定复选框事件
+                        this.bindProjectCheckboxes();
+                    })
+                    .catch(error => {
+                        console.error('Error getting project stats:', error);
+                        // 即使获取统计信息失败，也要显示项目列表（使用0作为默认值）
+                        filteredProjects.forEach(project => {
+                            const projectTypeText = this.getProjectTypeText(project.project_type);
+                            
+                            const projectItem = document.createElement('div');
+                            projectItem.className = 'form-check mb-2';
+                            projectItem.innerHTML = '<input class="form-check-input project-checkbox" type="checkbox" value="' + project.id + '" id="project-' + project.id + '" data-total-images="0" data-completed-images="0">' +
+                                '<label class="form-check-label d-flex justify-content-between w-100" for="project-' + project.id + '">' +
+                                    '<span>' +
+                                        '<strong>' + project.name + '</strong> ' +
+                                        '<span class="badge bg-info ms-2">' + projectTypeText + '</span>' +
+                                    '</span>' +
+                                    '<span class="text-muted">' +
+                                        project.classes.length + ' 类别, 0 图片 (0 已标注)' +
+                                    '</span>' +
+                                '</label>';
+                            projectsList.appendChild(projectItem);
+                        });
+                        
+                        // 绑定复选框事件
+                        this.bindProjectCheckboxes();
+                    });
+            })
+            .catch(error => {
+                console.error('Error loading projects for merge:', error);
+                const projectsList = document.getElementById('projects-list');
+                if (projectsList) {
+                    projectsList.innerHTML = '<div class="alert alert-danger">加载项目列表失败</div>';
+                }
+            });
+    }
+    
+    // 绑定项目复选框事件
+    bindProjectCheckboxes() {
+        const checkboxes = document.querySelectorAll('.project-checkbox');
+        checkboxes.forEach(checkbox => {
+            checkbox.addEventListener('change', () => {
+                this.validateProjectSelection();
+            });
+        });
+    }
+    
+    // 验证项目选择
+    validateProjectSelection() {
+        const selectedCheckboxes = document.querySelectorAll('.project-checkbox:checked');
+        const modalSubmit = document.getElementById('modalSubmit');
+        
+        if (selectedCheckboxes.length < 2) {
+            // 少于2个项目，禁用合并按钮
+            if (modalSubmit) {
+                modalSubmit.disabled = true;
+            }
+            this.updateMergeSummary([]);
+            return;
+        }
+        
+        // 获取选中项目的类型
+        const selectedTypes = [];
+        selectedCheckboxes.forEach(checkbox => {
+            const label = checkbox.nextElementSibling;
+            const typeBadge = label.querySelector('.badge.bg-info');
+            if (typeBadge) {
+                // 从badge中获取类型文本，然后映射回实际类型
+                const typeText = typeBadge.textContent;
+                const typeValue = this.getTypeValueFromText(typeText);
+                selectedTypes.push(typeValue);
+            }
+        });
+        
+        // 检查所有选中项目是否为同一类型
+        const isConsistent = selectedTypes.every(type => type === selectedTypes[0]);
+        
+        if (!isConsistent) {
+            alert('警告：所选项目类型不一致，合并项目必须是同一类型！');
+            // 类型不一致也禁用按钮
+            if (modalSubmit) {
+                modalSubmit.disabled = true;
+            }
+        } else {
+            // 类型一致且选中了至少2个项目，启用按钮
+            if (modalSubmit) {
+                modalSubmit.disabled = false;
+            }
+        }
+        
+        // 更新摘要
+        this.updateMergeSummary(Array.from(selectedCheckboxes));
+    }
+    
+    // 从显示文本获取实际类型值
+    getTypeValueFromText(typeText) {
+        const typeMap = {
+            '目标检测': 'detection',
+            '实例分割': 'segmentation',
+            '旋转框': 'obb',
+            '关键点/姿态估计': 'pose'
+        };
+        return typeMap[typeText] || typeText;
+    }
+    
+    // 更新合并摘要
+    updateMergeSummary(selectedCheckboxes) {
+        if (selectedCheckboxes.length === 0) {
+            document.getElementById('merge-summary').style.display = 'none';
+            return;
+        }
+        
+        // 计算选中项目的总数和图片数
+        let totalProjects = 0;
+        let totalImages = 0;
+        
+        selectedCheckboxes.forEach(checkbox => {
+            totalProjects++;
+            
+            // 获取项目ID
+            const projectId = checkbox.value;
+            
+            // 从存储的数据中获取图片数量，优先使用data属性，然后是存储的项目数据
+            let imgCount = parseInt(checkbox.getAttribute('data-total-images')) || 0;
+            
+            if (imgCount === 0 && this.mergedProjectsData && this.mergedProjectsData[projectId]) {
+                // 如果data属性中的数量为0，尝试从存储的项目数据中获取
+                imgCount = this.mergedProjectsData[projectId].stats?.total_images || 0;
+            }
+            
+            totalImages += imgCount;
+        });
+        
+        const summaryContent = document.getElementById('merge-summary-content');
+        summaryContent.innerHTML = '<p>将合并 <strong>' + totalProjects + '</strong> 个项目</p>' +
+            '<p>总计 <strong>' + totalImages + '</strong> 张图片</p>' +
+            '<p>新项目名称: <strong>' + (document.getElementById('target-project-name').value || '未设置') + '</strong></p>' +
+            '<p>删除源项目: <strong>' + (document.getElementById('delete-source-projects').checked ? '是' : '否') + '</strong></p>';
+        
+        document.getElementById('merge-summary').style.display = 'block';
+    }
+    
+    // 绑定合并项目相关事件
+    bindMergeProjectsEvents() {
+        // 类型筛选事件
+        const typeFilter = document.getElementById('project-type-filter');
+        if (typeFilter) {
+            typeFilter.addEventListener('change', (e) => {
+                this.loadProjectsForMerge(e.target.value);
+            });
+        }
+        
+        // 刷新按钮事件
+        const refreshBtn = document.getElementById('refresh-projects-btn');
+        if (refreshBtn) {
+            refreshBtn.addEventListener('click', () => {
+                const currentFilter = document.getElementById('project-type-filter').value;
+                this.loadProjectsForMerge(currentFilter);
+            });
+        }
+        
+        // 新项目名称输入事件
+        const targetNameInput = document.getElementById('target-project-name');
+        if (targetNameInput) {
+            targetNameInput.addEventListener('input', () => {
+                const selectedCheckboxes = document.querySelectorAll('.project-checkbox:checked');
+                this.updateMergeSummary(selectedCheckboxes);
+            });
+        }
+        
+        // 删除源项目复选框事件
+        const deleteSourceCheckbox = document.getElementById('delete-source-projects');
+        if (deleteSourceCheckbox) {
+            deleteSourceCheckbox.addEventListener('change', () => {
+                const selectedCheckboxes = document.querySelectorAll('.project-checkbox:checked');
+                this.updateMergeSummary(selectedCheckboxes);
+            });
+        }
+    }
+    
+    // 提交合并标注项目
+    submitMergeAnnotationProjects() {
+        const selectedCheckboxes = document.querySelectorAll('.project-checkbox:checked');
+        
+        if (selectedCheckboxes.length < 2) {
+            alert('请至少选择2个项目进行合并');
+            return;
+        }
+        
+        const targetProjectName = document.getElementById('target-project-name').value.trim();
+        if (!targetProjectName) {
+            alert('请输入新项目名称');
+            return;
+        }
+        
+        // 获取选中的项目ID
+        const sourceProjectIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+        
+        // 检查项目类型一致性
+        const selectedTypes = [];
+        selectedCheckboxes.forEach(checkbox => {
+            const label = checkbox.nextElementSibling;
+            const typeBadge = label.querySelector('.badge.bg-info');
+            if (typeBadge) {
+                const typeText = typeBadge.textContent;
+                const typeValue = this.getTypeValueFromText(typeText);
+                selectedTypes.push(typeValue);
+            }
+        });
+        
+        const isConsistent = selectedTypes.every(type => type === selectedTypes[0]);
+        if (!isConsistent) {
+            alert('错误：所选项目类型不一致，无法合并！');
+            return;
+        }
+        
+        const deleteSourceProjects = document.getElementById('delete-source-projects').checked;
+        const duplicateHandling = document.getElementById('duplicate-handling').value;
+        
+        // 发送合并请求
+        const mergeData = {
+            target_project_name: targetProjectName,
+            source_project_ids: sourceProjectIds,
+            delete_source_projects: deleteSourceProjects,
+            duplicate_handling: duplicateHandling
+        };
+        
+        // 禁用提交按钮
+        const modalSubmit = document.getElementById('modalSubmit');
+        modalSubmit.disabled = true;
+        modalSubmit.textContent = '合并中...';
+        
+        authenticatedFetch(API_URL + '/annotation/merge-projects', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(mergeData)
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.detail || '合并失败'); });
+            }
+            return response.json();
+        })
+        .then(result => {
+            // 合并成功
+            modal.hide();
+            
+            // 显示结果
+            let message = '合并完成！\n';
+            message += '- 创建新项目: ' + result.new_project_name + '\n';
+            message += '- 合并了 ' + result.merged_projects_count + ' 个项目\n';
+            message += '- 总计 ' + result.total_images_count + ' 张图片\n';
+            
+            if (result.conflicts && result.conflicts.length > 0) {
+                message += '\n警告：发现 ' + result.conflicts.length + ' 个文件名冲突，已自动重命名解决冲突。';
+            }
+            
+            if (deleteSourceProjects) {
+                message += '\n已删除原始项目。';
+            } else {
+                message += '\n保留了原始项目。';
+            }
+            
+            alert(message);
+            
+            // 刷新项目列表
+            this.loadAnnotationProjects();
+            
+            // 重新启用提交按钮（以防万一）
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '开始合并';
+        })
+        .catch(error => {
+            console.error('Error merging annotation projects:', error);
+            alert('合并标注项目失败: ' + error.message);
+            
+            // 重新启用提交按钮
+            modalSubmit.disabled = false;
+            modalSubmit.textContent = '开始合并';
+        });
     }
 }
 
