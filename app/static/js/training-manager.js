@@ -971,6 +971,7 @@ class TrainingManager {
         const deviceTypeSelect = document.getElementById('device-type');
         const cpuCoresInput = document.getElementById('cpu-cores');
         const gpuMemoryInput = document.getElementById('gpu-memory');
+        const ascendMemoryInput = document.getElementById('ascend-memory');
         const memoryInput = document.getElementById('memory');
 
         // 创建训练参数对象
@@ -1085,10 +1086,24 @@ class TrainingManager {
             }
         })
         .then(result => {
+            // 重置按钮状态
+            const modalSubmit = document.getElementById('modalSubmit');
+            if (modalSubmit) {
+                modalSubmit.disabled = false;
+                modalSubmit.textContent = '确定';
+            }
+            
             modal.hide();
             this.loadTrainingTasks();
         })
         .catch(error => {
+            // 重置按钮状态
+            const modalSubmit = document.getElementById('modalSubmit');
+            if (modalSubmit) {
+                modalSubmit.disabled = false;
+                modalSubmit.textContent = '确定';
+            }
+            
             console.error('Error creating training task:', error);
             alert('创建训练任务失败: ' + error.message);
         });
