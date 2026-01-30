@@ -59,15 +59,165 @@ class AnnotationTool {
         this.obbTool = new OBBTool(this);
         // 新增属性：关键点工具
         this.keypointsTool = new KeypointsTool(this);
+        // 新增属性：SAM3工具
+        this.sam3Tool = null; // 懒加载
         // 新增属性：当前工具类型
-        this.currentTool = 'box'; // box, segment, obb, keypoints
+        this.currentTool = 'box'; // box, segment, obb, keypoints, sam3
+        
+        // 防抖相关变量
+        this.debounceTimer = null;
+        this.pendingSave = false;
         
         this.init();
+        this.loadSAM3Tool(); // 初始化SAM3工具
     }
     
     init() {
         this.setupEventListeners();
         this.loadProject();
+    }
+    
+    // 加载SAM3工具
+    async loadSAM3Tool() {
+        try {
+            // 检查SAM3 API是否可用
+            const response = await fetch('/api/sam3/available');
+            const data = await response.json();
+            
+            // 即使SAM3不可用也创建按钮，只是功能受限
+            const script = document.createElement('script');
+            script.src = '/static/js/sam3-tool.js';
+            document.head.appendChild(script);
+            
+            script.onload = () => {
+                // 创建SAM3工具实例
+                this.sam3Tool = new SAM3Tool(this);
+                
+                console.log('SAM3工具已加载');
+                
+                // 如果项目数据已经加载完成，且是实例分割项目，则添加SAM3按钮
+                if (this.projectData && this.projectData.project_type === 'segmentation') {
+                    this.addSAM3ToolButton();
+                }
+                // 否则，按钮将在loadProject完成时被添加
+            };
+            
+            // 如果SAM3不可用，记录警告
+            if (!data.available) {
+                console.warn('SAM3不可用:', data.message);
+            }
+        } catch (error) {
+            console.error('加载SAM3工具失败:', error);
+        }
+    }
+    
+    // 添加SAM3工具栏（全新实现）
+    addSAM3ToolButton() {
+        // 检查是否已存在SAM3容器
+        if (document.getElementById('sam3-control-container')) {
+            console.log('SAM3控制容器已存在，跳过创建');
+            return;
+        }
+        
+        console.log('开始创建SAM3控制容器');
+        
+        const toolSelector = document.getElementById('tool-selector');
+        if (toolSelector) {
+            // 创建一个全新的SAM3控制容器
+            const containerDiv = document.createElement('div');
+            containerDiv.id = 'sam3-control-container';
+            containerDiv.className = 'd-flex align-items-center me-2';
+            containerDiv.style.gap = '8px';
+            containerDiv.style.border = '1px solid #dee2e6';
+            containerDiv.style.borderRadius = '4px';
+            containerDiv.style.padding = '4px 8px';
+            containerDiv.style.backgroundColor = '#f8f9fa';
+            
+            // 创建SAM3标签
+            const label = document.createElement('span');
+            label.textContent = 'SAM3:';
+            label.style.fontSize = '14px';
+            label.style.fontWeight = 'bold';
+            
+            // 创建滑块开关
+            const switchDiv = document.createElement('div');
+            switchDiv.className = 'form-check form-switch mb-0';
+            
+            const switchInput = document.createElement('input');
+            switchInput.type = 'checkbox';
+            switchInput.className = 'form-check-input';
+            switchInput.id = 'sam3-toggle-switch';
+            switchInput.role = 'switch';
+            switchInput.title = '启用/关闭SAM3分割工具';
+            
+            switchDiv.appendChild(switchInput);
+            
+            // 创建状态标签
+            const statusLabel = document.createElement('span');
+            statusLabel.id = 'sam3-status-label';
+            statusLabel.textContent = '关闭';
+            statusLabel.style.fontSize = '12px';
+            statusLabel.style.color = '#6c757d';
+            
+            // 将组件添加到容器
+            containerDiv.appendChild(label);
+            containerDiv.appendChild(switchDiv);
+            containerDiv.appendChild(statusLabel);
+            
+            toolSelector.appendChild(containerDiv);
+            
+            // 添加滑块开关事件监听器
+            switchInput.addEventListener('change', async (event) => {
+                if (this.sam3Tool) {
+                    if (event.target.checked) {
+                        // 检查SAM3是否已配置
+                        const isConfigured = await this.checkSAM3Configuration();
+                        if (isConfigured) {
+                            // 如果已配置，开启SAM3
+                            this.sam3Tool.activate();
+                            // 更新状态显示
+                            statusLabel.textContent = '开启';
+                            statusLabel.style.color = '#28a745';
+                            // 确保当前工具状态同步
+                            this.currentTool = 'sam3';
+                            this.redraw();
+                        } else {
+                            // 如果未配置，取消勾选并提示用户
+                            event.target.checked = false;
+                            statusLabel.textContent = '关闭';
+                            statusLabel.style.color = '#6c757d';
+                            this.showMessage('SAM3未配置或配置失败，请先在在线标注列表页配置SAM3', 'error');
+                        }
+                    } else {
+                        // 如果当前是SAM3模式，停用SAM3
+                        if (this.currentTool === 'sam3') {
+                            this.sam3Tool.deactivate();
+                            // 更新状态显示
+                            statusLabel.textContent = '关闭';
+                            statusLabel.style.color = '#6c757d';
+                            // 确保当前工具状态同步
+                            this.currentTool = 'segment';
+                            this.redraw();
+                        }
+                    }
+                }
+            });
+            
+            console.log('全新SAM3控制容器已添加到工具栏');
+            
+            // 如果当前是实例分割项目，确保容器可见
+            if (this.projectData && this.projectData.project_type === 'segmentation') {
+                containerDiv.style.display = 'flex';
+                console.log('设置SAM3控制容器为可见');
+                
+                // 默认关闭SAM3（滑块处于关闭状态）
+                switchInput.checked = false;
+                statusLabel.textContent = '关闭';
+                statusLabel.style.color = '#6c757d';
+            }
+        } else {
+            console.log('未找到工具选择器，无法添加SAM3控制容器');
+        }
     }
     
     setupEventListeners() {
@@ -145,12 +295,30 @@ class AnnotationTool {
         
         // 搜索
         document.getElementById('image-search').addEventListener('input', this.filterImages.bind(this));
+        
+        // SAM3启用开关事件
+        const enableSam3Switch = document.getElementById('enable-sam3-switch');
+        if (enableSam3Switch) {
+            enableSam3Switch.addEventListener('change', this.handleSam3ToggleChange.bind(this));
+        }
     }
     
     // 新增方法：设置辅助线颜色（供annotation-manager.js调用）
     setGuidelineColor(color) {
         this.guidelineColor = color;
         this.redraw();
+    }
+    
+    // 检查SAM3配置状态
+    async checkSAM3Configuration() {
+        try {
+            const response = await fetch('/api/sam3/check_config');
+            const data = await response.json();
+            return data.configured === true;
+        } catch (error) {
+            console.error('检查SAM3配置失败:', error);
+            return false;
+        }
     }
     
     // 根据项目类型设置默认工具
@@ -165,7 +333,21 @@ class AnnotationTool {
             'pose': 'keypoints'
         };
         
-        const defaultTool = toolTypeMap[this.projectData.project_type] || 'box';
+        let defaultTool = toolTypeMap[this.projectData.project_type] || 'box';
+        
+        // 实例分割项目：确保SAM3按钮显示，但不自动启用
+        if (this.projectData.project_type === 'segmentation') {
+            // 确保使用segment工具作为默认工具
+            this.setTool('segment');
+            
+            // 确保SAM3按钮被创建（如果尚未创建）
+            this.addSAM3ToolButton();
+            
+            // 根据项目类型隐藏不相关的工具按钮
+            this.hideIrrelevantTools();
+            return;
+        }
+        
         this.setTool(defaultTool);
         
         // 根据项目类型隐藏不相关的工具按钮
@@ -175,7 +357,74 @@ class AnnotationTool {
     // 设置当前工具类型
     setTool(toolType) {
         console.log('切换工具到:', toolType);
-        this.currentTool = toolType;
+        
+        // 对于实例分割项目，允许在segment和SAM3之间自由切换
+        let finalToolType = toolType;
+        if (toolType === 'segment' && this.projectData && this.projectData.project_type === 'segmentation' && this.sam3Tool) {
+            // 如果切换到segment工具且SAM3已激活，先停用SAM3
+            if (this.sam3Tool.isActive) {
+                this.sam3Tool.deactivate();
+            }
+            finalToolType = 'segment';
+        } else if (toolType === 'sam3' && this.projectData && this.projectData.project_type === 'segmentation' && this.sam3Tool) {
+            // 如果切换到SAM3工具且SAM3未激活，激活SAM3
+            if (!this.sam3Tool.isActive) {
+                this.sam3Tool.activate();
+            }
+            finalToolType = 'sam3';
+        } else if (toolType === 'segment' && this.projectData && this.projectData.project_type === 'segmentation' && !this.sam3Tool) {
+            // 如果SAM3工具未加载，允许使用segment
+            finalToolType = 'segment';
+        }
+        
+        // 如果是从SAM3切换到其他工具，先停用SAM3
+        if (this.currentTool === 'sam3' && this.sam3Tool) {
+            this.sam3Tool.deactivate();
+        }
+        
+        // 如果切换到SAM3，需要特殊处理
+        if (finalToolType === 'sam3') {
+            if (this.sam3Tool) {
+                // 确保SAM3工具已激活
+                if (!this.sam3Tool.isActive) {
+                    this.sam3Tool.activate();
+                }
+                    
+// 显示SAM3操作选项
+                this.showSAM3OperationOptions();
+                this.showSam3HintInfo();
+                
+                // 更新按钮状态
+                const toolButtons = document.querySelectorAll('#tool-selector .btn');
+                toolButtons.forEach(btn => {
+                    btn.classList.remove('active');
+                    btn.classList.remove('btn-primary');
+                    btn.classList.add('btn-outline-primary');
+                });
+                
+                const activeButton = document.getElementById('tool-sam3');
+                if (activeButton) {
+                    activeButton.classList.remove('btn-outline-primary');
+                    activeButton.classList.add('btn-primary');
+                    activeButton.classList.add('active');
+                }
+                
+                this.currentTool = 'sam3';
+                this.redraw();
+                return;
+            } else {
+                alert('SAM3工具未加载，请稍后再试');
+                // 切换回segment工具
+                finalToolType = 'segment';
+            }
+        } else if (finalToolType === 'segment' && this.currentTool === 'sam3' && this.sam3Tool) {
+            // 如果从SAM3切换回segment，确保停用SAM3
+            if (this.sam3Tool.isActive) {
+                this.sam3Tool.deactivate();
+            }
+        }
+        
+        this.currentTool = finalToolType;
         
         // 更新工具按钮的激活状态
         const toolButtons = document.querySelectorAll('#tool-selector .btn');
@@ -226,6 +475,8 @@ class AnnotationTool {
             this.keypointsTool.isDraggingKeypoint = false;
             this.keypointsTool.currentKeypoints = [];
         }
+        
+
     }
     
     // 更新关键点模式按钮状态
@@ -263,6 +514,12 @@ class AnnotationTool {
         }
     }
     
+    // 检查并启用SAM3功能
+    async checkAndEnableSAM3Feature() {
+        // 不自动启用SAM3，让用户手动开启
+        // 保持默认为segment工具
+    }
+    
     // 根据项目类型隐藏不相关的工具按钮
     hideIrrelevantTools() {
         if (!this.projectData || !this.projectData.project_type) return;
@@ -272,33 +529,105 @@ class AnnotationTool {
             'box': document.getElementById('tool-box'),
             'segment': document.getElementById('tool-segment'),
             'obb': document.getElementById('tool-obb'),
-            'keypoints': document.getElementById('tool-keypoints')
+            'keypoints': document.getElementById('tool-keypoints'),
+            'sam3': document.getElementById('sam3-control-container')  // 全新SAM3控制容器
         };
         
-        // 根据项目类型决定显示哪些工具
-        const visibleTools = {
-            'detection': ['box'],
-            'segmentation': ['segment'],
-            'obb': ['obb'],
-            'pose': ['keypoints']
-        };
-        
+        // 根据项目类型和SAM3激活状态决定显示哪些工具
         const projectType = this.projectData.project_type;
-        const toolsToShow = visibleTools[projectType] || ['box'];
         
-        // 隐藏所有工具按钮
-        Object.values(toolButtons).forEach(button => {
-            if (button) {
+        // 隐藏所有存在的工具按钮（但不包括SAM3滑块开关）
+        Object.entries(toolButtons).forEach(([key, button]) => {
+            if (button && key !== 'sam3') {  // 不隐藏SAM3滑块
                 button.style.display = 'none';
             }
         });
         
-        // 显示相关的工具按钮
-        toolsToShow.forEach(tool => {
-            if (toolButtons[tool]) {
-                toolButtons[tool].style.display = 'inline-block';
+        // 根据项目类型显示相应的工具按钮
+        if (projectType === 'detection') {
+            if (toolButtons['box']) toolButtons['box'].style.display = 'inline-block';
+        } else if (projectType === 'segmentation') {
+            // 对于实例分割项目，始终显示SAM3按钮
+            if (toolButtons['sam3']) toolButtons['sam3'].style.display = 'flex';
+            
+            // 隐藏segment按钮，只使用SAM3滑块控制
+            if (toolButtons['segment']) toolButtons['segment'].style.display = 'none';
+            
+            // 确保其他不相关的工具按钮隐藏
+            const otherTools = ['box', 'obb', 'keypoints'];
+            otherTools.forEach(tool => {
+                const button = toolButtons[tool];
+                if (button) {
+                    button.style.display = 'none';
+                }
+            });
+            
+            // 确保SAM3操作按钮被创建
+            this.ensureSAM3OperationButtonsCreated();
+            
+            // 只有当SAM3激活时才显示操作工具栏
+            const sam3Toolbar = document.getElementById('sam3-operation-toolbar');
+            if (sam3Toolbar) {
+                if (this.sam3Tool && this.sam3Tool.isActive) {
+                    sam3Toolbar.style.display = 'block';
+                } else {
+                    sam3Toolbar.style.display = 'none';
+                }
             }
-        });
+        } else if (projectType === 'obb') {
+            if (toolButtons['obb']) toolButtons['obb'].style.display = 'inline-block';
+        } else if (projectType === 'pose') {
+            if (toolButtons['keypoints']) toolButtons['keypoints'].style.display = 'inline-block';
+        }
+    }
+    
+    // 确保SAM3操作按钮事件绑定
+    ensureSAM3OperationButtonsCreated() {
+        // 绑定SAM3操作按钮事件到预定义的HTML元素
+        
+        // 点提示按钮
+        const pointBtn = document.getElementById('sam3-point-mode');
+        if (pointBtn && !pointBtn.hasAttribute('data-bound')) {
+            pointBtn.addEventListener('click', () => {
+                if (this.sam3Tool) {
+                    this.sam3Tool.setPromptType('point');
+                }
+            });
+            pointBtn.setAttribute('data-bound', 'true');
+        }
+        
+        // 框提示按钮
+        const boxBtn = document.getElementById('sam3-box-mode');
+        if (boxBtn && !boxBtn.hasAttribute('data-bound')) {
+            boxBtn.addEventListener('click', () => {
+                if (this.sam3Tool) {
+                    this.sam3Tool.setPromptType('box');
+                }
+            });
+            boxBtn.setAttribute('data-bound', 'true');
+        }
+        
+        // 清除按钮
+        const clearBtn = document.getElementById('sam3-clear');
+        if (clearBtn && !clearBtn.hasAttribute('data-bound')) {
+            clearBtn.addEventListener('click', () => {
+                if (this.sam3Tool) {
+                    this.sam3Tool.clearPrompts();
+                }
+            });
+            clearBtn.setAttribute('data-bound', 'true');
+        }
+        
+        // 执行分割按钮
+        const executeBtn = document.getElementById('sam3-execute');
+        if (executeBtn && !executeBtn.hasAttribute('data-bound')) {
+            executeBtn.addEventListener('click', () => {
+                if (this.sam3Tool) {
+                    this.sam3Tool.executeSegmentation();
+                }
+            });
+            executeBtn.setAttribute('data-bound', 'true');
+        }
     }
     
 
@@ -343,6 +672,12 @@ class AnnotationTool {
         const { x: canvasX, y: canvasY, rawX: mouseX, rawY: mouseY } = this.getCanvasCoordinates(e);
         this.mouseX = mouseX;
         this.mouseY = mouseY;
+        
+        // 如果SAM3工具处于活动状态，交由SAM3工具处理
+        if (this.currentTool === 'sam3' && this.sam3Tool && this.sam3Tool.isActive) {
+            this.sam3Tool.onMouseMove(e);
+            return;
+        }
         
         // 根据当前工具类型处理鼠标移动
         if (this.currentTool === 'segment') {
@@ -909,6 +1244,29 @@ class AnnotationTool {
             if (this.projectData.project_type === 'pose' && this.keypointsTool) {
                 this.keypointsTool.setClassKeypointsConfig(this.projectData.class_keypoints || []);
             }
+            
+            // 如果是实例分割项目，确保SAM3工具按钮存在并显示
+            if (this.projectData.project_type === 'segmentation') {
+                // 确保SAM3按钮被创建（如果尚未创建）
+                this.addSAM3ToolButton();
+                
+                // 确保SAM3控制容器可见（在容器创建后）
+                setTimeout(() => {
+                    const sam3Container = document.getElementById('sam3-control-container');
+                    if (sam3Container) {
+                        sam3Container.style.display = 'flex';
+                        console.log('SAM3控制容器设置为可见');
+                    } else {
+                        console.log('未找到SAM3控制容器');
+                    }
+                }, 100); // 稍微延时以确保容器已被创建
+                
+                // 再次调用hideIrrelevantTools以确保所有显示状态正确
+                setTimeout(() => {
+                    this.hideIrrelevantTools();
+                    console.log('再次调用hideIrrelevantTools以确保显示状态');
+                }, 150); // 稍晚一点执行，确保前面的设置已完成
+            }
         } catch (error) {
             console.error('加载项目失败:', error);
             alert('加载项目失败');
@@ -1406,6 +1764,31 @@ class AnnotationTool {
     }
     
     async saveAnnotation() {
+        // 实现防抖机制，防止频繁保存
+        if (this.debounceTimer) {
+            // 如果已经有保存请求在等待，取消之前的请求
+            clearTimeout(this.debounceTimer);
+            this.pendingSave = true; // 标记有新的保存需求
+            this.debounceTimer = setTimeout(async () => {
+                await this.performSave();
+                this.pendingSave = false;
+            }, 500); // 500ms延迟
+            return;
+        }
+        
+        // 如果没有等待的请求，立即执行保存
+        await this.performSave();
+        
+        // 设置定时器，如果在此期间又有新的保存请求，则等待
+        this.debounceTimer = setTimeout(() => {
+            this.debounceTimer = null;
+            if (this.pendingSave) {
+                this.saveAnnotation();
+            }
+        }, 500);
+    }
+    
+    async performSave() {
         if (!this.currentImageData) return;
         
         console.log('开始保存标注，当前工具:', this.currentTool);
@@ -1820,6 +2203,12 @@ class AnnotationTool {
         // 使用通用坐标转换方法
         const { x: canvasX, y: canvasY } = this.getCanvasCoordinates(e);
         
+        // 如果是SAM3工具，交由SAM3工具处理
+        if (this.currentTool === 'sam3' && this.sam3Tool && this.sam3Tool.isActive) {
+            this.sam3Tool.onMouseDown(e);
+            return;
+        }
+        
         // 如果准备好进行抓手模式，开始拖拽
         if (this.isPanReady) {
             this.isPanning = true;
@@ -1997,8 +2386,19 @@ class AnnotationTool {
     
     stopDrawing(e) {
         console.log('停止绘制，当前工具:', this.currentTool);
+        
+        // 如果是SAM3工具，交由SAM3工具处理
+        if (this.currentTool === 'sam3' && this.sam3Tool && this.sam3Tool.isActive) {
+            this.sam3Tool.onMouseUp(e);
+            return;
+        }
+        
         // 根据当前工具类型处理停止绘制
-        if (this.currentTool === 'segment') {
+        if (this.currentTool === 'sam3' && this.sam3Tool && this.sam3Tool.isActive) {
+            // 如果是SAM3工具，交由SAM3工具处理
+            this.sam3Tool.onMouseUp(e);
+            return;
+        } else if (this.currentTool === 'segment') {
             // 如果正在拖拽点，则停止拖拽
             if (this.segmentationTool.isDraggingPoint) {
                 console.log('完成实例分割点拖拽');
@@ -2158,7 +2558,37 @@ class AnnotationTool {
         }
         
         // 根据当前工具类型绘制标注
-        if (this.currentTool === 'segment') {
+        if (this.currentTool === 'sam3' && this.sam3Tool && this.sam3Tool.isActive) {
+            // SAM3工具的绘制
+            // 首先绘制已有标注
+            this.annotations.forEach((ann, index) => {
+                const isSelected = this.selectedAnnotation === ann;
+                // 对于分割标注，使用特殊的绘制方法
+                if (ann.points) {
+                    this.drawSegmentAnnotation(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
+                } else if (!ann.keypoints && ann.x !== undefined && ann.y !== undefined && ann.width !== undefined && ann.height !== undefined) {
+                    // 对于普通矩形框标注，使用drawBox方法
+                    this.drawBox(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
+                }
+            });
+            
+            // 绘制关键点标注（确保在最上层）
+            this.annotations.forEach((ann, index) => {
+                const isSelected = this.selectedAnnotation === ann;
+                if (ann.keypoints) {
+                    // 对于关键点标注，使用关键点工具的绘制方法
+                    this.keypointsTool.drawKeypoints(ann, this.getClassColor(ann.class_id), false, index + 1, isSelected);
+                }
+            });
+            
+            // 绘制当前正在绘制的框
+            if (this.currentBox) {
+                this.drawBox(this.currentBox, this.getClassColor(this.selectedClass), true);
+            }
+            
+            // 绘制SAM3相关的元素
+            this.sam3Tool.drawSAM3Elements();
+        } else if (this.currentTool === 'segment') {
             this.segmentationTool.redraw();
         } else if (this.currentTool === 'obb') {
             this.obbTool.redraw();
@@ -2557,7 +2987,19 @@ class AnnotationTool {
         const key = e.key.toLowerCase();
         
         // 根据当前工具类型处理特定按键
-        if (this.currentTool === 'segment' && key === 'enter') {
+        if (this.currentTool === 'sam3' && this.sam3Tool && this.sam3Tool.isActive) {
+            // 对于切换图片和类别的快捷键，即使在SAM3激活状态下也要处理
+            const navigationKeys = ['a', 'd', 'arrowleft', 'arrowright', 'w', 's'];
+            const classSelectionKeys = ['1', '2', '3', '4', '5', '6', '7', '8', '9'];
+            
+            if (navigationKeys.includes(key) || classSelectionKeys.some(num => num === e.key)) {
+                // 让基础快捷键正常工作
+            } else {
+                // 其他快捷键交给SAM3工具处理
+                this.sam3Tool.handleKeyDown(e);
+                return;
+            }
+        } else if (this.currentTool === 'segment' && key === 'enter') {
             e.preventDefault();
             this.segmentationTool.finishDrawing();
             return;
@@ -2585,6 +3027,25 @@ class AnnotationTool {
                 this.deleteSelectedAnnotation();
             }
             return;
+        }
+        
+        // 如果是实例分割项目且SAM3已启用，处理Q键切换
+        const sam3Switch = document.getElementById('enable-sam3-switch');
+        if (this.projectData && this.projectData.project_type === 'segmentation' && 
+            sam3Switch && sam3Switch.checked) {
+            if (key === 'q') {
+                e.preventDefault();
+                // 切换到SAM3分割模式
+                if (this.currentTool !== 'sam3') {
+                    if (this.sam3Tool) {
+                        this.setTool('sam3');
+                    }
+                } else {
+                    // 如果当前已经是SAM3模式，切换回segment模式
+                    this.setTool('segment');
+                }
+                return;
+            }
         }
         
         // 处理Q和E键的快捷键（用于关键点工具模式切换）
@@ -3200,6 +3661,60 @@ class AnnotationTool {
             item.classList.toggle('selected', originalIndex === this.currentImageIndex);
         });
     }
+    
+
+    
+
+    
+
+    
+    // 显示SAM3操作选项
+    showSAM3OperationOptions() {
+        // 这个方法现在不再需要，因为使用了固定的SAM3操作工具栏
+        // 保持为空实现以维持兼容性
+    }
+    
+    // 隐藏SAM3操作选项
+    hideSAM3OperationOptions() {
+        // 这个方法现在不再需要，因为使用了固定的SAM3操作工具栏
+        // 保持为空实现以维持兼容性
+    }
+    
+    // 显示SAM3提示信息
+    showSam3HintInfo() {
+        const hintInfo = document.getElementById('sam3-hint-info');
+        if (hintInfo) {
+            hintInfo.style.display = 'block';
+        }
+    }
+    
+    // 处理SAM3开关切换
+    handleSam3ToggleChange(event) {
+        const isChecked = event.target.checked;
+        
+        if (isChecked) {
+            // 启用SAM3
+            if (this.sam3Tool) {
+                this.sam3Tool.activate();
+            }
+        } else {
+            // 禁用SAM3
+            if (this.sam3Tool && this.sam3Tool.isActive) {
+                this.sam3Tool.deactivate();
+            }
+        }
+    }
+    
+    // 隐藏SAM3提示信息
+    hideSam3HintInfo() {
+        const hintInfo = document.getElementById('sam3-hint-info');
+        if (hintInfo) {
+            hintInfo.style.display = 'none';
+        }
+    }
+    
+    
+
 }
 
 // 初始化标注工具

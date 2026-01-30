@@ -715,7 +715,12 @@ class AnnotationService:
             raise HTTPException(status_code=404, detail="项目不存在")
         
         project_id_value = UUID(str(actual_project.id)) if actual_project.id is not None else UUID(str(project.id))
-        images = image_annotation.get_by_project_id(db, project_id=project_id_value)
+        
+        # 获取所有图片及其标注，避免N+1查询
+        # 注意：annotations是普通列（JSON字段），不是关系，所以不需要使用joinedload
+        images = db.query(ImageAnnotationModel).filter(
+            ImageAnnotationModel.project_id == project_id_value
+        ).all()
         
         # 创建目录结构
         if export_request.split_data:
@@ -734,20 +739,15 @@ class AnnotationService:
             os.makedirs(export_dir / "labels", exist_ok=True)
         
         # 处理每张图片
-        for img in images:
-            # 通过查询获取实际的图片数据
-            actual_img = db.query(ImageAnnotationModel).filter(ImageAnnotationModel.id == img.id).first()
-            if not actual_img:
-                continue  # 跳过无效的图片
-            img_annotations = actual_img.annotations if actual_img.annotations is not None else []
-            img_annotations_value = img_annotations if isinstance(img_annotations, list) else []
+        project_class_keypoints_value = actual_project.class_keypoints if actual_project.class_keypoints is not None and isinstance(actual_project.class_keypoints, list) else None
+        for actual_img in images:
+            # 直接使用预加载的标注数据，避免再次查询
+            img_annotations_value = actual_img.annotations if actual_img.annotations is not None else []
+            img_annotations_value = img_annotations_value if isinstance(img_annotations_value, list) else []
             if not img_annotations_value:
                 continue
                 
             # 创建标签文件
-            img_annotations = actual_img.annotations if actual_img.annotations is not None else []
-            img_annotations_value = img_annotations if isinstance(img_annotations, list) else []
-            project_class_keypoints_value = actual_project.class_keypoints if actual_project.class_keypoints is not None and isinstance(actual_project.class_keypoints, list) else None
             label_content = self._format_annotation_labels(img_annotations_value, project_class_keypoints_value)
             
             # 确定目标目录
@@ -1343,7 +1343,11 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
         image_name_str = str(image_name) if image_name is not None else ""
         project_image_directory = project.image_directory if project.image_directory is not None else ""
         project_image_directory_str = str(project_image_directory) if project_image_directory is not None else ""
-
+        
+        # 防止路径穿越攻击：使用Path.resolve()规范化路径
+        from app.core.config import settings
+        static_dir = settings.STATIC_DIR
+        
         if image_path_str.startswith('datasets/'):
             image_file_path = Path("app/static") / image_path_str
         elif Path(image_path_str).is_absolute():  # 确保转换为字符串
@@ -1351,7 +1355,17 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
         else:
             image_file_path = Path(project_image_directory_str) / image_name_str
         
-        if not image_file_path.exists():
+        # 规范化路径并验证其在允许的目录范围内
+        resolved_path = image_file_path.resolve()
+        static_dir_resolved = static_dir.resolve()
+        
+        # 检查路径是否在静态目录范围内
+        try:
+            resolved_path.relative_to(static_dir_resolved)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="非法路径访问")
+        
+        if not resolved_path.exists():
             raise HTTPException(status_code=404, detail="图片文件不存在")
         
         try:
@@ -1371,8 +1385,140 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
             if results and len(results) > 0:
                 result = results[0]
                 
+                # 如果是实例分割项目，尝试使用YOLO+SAM3结合的方式
+                if project.project_type == 'segmentation':
+                    # 尝试导入SAM模块
+                    try:
+                        # 1. 引用 sam3.py 中的共享资源
+                        from app.api.endpoints.sam3 import get_shared_sam_model, BEST_DEVICE
+                        
+                        # 查找SAM模型 - 在相同目录下寻找sam开头的模型文件
+                        model_dir = Path(model_path).parent
+                        sam_model_path = None
+                        for file in model_dir.iterdir():
+                            if file.suffix in ['.pt', '.engine'] and 'sam' in file.name.lower():
+                                sam_model_path = str(file)
+                                break
+                        
+                        # 如果没找到，尝试默认的sam3.pt
+                        if not sam_model_path:
+                            sam_model_path = "sam3.pt"
+                        
+                        # 使用YOLO检测结果作为SAM的提示
+                        if result.boxes is not None and len(result.boxes) > 0:
+                            # === 关键：从共享缓存拿模型 ===
+                            # 绝对不要再 create 新的 SAM() 对象了
+                            sam_model = get_shared_sam_model(sam_model_path)
+                            
+                            # 获取YOLO检测到的边界框
+                            boxes = result.boxes
+                            bboxes_xyxy = boxes.xyxy.cpu().numpy().tolist()
+                            
+                            # 使用YOLO检测的边界框作为SAM的输入
+                            import torch
+                            
+                            # 从配置文件加载用户设置的参数
+                            from app.api.endpoints.sam3 import load_sam3_config
+                            sam3_config = load_sam3_config()
+                            imgsz_value = sam3_config.get("imgsz", 1024)  # 默认1024
+                            half_precision = sam3_config.get("half_precision", True)  # 默认True
+                            
+                            with torch.no_grad():
+                                sam_results = sam_model.predict(
+                                    source=str(image_file_path),
+                                    bboxes=bboxes_xyxy,
+                                    imgsz=imgsz_value,         # 使用用户配置的图像尺寸
+                                    half=half_precision,       # 使用用户配置的半精度设置
+                                    device=BEST_DEVICE,
+                                    retina_masks=False,
+                                    verbose=False
+                                )
+                            
+                            # 解析SAM结果
+                            if sam_results and len(sam_results) > 0:
+                                sam_result = sam_results[0]
+                                
+                                if sam_result.masks is not None:
+                                    # 获取归一化多边形
+                                    xyn = sam_result.masks.xyn
+                                    cls_ids = boxes.cls.cpu().numpy()  # 类别沿用 YOLO 的
+                                    
+                                    for i, poly in enumerate(xyn):
+                                        if len(poly) > 0:
+                                            # 构造标注数据
+                                            class_id = int(cls_ids[i])
+                                            if class_id < len(project_classes):
+                                                # 转换为 annotation.js 需要的格式
+                                                # 注意这里后端存的是归一化的 points 列表
+                                                flat_points = poly.flatten().tolist()
+                                                
+                                                # 计算中心点和宽高
+                                                xs = flat_points[0::2]
+                                                ys = flat_points[1::2]
+                                                x_min, x_max = min(xs), max(xs)
+                                                y_min, y_max = min(ys), max(ys)
+                                                
+                                                annotations.append({
+                                                    "class_id": class_id,
+                                                    "x_center": (x_min + x_max) / 2,
+                                                    "y_center": (y_min + y_max) / 2,
+                                                    "width": x_max - x_min,
+                                                    "height": y_max - y_min,
+                                                    "points": flat_points  # [x1, y1, x2, y2...]
+                                                })
+                            else:
+                                # 如果SAM失败，降级使用YOLO的检测结果
+                                boxes = result.boxes
+                                img_height, img_width = result.orig_shape
+                                
+                                for i in range(len(boxes)):
+                                    box = boxes.xyxy[i].cpu().numpy()
+                                    x1, y1, x2, y2 = box
+                                    
+                                    x_center = (x1 + x2) / 2 / img_width
+                                    y_center = (y1 + y2) / 2 / img_height
+                                    width = (x2 - x1) / img_width
+                                    height = (y2 - y1) / img_height
+                                    
+                                    class_id = int(boxes.cls[i].cpu().numpy())
+                                    
+                                    if class_id < len(project_classes):
+                                        annotations.append({
+                                            "class_id": class_id,
+                                            "x_center": float(x_center),
+                                            "y_center": float(y_center),
+                                            "width": float(width),
+                                            "height": float(height)
+                                        })
+                    except Exception as e:
+                        # 如果SAM失败，使用常规的YOLO检测
+                        print(f"SAM3 refinement failed: {e}")
+                        # 继续使用常规的YOLO处理逻辑
+                        if result.boxes is not None:
+                            boxes = result.boxes
+                            img_height, img_width = result.orig_shape
+                            
+                            for i in range(len(boxes)):
+                                box = boxes.xyxy[i].cpu().numpy()
+                                x1, y1, x2, y2 = box
+                                
+                                x_center = (x1 + x2) / 2 / img_width
+                                y_center = (y1 + y2) / 2 / img_height
+                                width = (x2 - x1) / img_width
+                                height = (y2 - y1) / img_height
+                                
+                                class_id = int(boxes.cls[i].cpu().numpy())
+                                
+                                if class_id < len(project_classes):
+                                    annotations.append({
+                                        "class_id": class_id,
+                                        "x_center": float(x_center),
+                                        "y_center": float(y_center),
+                                        "width": float(width),
+                                        "height": float(height)
+                                    })
                 # 如果是OBB项目且模型返回了obb属性
-                if project.project_type == 'obb' and hasattr(result, 'obb') and result.obb is not None:
+                elif project.project_type == 'obb' and hasattr(result, 'obb') and result.obb is not None:
                     obbs = result.obb
                     
                     # 获取图片尺寸

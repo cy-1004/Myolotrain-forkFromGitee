@@ -10,7 +10,7 @@
 
 
 # YOLO and dependencies
-ultralytics>=8.3.191
+ultralytics>=8.3.237
 numpy>=1.26.0   #仅有1.26.0以上支持python3.12
 opencv-python>=4.8.0
 PyYAML>=5.3.1
@@ -20,6 +20,7 @@ pillow>=10.0.0
 psutil>=5.9.0
 nvidia-ml-py>=13.580.82 #pynvml即将弃用，更新
 tensorboard>=2.20.0 #仅有2.16.0以上支持python3.12
+timm>=1.0.24
 
 # =============================================
 # GPU support additional dependencies
@@ -46,6 +47,9 @@ pydantic-settings>=2.0.0
 
 # File handling
 aiofiles>=23.0
+
+# Packaging tools
+packaging>=23.0
 
 # ONNX support
 # onnxruntime-gpu>=1.21.0，需在发行版中明确（！！）

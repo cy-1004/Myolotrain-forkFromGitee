@@ -569,7 +569,12 @@ def get_image_file(
             # 如果image_path只包含文件名，则使用项目的image_directory和image_path组合
             # 注意：这里使用image_path而不是image_name，因为两者应该是相同的
             if image_directory_str and image_path_str:
+                # 修复Windows路径问题：规范化路径分隔符
                 image_file_path = Path(image_directory_str) / image_path_str
+                # 尝试使用os.path.normpath来处理跨平台路径
+                import os
+                normalized_path = os.path.normpath(str(image_file_path))
+                image_file_path = Path(normalized_path)
                 logging.info(f"get_image_file: Using project_dir + image_path: {image_file_path}")
         else:
             # 否则先尝试直接使用image_path作为相对路径
@@ -580,7 +585,11 @@ def get_image_file(
         if not image_file_path or not image_file_path.exists():
             image_path_str_fallback = str(image.image_name) if image.image_name is not None else ""
             if image_directory_str and image_path_str_fallback:
+                # 修复Windows路径问题：规范化路径分隔符
                 fallback_path = Path(image_directory_str) / image_path_str_fallback
+                import os
+                normalized_fallback_path = os.path.normpath(str(fallback_path))
+                fallback_path = Path(normalized_fallback_path)
                 logging.info(f"get_image_file: Trying fallback path: {fallback_path}")
                 if fallback_path.exists():
                     image_file_path = fallback_path

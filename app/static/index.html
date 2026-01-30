@@ -2206,6 +2206,7 @@
                 <div class="btn-group">
                     <button class="btn btn-primary" id="create-annotation-project-btn">创建标注项目</button>
                     <button class="btn btn-success" id="merge-annotation-projects-btn">合并标注项目</button>
+                    <button class="btn btn-info" id="sam3-config-btn">SAM3配置</button>
                 </div>
             </div>
         </div>
@@ -2263,6 +2264,14 @@
                             <p class="mb-1"><strong>标注流程：</strong>选择类别后点击画布开始进行多边形标注，双击最后一点或按回车键完成多边形闭合</p>
                             <p class="mb-1"><strong>编辑已有标注：</strong>按住键盘ctrl+点击选中已标注的多边形后，可移动、删除当前标注或移动顶点，编辑过程ctrl键不能松开</p>
                             <p class="mb-0"><strong>注意事项：</strong>保存前确保所有多边形已正确闭合，未闭合的多边形将无法保存</p>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <h6 class="text-primary mb-2">SAM3功能说明</h6>
+                        <div class="alert alert-info small p-3 mb-0">
+                            <p class="mb-1"><strong>配置：</strong>第一次配置建议验证一次，如果首次验证通过，后期修改模型地址（文件没变只是更改地址）分辨率、半精度可以不用验证直接保存</p>
+                            <p class="mb-1"><strong>使用：</strong>实例分割标注界面点击启用SAM3、选择工具后点击或者框选需要分割的位置，点击执行分割，点击关闭SAM3后可以切换回手动实例分割工具</p>
+                            <p class="mb-0"><strong>快捷键：</strong>启用SAM3后，键盘F可以快速打开文本提示框</p>
                         </div>
                     </div>
                     <div class="col-12">
@@ -2475,6 +2484,40 @@
         </form>
     </template>
 
+    <!-- SAM3配置模态框内容 -->
+    <template id="sam3-config-template">
+        <form id="sam3-config-form">
+            <div class="mb-3">
+                <label for="sam3-model-path" class="form-label">SAM3模型路径</label>
+                <input type="text" class="form-control" id="sam3-model-path" placeholder="请输入SAM3模型文件路径或选择模型">
+                <div class="form-text">手动输入完整路径</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="sam3-imgsz" class="form-label">推理图像尺寸</label>
+                <input type="number" class="form-control" id="sam3-imgsz" value="1024" min="0" max="2048" step="32">
+                <div class="form-text">图像推理时的尺寸，默认1024</div>
+            </div>
+            
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="sam3-half-precision">
+                    <label class="form-check-label" for="sam3-half-precision">启用半精度推理</label>
+                </div>
+                <div class="form-text">勾选后使用FP16半精度推理，提升速度但可能略微降低精度</div>
+            </div>
+            
+            <div class="mb-3">
+                <button type="button" class="btn btn-outline-primary w-100" id="validate-sam3-model-btn">验证模型配置</button>
+                <div class="form-text mt-2">验证模型路径和配置是否有效</div>
+            </div>
+            
+            <div id="sam3-validation-result" class="alert" style="display: none;">
+                <div class="validation-message"></div>
+            </div>
+        </form>
+    </template>
+
     <!-- 创建标注项目模态框内容 -->
     <template id="create-annotation-project-template">
         <form id="create-annotation-project-form">
@@ -2596,6 +2639,7 @@
                         <div id="upload-source-container" class="mb-3">
                             <input class="form-control" type="file" id="annotation-images-zip" accept=".zip">
                             <div class="form-text">上传包含图片的ZIP文件，支持jpg、png、bmp、webp格式</div>
+                            <div class="form-text">如果需要导入原标注，ZIP目录结构为：/images、/labels（TXT标注，与图片名匹配）、/classes.txt（类别名称列表）</div>
                         </div>
                         
                     <!--     <div class="form-check mb-2">

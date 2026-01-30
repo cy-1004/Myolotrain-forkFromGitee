@@ -3,6 +3,20 @@ class OnlineAnnotation {
     constructor() {
         this.currentSortField = '';
         this.currentSortDirection = 'asc';
+        
+        // 确保在DOM加载完成后初始化
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                this.init();
+            });
+        } else {
+            this.init();
+        }
+    }
+    
+    init() {
+        console.log('Initializing OnlineAnnotation...');
+        this.loadAnnotationPage();
     }
 
     // 加载标注页面
@@ -18,6 +32,12 @@ class OnlineAnnotation {
 
     // 加载标注项目列表
     loadAnnotationProjects() {
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            return;
+        }
+        
         authenticatedFetch(`${API_URL}/annotation/projects/`)
             .then(response => response.json())
             .then(projects => {
@@ -38,6 +58,24 @@ class OnlineAnnotation {
                     const row = document.createElement('tr');
                     
                     // 获取项目统计信息
+                    // 确保API_URL已定义
+                    if (typeof API_URL === 'undefined') {
+                        console.error('API_URL is not defined');
+                        return Promise.reject('API_URL is not defined');
+                    }
+                                    
+                    // 确保API_URL已定义
+                    if (typeof API_URL === 'undefined') {
+                        console.error('API_URL is not defined');
+                        return Promise.reject('API_URL is not defined');
+                    }
+                                            
+                    // 确保API_URL已定义
+                    if (typeof API_URL === 'undefined') {
+                        console.error('API_URL is not defined');
+                        return Promise.reject('API_URL is not defined');
+                    }
+                                
                     authenticatedFetch(`${API_URL}/annotation/projects/${project.id}/stats`)
                         .then(response => response.json())
                         .then(stats => {
@@ -116,12 +154,26 @@ class OnlineAnnotation {
     bindAnnotationEvents() {
         const createProjectBtn = document.getElementById('create-annotation-project-btn');
         if (createProjectBtn) {
-            createProjectBtn.addEventListener('click', () => this.showCreateAnnotationProjectModal());
+            // 移除现有事件监听器以避免重复绑定
+            const newCreateBtn = createProjectBtn.cloneNode(true);
+            createProjectBtn.parentNode.replaceChild(newCreateBtn, createProjectBtn);
+            newCreateBtn.addEventListener('click', () => this.showCreateAnnotationProjectModal());
         }
         
         const mergeProjectBtn = document.getElementById('merge-annotation-projects-btn');
         if (mergeProjectBtn) {
-            mergeProjectBtn.addEventListener('click', () => this.showMergeAnnotationProjectsModal());
+            // 移除现有事件监听器以避免重复绑定
+            const newMergeBtn = mergeProjectBtn.cloneNode(true);
+            mergeProjectBtn.parentNode.replaceChild(newMergeBtn, mergeProjectBtn);
+            newMergeBtn.addEventListener('click', () => this.showMergeAnnotationProjectsModal());
+        }
+        
+        const sam3ConfigBtn = document.getElementById('sam3-config-btn');
+        if (sam3ConfigBtn) {
+            // 移除现有事件监听器以避免重复绑定
+            const newSam3Btn = sam3ConfigBtn.cloneNode(true);
+            sam3ConfigBtn.parentNode.replaceChild(newSam3Btn, sam3ConfigBtn);
+            newSam3Btn.addEventListener('click', () => this.showSAM3ConfigModal());
         }
         
         const projectSelect = document.getElementById('annotation-project-select');
@@ -132,53 +184,361 @@ class OnlineAnnotation {
                     console.log('Loading annotation project:', this.value);
                 }
             });
-        }
+        };
     }
-
-    // 显示创建标注项目模态框
-    showCreateAnnotationProjectModal() {
+    
+    // 显示SAM3配置模态框
+    showSAM3ConfigModal() {
         const modalTitle = document.querySelector('.modal-title');
         const modalBody = document.querySelector('.modal-body');
         const modalSubmit = document.getElementById('modalSubmit');
 
-        modalTitle.textContent = '创建标注项目';
+        modalTitle.textContent = 'SAM3配置';
 
         // 获取模板内容
-        const template = document.getElementById('create-annotation-project-template');
+        const template = document.getElementById('sam3-config-template');
         if (!template) {
-            console.error('create-annotation-project-template not found');
+            console.error('sam3-config-template not found');
             return;
         }
 
         modalBody.innerHTML = template.innerHTML;
 
-        // 加载数据集选项
-        this.loadDatasetOptionsForAnnotation();
-        
-        // 绑定图片来源选择事件
-        this.bindImageSourceEvents();
-        
-        // 绑定标注类型选择事件
-        this.bindAnnotationTypeEvents();
-        
-        // 绑定类别和关键点配置事件
-        this.bindClassKeypointsEvents();
-        
-        // 绑定导入原标注开关事件
-        this.bindImportOriginalAnnotationsEvent();
-        
-        // 为初始的项目绑定事件
-        document.querySelectorAll('.class-keypoints-item').forEach(item => {
-            this.bindKeypointEventsForItem(item);
-        });
+        // 绑定SAM3配置事件
+        this.bindSAM3ConfigEvents();
 
-        modal.show();
+        const modalElement = document.getElementById('mainModal');
+        const bsModal = new bootstrap.Modal(modalElement);
         
-        // 设置提交按钮文字为确定
-        modalSubmit.textContent = '确定';
-        modalSubmit.onclick = () => this.submitCreateAnnotationProject();
+        // 先显示模态框，然后加载已保存的配置
+        bsModal.show();
+        
+        // 等待一点时间确保DOM渲染完成，然后加载已保存的配置
+        setTimeout(() => {
+            this.loadSavedSAM3Config();
+        }, 200);
+        
+        // 设置提交按钮文字为保存
+        modalSubmit.textContent = '保存';
+        modalSubmit.onclick = () => this.submitSAM3Config();
+    }
+    
+    // 加载已保存的SAM3配置
+    async loadSavedSAM3Config() {
+        try {
+            const response = await fetch('/api/sam3/check_config');
+            const data = await response.json();
+            
+            if (data.configured && data.config) {
+                // 等待一段时间确保下拉框已加载完成
+                await new Promise(resolve => setTimeout(resolve, 300));
+                
+                // 填充已保存的配置值
+                const modelPathInput = document.getElementById('sam3-model-path');
+                const imgszInput = document.getElementById('sam3-imgsz');
+                const halfPrecisionCheckbox = document.getElementById('sam3-half-precision');
+                
+                if (modelPathInput && data.config.model_path) {
+                    modelPathInput.value = data.config.model_path;
+                }
+                
+                if (imgszInput && data.config.imgsz) {
+                    imgszInput.value = data.config.imgsz;
+                }
+                
+                if (halfPrecisionCheckbox && typeof data.config.half_precision !== 'undefined') {
+                    halfPrecisionCheckbox.checked = data.config.half_precision;
+                }
+                
+                // 尝试同步下拉框选择
+                const modelSelect = document.getElementById('sam3-model-select');
+                if (modelSelect && modelPathInput && modelPathInput.value) {
+                    // 查找匹配的选项并选中
+                    for (let i = 0; i < modelSelect.options.length; i++) {
+                        if (modelSelect.options[i].value === modelPathInput.value) {
+                            modelSelect.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('加载已保存的SAM3配置失败:', error);
+        }
     }
 
+    // 绑定SAM3配置事件
+    bindSAM3ConfigEvents() {
+        // 绑定模型选择事件
+        const modelSelect = document.getElementById('sam3-model-select');
+        if (modelSelect) {
+            modelSelect.addEventListener('change', (e) => {
+                const selectedValue = e.target.value;
+                if (selectedValue) {
+                    document.getElementById('sam3-model-path').value = selectedValue;
+                }
+            });
+            
+            // 加载模型列表
+            this.loadSAM3Models();
+        }
+        
+        // 绑定验证按钮事件
+        const validateBtn = document.getElementById('validate-sam3-model-btn');
+        if (validateBtn) {
+            validateBtn.addEventListener('click', () => {
+                this.validateSAM3Model();
+            });
+        }
+    }
+
+    // 加载SAM3模型列表
+    loadSAM3Models() {
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            return;
+        }
+        
+        authenticatedFetch(`${API_URL}/models/type/sam3`)
+            .then(response => response.json())
+            .then(models => {
+                const modelSelect = document.getElementById('sam3-model-select');
+                if (!modelSelect) return;
+                
+                // 清空现有选项（保留第一个默认选项）
+                while (modelSelect.options.length > 1) {
+                    modelSelect.remove(1);
+                }
+                
+                models.forEach(model => {
+                    const option = document.createElement('option');
+                    option.value = model.path;
+                    option.textContent = `${model.name} (${model.type})`;
+                    modelSelect.appendChild(option);
+                });
+            })
+            .catch(error => {
+                console.error('Error loading SAM3 models:', error);
+            });
+    }
+
+    // 验证SAM3模型
+    validateSAM3Model() {
+        const modelPath = document.getElementById('sam3-model-path').value;
+        const imgsz = parseInt(document.getElementById('sam3-imgsz').value) || 1024;
+        const halfPrecision = document.getElementById('sam3-half-precision').checked;
+        
+        if (!modelPath) {
+            alert('请先选择或输入模型路径');
+            return;
+        }
+        
+        // 获取验证按钮并设置为验证中状态
+        const validateBtn = document.getElementById('validate-sam3-model-btn');
+        const originalBtnText = validateBtn.innerHTML;
+        validateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>验证中...';
+        validateBtn.disabled = true;
+        
+        const formData = new FormData();
+        formData.append('model_path', modelPath);
+        formData.append('imgsz', imgsz);
+        formData.append('half_precision', halfPrecision);
+        
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            // 恢复按钮状态
+            validateBtn.innerHTML = originalBtnText;
+            validateBtn.disabled = false;
+            return Promise.reject('API_URL is not defined');
+        }
+        
+        authenticatedFetch(`${API_URL}/sam3/validate`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            const resultDiv = document.getElementById('sam3-validation-result');
+            if (data.valid) {
+                resultDiv.className = 'alert alert-success';
+                resultDiv.innerHTML = `<div class="validation-message">✓ 模型验证成功！正在保存配置...</div>`;
+                resultDiv.style.display = 'block';
+                
+                // 验证成功后自动保存配置
+                this.saveSAM3Config(modelPath, imgsz, halfPrecision);
+            } else {
+                resultDiv.className = 'alert alert-danger';
+                resultDiv.innerHTML = `<div class="validation-message">✗ 模型验证失败：${data.error || '未知错误'}</div>`;
+                resultDiv.style.display = 'block';
+            }
+        })
+        .catch(error => {
+            console.error('Error validating SAM3 model:', error);
+            const resultDiv = document.getElementById('sam3-validation-result');
+            resultDiv.className = 'alert alert-danger';
+            resultDiv.innerHTML = `<div class="validation-message">✗ 验证请求失败：${error.message}</div>`;
+            resultDiv.style.display = 'block';
+        })
+        .finally(() => {
+            // 恢复按钮状态
+            validateBtn.innerHTML = originalBtnText;
+            validateBtn.disabled = false;
+        });
+    }
+
+    // 保存SAM3配置
+    saveSAM3Config(modelPath, imgsz, halfPrecision) {
+        const formData = new FormData();
+        formData.append('model_path', modelPath);
+        formData.append('imgsz', imgsz);
+        formData.append('half_precision', halfPrecision);
+        
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            return Promise.reject('API_URL is not defined');
+        }
+        
+        // 获取验证按钮并更新状态为保存中
+        const validateBtn = document.getElementById('validate-sam3-model-btn');
+        if (validateBtn) {
+            const originalBtnText = validateBtn.innerHTML;
+            validateBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>保存中...';
+            validateBtn.disabled = true;
+        }
+        
+        authenticatedFetch(`${API_URL}/sam3/save_config`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.detail || '保存配置失败'); });
+            }
+            return response.json();
+        })
+        .then(data => {
+            // 验证通过后保存配置，不关闭模态框
+            const resultDiv = document.getElementById('sam3-validation-result');
+            if (resultDiv) {
+                resultDiv.innerHTML = `<div class="validation-message">✓ 模型验证成功！配置已自动保存。</div>`;
+            }
+        })
+        .catch(error => {
+            console.error('Error saving SAM3 config:', error);
+            // 即使保存失败也要显示错误信息
+            const resultDiv = document.getElementById('sam3-validation-result');
+            if (resultDiv) {
+                resultDiv.className = 'alert alert-warning';
+                resultDiv.innerHTML = `<div class="validation-message">⚠ 模型验证成功，但配置保存失败: ${error.message}</div>`;
+            }
+        })
+        .finally(() => {
+            // 恢复按钮状态
+            if (validateBtn) {
+                // 延迟一小段时间再恢复按钮状态，让用户看到保存完成的反馈
+                setTimeout(() => {
+                    validateBtn.innerHTML = '验证模型配置';
+                    validateBtn.disabled = false;
+                }, 1000);
+            }
+        });
+    }
+    
+    // 提交SAM3配置
+    submitSAM3Config() {
+        const modelPath = document.getElementById('sam3-model-path').value;
+        const imgsz = parseInt(document.getElementById('sam3-imgsz').value) || 1024;
+        const halfPrecision = document.getElementById('sam3-half-precision').checked;
+        
+        if (!modelPath) {
+            alert('请输入模型路径');
+            return;
+        }
+        
+        const formData = new FormData();
+        formData.append('model_path', modelPath);
+        formData.append('imgsz', imgsz);
+        formData.append('half_precision', halfPrecision);
+        
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            return Promise.reject('API_URL is not defined');
+        }
+        
+        authenticatedFetch(`${API_URL}/sam3/save_config`, {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.json().then(err => { throw new Error(err.detail || '保存配置失败'); });
+            }
+            return response.json();
+        })
+        .then(data => {
+            alert('SAM3配置保存成功！');
+            const modalElement = document.getElementById('mainModal');
+            const bsModal = bootstrap.Modal.getInstance(modalElement);
+            if (bsModal) {
+                bsModal.hide();
+            }
+        })
+        .catch(error => {
+            console.error('Error saving SAM3 config:', error);
+            alert('保存配置失败: ' + error.message);
+        });
+    }
+
+    // 显示创建标注项目模态框
+    showCreateAnnotationProjectModal() {
+    const modalTitle = document.querySelector('.modal-title');
+    const modalBody = document.querySelector('.modal-body');
+    const modalSubmit = document.getElementById('modalSubmit');
+
+    modalTitle.textContent = '创建标注项目';
+
+    // 获取模板内容
+    const template = document.getElementById('create-annotation-project-template');
+    if (!template) {
+        console.error('create-annotation-project-template not found');
+        return;
+    }
+
+    modalBody.innerHTML = template.innerHTML;
+
+    // 加载数据集选项
+    this.loadDatasetOptionsForAnnotation();
+    
+    // 绑定图片来源选择事件
+    this.bindImageSourceEvents();
+    
+    // 绑定标注类型选择事件
+    this.bindAnnotationTypeEvents();
+    
+    // 绑定类别和关键点配置事件
+    this.bindClassKeypointsEvents();
+    
+    // 绑定导入原标注开关事件
+    this.bindImportOriginalAnnotationsEvent();
+    
+    // 为初始的项目绑定事件
+    document.querySelectorAll('.class-keypoints-item').forEach(item => {
+        this.bindKeypointEventsForItem(item);
+    });
+
+    const modalElement = document.getElementById('mainModal');
+    const bsModal = new bootstrap.Modal(modalElement);
+    bsModal.show();
+    
+    // 设置提交按钮文字为确定
+    modalSubmit.textContent = '确定';
+    modalSubmit.onclick = () => this.submitCreateAnnotationProject();
+}
+    
     // 绑定图片来源选择事件
     bindImageSourceEvents() {
         const imageSourceRadios = document.querySelectorAll('input[name="image-source"]');
@@ -227,8 +587,14 @@ class OnlineAnnotation {
                     window.directoryBrowser.show(function(selectedPath) {
                         directoryInput.value = selectedPath;
                         
+                        // 确保API_URL已定义
+                        if (typeof API_URL === 'undefined') {
+                            console.error('API_URL is not defined');
+                            return Promise.reject('API_URL is not defined');
+                        }
+                        
                         // 扫描选中目录的图片
-                        authenticatedFetch(`/api/annotation/scan-directory-images?directory_path=${encodeURIComponent(selectedPath)}`)
+                        authenticatedFetch(`${API_URL}/annotation/scan-directory-images?directory_path=${encodeURIComponent(selectedPath)}`)
                             .then(response => response.json())
                             .then(data => {
                                 imageCountSpan.textContent = data.image_count;
@@ -649,7 +1015,11 @@ class OnlineAnnotation {
                     modalSubmit.textContent = '确定';
                     progressContainer.style.display = 'none';
                     
-                    modal.hide();
+                    const modalElement = document.getElementById('mainModal');
+                    const bsModal = bootstrap.Modal.getInstance(modalElement);
+                    if (bsModal) {
+                        bsModal.hide();
+                    }
                     onlineAnnotation.loadAnnotationProjects();
                     
                     // 检查是否有导入结果
@@ -748,7 +1118,11 @@ class OnlineAnnotation {
             return response.json();
         })
         .then(data => {
-            modal.hide();
+            const modalElement = document.getElementById('mainModal');
+            const bsModal = bootstrap.Modal.getInstance(modalElement);
+            if (bsModal) {
+                bsModal.hide();
+            }
             this.loadAnnotationProjects();
             
             // 检查是否有导入结果
@@ -829,6 +1203,12 @@ class OnlineAnnotation {
             return;
         }
         
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            return Promise.reject('API_URL is not defined');
+        }
+        
         authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/scan`, {
             method: 'POST'
         })
@@ -855,6 +1235,12 @@ class OnlineAnnotation {
             include_images: true,
             split_data: false
         };
+        
+        // 确保API_URL已定义
+        if (typeof API_URL === 'undefined') {
+            console.error('API_URL is not defined');
+            return Promise.reject('API_URL is not defined');
+        }
         
         authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/export`, {
             method: 'POST',
@@ -1115,7 +1501,9 @@ class OnlineAnnotation {
         // 绑定事件
         this.bindMergeProjectsEvents();
 
-        modal.show();
+        const modalElement = document.getElementById('mainModal');
+        const bsModal = new bootstrap.Modal(modalElement);
+        bsModal.show();
         
         // 确保提交按钮状态正确
         modalSubmit.disabled = false;
@@ -1444,7 +1832,11 @@ class OnlineAnnotation {
         })
         .then(result => {
             // 合并成功
-            modal.hide();
+            const modalElement = document.getElementById('mainModal');
+            const bsModal = bootstrap.Modal.getInstance(modalElement);
+            if (bsModal) {
+                bsModal.hide();
+            }
             
             // 显示结果
             let message = '合并完成！\n';
@@ -1622,6 +2014,16 @@ class OnlineAnnotation {
 
 // 创建全局实例
 window.onlineAnnotation = new OnlineAnnotation();
+
+// 在DOM加载完成后加载标注页面
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function() {
+        window.onlineAnnotation.loadAnnotationPage();
+    });
+} else {
+    // DOM已经加载完成，直接调用
+    window.onlineAnnotation.loadAnnotationPage();
+}
 
 // 导出供其他模块使用
 if (typeof module !== 'undefined' && module.exports) {

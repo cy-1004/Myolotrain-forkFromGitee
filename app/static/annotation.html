@@ -197,6 +197,30 @@
                         </div>
                     </div>
                 </div>
+                <div id="tool-selector" class="mb-2">
+                    <!-- SAM3开启工具按钮将在这里动态添加 -->
+                </div>
+                <!-- SAM3操作工具栏 -->
+                <div id="sam3-operation-toolbar" class="toolbar mt-2" style="display: none;">
+                    <div class="row align-items-center">
+                        <div class="col-md-12">
+                            <div class="btn-group" role="group">
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="sam3-point-mode" title="点提示模式">
+                                    <i class="fas fa-plus-circle"></i> 点提示
+                                </button>
+                                <button type="button" class="btn btn-outline-primary btn-sm" id="sam3-box-mode" title="框提示模式">
+                                    <i class="fas fa-square"></i> 框提示
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm" id="sam3-clear" title="清除提示">
+                                    <i class="fas fa-times-circle"></i> 清除（C）
+                                </button>
+                                <button type="button" class="btn btn-success btn-sm" id="sam3-execute" title="执行SAM3分割">
+                                    <i class="fas fa-play-circle"></i> 执行分割
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
 
                 <!-- 关键点工具模式选择栏 -->
                 <div id="keypoints-mode-selector" class="toolbar" style="display: none;">

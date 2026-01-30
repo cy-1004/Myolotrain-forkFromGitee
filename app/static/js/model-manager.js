@@ -390,7 +390,7 @@ class ModelManager {
                 submitButton.textContent = '确定';
                 alert('上传操作超时，请刷新页面后重试');
             }
-        }, 60000); // 60秒超时
+        }, 600000); // 10分钟超时
 
         // 发送请求
         xhr.send(formData);
@@ -444,7 +444,7 @@ class ModelManager {
 
     // 删除模型
     deleteModel(modelId) {
-        if (!confirm('确定要删除这个模型吗？此操作不可恢复。')) {
+        if (!confirm('慎重！若使用是预加载模型，将删除原始文件！')) {
             return;
         }
 

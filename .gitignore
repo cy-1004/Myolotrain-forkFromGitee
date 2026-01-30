@@ -49,3 +49,4 @@ postgres_data/
 # 系统文件
 .DS_Store
 Thumbs.db
+sam3_config.json
