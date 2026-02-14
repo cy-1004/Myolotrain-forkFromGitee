@@ -7,7 +7,7 @@ import time
 import threading
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List
 from sqlalchemy.orm import Session
 from app.db.session import SessionLocal
@@ -22,17 +22,25 @@ class SystemMonitor:
         self.data_storage = []
         self.max_storage_size = 1000  # 最大存储数据点数
         self.storage_file = "logs/system_monitor_data.json"
+        self.collect_interval = 30  # 数据收集间隔（秒）
+        self.netdata_available = False  # NETDATA是否可用
+        self.netdata_url = "http://localhost:19999"  # 默认NETDATA URL
 
     def start(self):
         """启动监控线程"""
         if self.running or not self.enabled:
             return
 
+        # 检测NETDATA
+        self._detect_netdata()
+
         self.running = True
         self.monitor_thread = threading.Thread(target=self._monitor_loop)
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
         print("系统资源监控服务已启动")
+        if self.netdata_available:
+            print("检测到NETDATA，将优先使用其数据")
 
     def stop(self):
         """停止监控线程"""
@@ -68,11 +76,11 @@ class SystemMonitor:
                 # 存储数据
                 self._store_data(resource_data)
                 
-                # 每5秒收集一次数据
-                time.sleep(5)
+                # 按照设定的间隔收集数据
+                time.sleep(self.collect_interval)
             except Exception as e:
                 print(f"系统资源监控循环出错: {e}")
-                time.sleep(5)
+                time.sleep(self.collect_interval)
 
     def _collect_system_resources(self) -> Dict:
         """收集系统资源信息"""
@@ -173,6 +181,21 @@ class SystemMonitor:
         if len(self.data_storage) % 100 == 0:
             self._save_to_file()
 
+    def _detect_netdata(self):
+        """检测NETDATA是否可用"""
+        try:
+            import requests
+            response = requests.get(f"{self.netdata_url}/api/v1/info", timeout=2)
+            if response.status_code == 200:
+                self.netdata_available = True
+                print("NETDATA检测成功")
+            else:
+                self.netdata_available = False
+                print("NETDATA检测失败: 状态码", response.status_code)
+        except Exception as e:
+            self.netdata_available = False
+            print(f"NETDATA检测失败: {e}")
+
     def _save_to_file(self):
         """保存数据到文件"""
         try:
@@ -199,19 +222,115 @@ class SystemMonitor:
         except Exception as e:
             print(f"保存监控数据到文件时出错: {e}")
 
-    def get_recent_data(self, count: int = 100) -> List[Dict]:
+    def get_recent_data(self, count: int = 100, minutes: int = 60) -> List[Dict]:
         """获取最近的监控数据"""
         try:
+            # 优先使用NETDATA数据
+            if self.netdata_available:
+                return self._get_netdata_data(minutes, count)
+            
             # 从文件读取数据
             if os.path.exists(self.storage_file):
                 with open(self.storage_file, 'r', encoding='utf-8') as f:
                     file_data = json.load(f)
-                return file_data[-count:]
+                
+                # 按时间范围过滤数据
+                filtered_data = []
+                current_time = datetime.now()
+                start_time = current_time - timedelta(minutes=minutes)
+                
+                for data in file_data:
+                    data_time = datetime.fromisoformat(data['timestamp'])
+                    if data_time >= start_time:
+                        filtered_data.append(data)
+                
+                # 数据采样
+                if len(filtered_data) > count:
+                    return self._sample_data(filtered_data, count)
+                return filtered_data
             else:
                 return self.data_storage[-count:]
         except Exception as e:
             print(f"读取监控数据时出错: {e}")
             return self.data_storage[-count:]
+    
+    def _get_netdata_data(self, minutes: int = 60, count: int = 100) -> List[Dict]:
+        """从NETDATA获取数据"""
+        try:
+            import requests
+            import time
+            
+            # 计算时间范围
+            end_time = int(time.time())
+            start_time = end_time - (minutes * 60)
+            
+            # 获取CPU使用率
+            cpu_response = requests.get(
+                f"{self.netdata_url}/api/v1/data",
+                params={
+                    'chart': 'system.cpu',
+                    'points': count,
+                    'after': start_time,
+                    'before': end_time,
+                    'group': 'average',
+                    'format': 'json'
+                },
+                timeout=5
+            )
+            
+            # 获取内存使用率
+            memory_response = requests.get(
+                f"{self.netdata_url}/api/v1/data",
+                params={
+                    'chart': 'system.mem',
+                    'points': count,
+                    'after': start_time,
+                    'before': end_time,
+                    'group': 'average',
+                    'format': 'json'
+                },
+                timeout=5
+            )
+            
+            # 获取磁盘使用率
+            disk_response = requests.get(
+                f"{self.netdata_url}/api/v1/data",
+                params={
+                    'chart': 'disk_space._',
+                    'points': count,
+                    'after': start_time,
+                    'before': end_time,
+                    'group': 'average',
+                    'format': 'json'
+                },
+                timeout=5
+            )
+            
+            # 解析数据并格式化为统一格式
+            # 这里简化处理，实际实现需要根据NETDATA API响应格式进行调整
+            # 暂时返回空列表，后续需要完善
+            return []
+        except Exception as e:
+            print(f"从NETDATA获取数据时出错: {e}")
+            return []
+    
+    def _sample_data(self, data: List[Dict], count: int) -> List[Dict]:
+        """数据采样，减少数据点数量"""
+        if len(data) <= count:
+            return data
+        
+        step = len(data) / count
+        sampled_data = []
+        
+        for i in range(count):
+            index = int(i * step)
+            sampled_data.append(data[index])
+        
+        # 确保包含最后一个数据点
+        if sampled_data[-1] != data[-1]:
+            sampled_data[-1] = data[-1]
+        
+        return sampled_data
 
     def get_data_by_time_range(self, start_time: str, end_time: str) -> List[Dict]:
         """根据时间范围获取监控数据"""

@@ -94,19 +94,22 @@ def get_system_resources():
         return {"error": str(e)}
 
 @router.get("/system-resources/history")
-def get_system_resources_history(minutes: int = 60):
+def get_system_resources_history(minutes: int = 60, points: int = 100):
     """获取历史系统资源使用情况（默认最近60分钟）"""
     try:
-        # 从监控服务获取历史数据
-        history_data = system_monitor.get_recent_data(minutes)
+        # 从监控服务获取历史数据，指定数据点数量
+        history_data = system_monitor.get_recent_data(count=points, minutes=minutes)
         
         # 如果没有历史数据，生成示例数据
         if not history_data:
-            # 生成示例历史数据
+            # 生成示例历史数据，控制数据点数量
             history_data = []
             current_time = time.time()
             
-            for i in range(minutes):
+            # 计算采样步长
+            step = max(1, minutes // points)
+            
+            for i in range(0, minutes, step):
                 timestamp = current_time - (minutes - i) * 60
                 history_data.append({
                     "timestamp": datetime.fromtimestamp(timestamp).isoformat(),
@@ -114,10 +117,15 @@ def get_system_resources_history(minutes: int = 60):
                     "memory_percent": psutil.virtual_memory().percent,
                     "disk_percent": (psutil.disk_usage('/').used / psutil.disk_usage('/').total) * 100
                 })
+            
+            # 确保不超过指定的数据点数量
+            if len(history_data) > points:
+                history_data = history_data[:points]
         
         return {
             "data": history_data,
-            "period": f"Last {minutes} minutes"
+            "period": f"Last {minutes} minutes",
+            "points": len(history_data)
         }
     except Exception as e:
         return {"error": str(e)}

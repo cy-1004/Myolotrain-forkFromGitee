@@ -25,7 +25,9 @@ def get_model_type(filename: str) -> str:
     """
     # 检查文件名中的关键字来确定模型类型
     filename_lower = filename.lower()
-    if "yolo8n" in filename_lower:
+    if "yoloe" in filename_lower:
+        return "yoloe"
+    elif "yolo8n" in filename_lower:
         return "yolov8n"
     elif "yolo8s" in filename_lower:
         return "yolov8s"

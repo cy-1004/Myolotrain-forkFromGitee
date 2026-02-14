@@ -1,5 +1,5 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pathlib import Path
@@ -54,7 +54,14 @@ def read_models(
     result = []
     for model in models:
         if hasattr(model, '__dict__'):
-            model_dict = {column.name: getattr(model, column.name) for column in model.__table__.columns}
+            model_dict = {}
+            for column in model.__table__.columns:
+                value = getattr(model, column.name)
+                # 确保UUID类型的字段转换为字符串
+                if column.name == 'id' and hasattr(value, '__class__') and value.__class__.__name__ == 'UUID':
+                    model_dict[column.name] = str(value)
+                else:
+                    model_dict[column.name] = value
             result.append(model_dict)
         else:
             # 如果已经是字典格式，直接添加
@@ -84,6 +91,7 @@ def read_model(
 @router.delete("/{model_id}")
 def delete_model(
     model_id: str,
+    delete_file: bool = Body(True),
     db: Session = Depends(get_db)
 ):
     """
@@ -96,13 +104,15 @@ def delete_model(
     if not db_model:
         raise HTTPException(status_code=404, detail="模型未找到")
     
-    # 删除模型文件
-    if os.path.exists(db_model.path):
+    # 根据参数决定是否删除模型文件
+    if delete_file and os.path.exists(db_model.path):
         try:
             os.remove(db_model.path)
             print(f"✅ 模型文件已删除: {db_model.path}")
         except Exception as e:
             print(f"⚠️ 删除模型文件失败: {e}")
+    elif not delete_file:
+        print(f"⚠️ 仅从清单移除模型，保留文件: {db_model.path}")
     
     # 删除模型记录
     model_crud.remove(db, id=model_id)

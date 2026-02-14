@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     DEBUG: bool = False  # 全局DEBUG模式开关
 
     # Database
-    POSTGRES_SERVER: str = "localhost"  # 本地环境使用 localhost
+    POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"   # 使用你设置的密码
+    POSTGRES_PASSWORD: str = "postgres"
     POSTGRES_DB: str = "yolov8_platform"
     SQLALCHEMY_DATABASE_URI: Optional[PostgresDsn] = None
 

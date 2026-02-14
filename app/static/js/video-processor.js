@@ -2029,9 +2029,12 @@ class VideoProcessor {
     stopRealTimeDetection() {
         this.isDetecting = false;
 
-        // 更新检测状态
-        document.getElementById('detection-status').innerHTML =
-            `<span class="badge bg-secondary">已停止</span>`;
+        // 更新检测状态（添加元素存在性检查）
+        const detectionStatusElement = document.getElementById('detection-status');
+        if (detectionStatusElement) {
+            detectionStatusElement.innerHTML =
+                `<span class="badge bg-secondary">已停止</span>`;
+        }
 
         // 取消动画帧
         if (this.animationFrameId) {
@@ -2045,7 +2048,7 @@ class VideoProcessor {
             this.stream = null;
         }
 
-        // 重置视频元素
+        // 重置视频元素（添加元素存在性检查）
         const videoElement = document.getElementById('video-element');
         if (videoElement) {
             videoElement.srcObject = null;

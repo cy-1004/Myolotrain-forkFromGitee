@@ -456,8 +456,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // 测试API端点
     testApiEndpoints();
 
-    // 默认加载数据集页面
-    loadPage('datasets');
+    // 加载页面：优先从localStorage恢复，否则加载默认的数据集页面
+    const savedPage = localStorage.getItem('currentPage');
+    if (savedPage) {
+        log('从localStorage恢复页面:', savedPage);
+        loadPage(savedPage);
+    } else {
+        // 默认加载数据集页面
+        loadPage('datasets');
+    }
     
     // 获取后端DEBUG模式状态
     getBackendDebugMode();
@@ -532,6 +539,10 @@ function loadPage(page) {
     }
     
     currentPage = page;
+    
+    // 保存当前页面到localStorage，以便页面刷新时恢复
+    localStorage.setItem('currentPage', page);
+    log('已保存当前页面到localStorage:', page);
 
     // 更新导航菜单激活状态
     document.querySelectorAll('.nav-link').forEach(link => {

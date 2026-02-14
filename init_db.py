@@ -4,6 +4,7 @@ import subprocess
 import psycopg2
 from psycopg2 import sql
 import logging
+from app.core.config import settings
 
 # 配置日志
 logging.basicConfig(
@@ -16,13 +17,13 @@ def init_database():
     """初始化PostgreSQL数据库，在检测不到目标数据库时自动创建"""
     logger.info("正在初始化PostgreSQL数据库...")
 
-    # 数据库连接参数
+    # 数据库连接参数 - 使用配置文件中的设置
     db_params = {
-        'user': 'postgres',
-        'password': 'postgres',    # 使用你的本地数据库密码
-        'host': 'localhost',     # 本地环境使用 localhost
+        'user': settings.POSTGRES_USER,
+        'password': settings.POSTGRES_PASSWORD,
+        'host': settings.POSTGRES_SERVER,
         'port': '5432',
-        'database': 'postgres'   # 连接到默认数据库
+        'database': settings.POSTGRES_DB
     }
 
     try:
@@ -32,15 +33,15 @@ def init_database():
         cursor = conn.cursor()
 
         # 检查数据库是否存在
-        cursor.execute("SELECT 1 FROM pg_database WHERE datname = 'yolov8_platform'")
+        cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", (db_params['database'],))
         exists = cursor.fetchone()
 
         if exists:
-            logger.info("yolov8_platform数据库已存在，跳过创建步骤")
+            logger.info(f"{db_params['database']}数据库已存在，跳过创建步骤")
         else:
             # 创建新数据库
-            logger.info("创建yolov8_platform数据库...")
-            cursor.execute(sql.SQL("CREATE DATABASE {} WITH ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0").format(sql.Identifier('yolov8_platform')))
+            logger.info(f"创建{db_params['database']}数据库...")
+            cursor.execute(sql.SQL("CREATE DATABASE {} WITH ENCODING 'UTF8' LC_COLLATE='C' LC_CTYPE='C' TEMPLATE=template0").format(sql.Identifier(db_params['database'])))
 
         # 关闭连接
         cursor.close()

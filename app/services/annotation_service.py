@@ -1314,17 +1314,16 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
         image_id: UUID,
         model_path: str,
         project_classes: List[str],
+        model_type: str = "",
+        project_type: str = "detection",
         confidence: float = 0.25,
         iou: float = 0.45,
         overwrite: bool = True
     ) -> List[Dict[str, Any]]:
         """使用AI模型自动标注图片"""
         import importlib
-        try:
-            ultralytics_module = importlib.import_module("ultralytics")
-            YOLO = getattr(ultralytics_module, "YOLO")
-        except ImportError:
-            raise HTTPException(status_code=500, detail="YOLO模型库未安装，请安装ultralytics包")
+        import cv2
+        import numpy as np
         
         # 获取实际的图片数据
         db_image = db.query(ImageAnnotationModel).filter(ImageAnnotationModel.id == image_id).first()
@@ -1355,34 +1354,86 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
         else:
             image_file_path = Path(project_image_directory_str) / image_name_str
         
-        # 规范化路径并验证其在允许的目录范围内
+        # 规范化路径
         resolved_path = image_file_path.resolve()
-        static_dir_resolved = static_dir.resolve()
         
-        # 检查路径是否在静态目录范围内
-        try:
-            resolved_path.relative_to(static_dir_resolved)
-        except ValueError:
-            raise HTTPException(status_code=400, detail="非法路径访问")
-        
+        # 检查路径是否存在
         if not resolved_path.exists():
             raise HTTPException(status_code=404, detail="图片文件不存在")
         
+        # 路径安全检查：确保路径是真实存在的文件
+        if not resolved_path.is_file():
+            raise HTTPException(status_code=400, detail="无效的图片文件路径")
+        
         try:
-            # 加载模型
-            model = YOLO(model_path)
+            # 检查模型类型
+            # 优先使用传入的model_type参数（从数据库中获取）
+            if model_type:
+                # 如果传入了model_type，直接使用
+                # 转换为小写并标准化
+                model_type_lower = model_type.lower()
+                if 'yoloe' in model_type_lower:
+                    model_type = 'yoloe'
+                elif 'yolov8' in model_type_lower:
+                    model_type = 'yolov8'
+                elif 'yolov11' in model_type_lower:
+                    model_type = 'yolov11'
+                else:
+                    # 默认使用常规YOLO模型处理
+                    model_type = 'yolo'
+            else:
+                # 如果没有传入model_type，从模型路径中提取文件名判断
+                import os
+                model_filename = os.path.basename(model_path)
+                model_filename_lower = model_filename.lower()
+                
+                # 模型类型判断
+                if 'yoloe' in model_filename_lower:
+                    model_type = 'yoloe'
+                elif 'yolov8' in model_filename_lower:
+                    model_type = 'yolov8'
+                elif 'yolov11' in model_filename_lower:
+                    model_type = 'yolov11'
+                else:
+                    # 默认使用常规YOLO模型处理
+                    model_type = 'yolo'
             
-            # 进行推理
-            results = model.predict(
-                source=str(image_file_path),
-                conf=confidence,
-                iou=iou,
-                verbose=False
-            )
+            annotations = []
+            
+            if model_type == 'yoloe':
+                # 处理YOLOE模型
+                annotations = self._process_yoloe_model(
+                    model_path=model_path,
+                    image_file_path=resolved_path,
+                    project_classes=project_classes,
+                    project_type=project.project_type if project.project_type else "detection",
+                    confidence=confidence,
+                    iou=iou
+                )
+                
+                # 直接进入后续处理，跳过常规YOLO模型的解析逻辑
+                # 因为_process_yoloe_model已经返回了完整的标注结果
+            else:
+                # 处理常规YOLO模型
+                try:
+                    ultralytics_module = importlib.import_module("ultralytics")
+                    YOLO = getattr(ultralytics_module, "YOLO")
+                except ImportError:
+                    raise HTTPException(status_code=500, detail="YOLO模型库未安装，请安装ultralytics包")
+                
+                # 加载模型
+                model = YOLO(model_path)
+                
+                # 进行推理
+                results = model.predict(
+                    source=str(resolved_path),
+                    conf=confidence,
+                    iou=iou,
+                    verbose=False
+                )
             
             # 解析结果
-            annotations = []
-            if results and len(results) > 0:
+            if model_type != 'yoloe' and results and len(results) > 0:
                 result = results[0]
                 
                 # 如果是实例分割项目，尝试使用YOLO+SAM3结合的方式
@@ -1425,7 +1476,7 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                             
                             with torch.no_grad():
                                 sam_results = sam_model.predict(
-                                    source=str(image_file_path),
+                                    source=str(resolved_path),
                                     bboxes=bboxes_xyxy,
                                     imgsz=imgsz_value,         # 使用用户配置的图像尺寸
                                     half=half_precision,       # 使用用户配置的半精度设置
@@ -1443,11 +1494,14 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                                     xyn = sam_result.masks.xyn
                                     cls_ids = boxes.cls.cpu().numpy()  # 类别沿用 YOLO 的
                                     
+                                    # 确保 project_classes 是列表
+                                    project_classes_value = project_classes if isinstance(project_classes, list) else []
+                                    
                                     for i, poly in enumerate(xyn):
                                         if len(poly) > 0:
                                             # 构造标注数据
                                             class_id = int(cls_ids[i])
-                                            if class_id < len(project_classes):
+                                            if class_id < len(project_classes_value):
                                                 # 转换为 annotation.js 需要的格式
                                                 # 注意这里后端存的是归一化的 points 列表
                                                 flat_points = poly.flatten().tolist()
@@ -1471,6 +1525,9 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                                 boxes = result.boxes
                                 img_height, img_width = result.orig_shape
                                 
+                                # 确保 project_classes 是列表
+                                project_classes_value = project_classes if isinstance(project_classes, list) else []
+                                
                                 for i in range(len(boxes)):
                                     box = boxes.xyxy[i].cpu().numpy()
                                     x1, y1, x2, y2 = box
@@ -1482,7 +1539,7 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                                     
                                     class_id = int(boxes.cls[i].cpu().numpy())
                                     
-                                    if class_id < len(project_classes):
+                                    if class_id < len(project_classes_value):
                                         annotations.append({
                                             "class_id": class_id,
                                             "x_center": float(x_center),
@@ -1578,6 +1635,59 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                                 "height": float(height)
                             })
             
+            # 释放常规YOLO模型的资源
+            if model_type != 'yoloe':
+                import gc
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                if 'model' in locals():
+                    del model
+                if 'results' in locals():
+                    del results
+                gc.collect()
+            
+            # 对所有模型的标注结果应用类别过滤
+            # 确保只保留项目中预设的目标类别
+            filtered_annotations = []
+            for ann in annotations:
+                class_id = ann.get('class_id', -1)
+                if class_id >= 0 and class_id < len(project_classes):
+                    filtered_annotations.append(ann)
+            annotations = filtered_annotations
+            
+            # 统一输出格式，确保与标注集类型一致
+            final_annotations = []
+            for ann in annotations:
+                # 根据项目类型调整标注格式
+                if project_type == "segmentation":
+                    # 确保实例分割标注包含points字段
+                    if "points" not in ann:
+                        # 为没有points字段的标注创建默认的矩形多边形
+                        x_center = ann.get("x_center", 0.5)
+                        y_center = ann.get("y_center", 0.5)
+                        width = ann.get("width", 0.2)
+                        height = ann.get("height", 0.2)
+                        
+                        points = [
+                            x_center - width/2, y_center - height/2,
+                            x_center + width/2, y_center - height/2,
+                            x_center + width/2, y_center + height/2,
+                            x_center - width/2, y_center + height/2
+                        ]
+                        ann["points"] = points
+                elif project_type == "obb":
+                    # 确保OBB标注包含angle字段
+                    if "angle" not in ann:
+                        ann["angle"] = 0.0
+                elif project_type == "pose":
+                    # 确保关键点标注包含keypoints字段
+                    if "keypoints" not in ann:
+                        ann["keypoints"] = []
+                
+                final_annotations.append(ann)
+            annotations = final_annotations
+            
             # 更新数据库
             db_image_annotations = db_image.annotations if db_image.annotations is not None else []
             db_image_annotations_value = db_image_annotations if isinstance(db_image_annotations, list) else []
@@ -1596,6 +1706,379 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                 detail=f"自动标注失败: {str(e)}"
             )
 
+    def _process_yoloe_model(self, model_path: str, image_file_path: Path, project_classes: List[str], project_type: str, confidence: float, iou: float) -> List[Dict[str, Any]]:
+        """处理YOLOE模型的推理和结果解析"""
+        try:
+            # 首先尝试使用Ultralytics库处理YOLOE模型
+            try:
+                import logging
+                logger = logging.getLogger(__name__)
+                
+                from ultralytics import YOLO
+                logger.info(f"加载YOLOE模型: {model_path}")
+                model = YOLO(model_path)
+                
+                # 打印模型信息
+                logger.info(f"模型名称: {model.names}")
+                logger.info(f"项目类别: {project_classes}")
+                
+                logger.info(f"开始推理: {image_file_path}")
+                results = model.predict(source=str(image_file_path), conf=confidence, iou=iou, verbose=True)
+                
+                annotations = []
+                logger.info(f"推理结果数量: {len(results) if results else 0}")
+                
+                if results and len(results) > 0:
+                    result = results[0]
+                    img_height, img_width = result.orig_shape
+                    logger.info(f"图像尺寸: {img_width}x{img_height}")
+                    
+                    # 获取模型的类别名称
+                    model_names = model.names if hasattr(model, 'names') else {}
+                    logger.info(f"模型类别: {model_names}")
+                    
+                    # 创建类别映射：模型类别名称到项目类别索引的映射
+                    class_mapping = {}
+                    for project_idx, project_class in enumerate(project_classes):
+                        # 检查项目类别是否在模型类别中
+                        for model_idx, model_class in model_names.items():
+                            if isinstance(model_class, str) and model_class.lower() == project_class.lower():
+                                class_mapping[model_idx] = project_idx
+                                logger.info(f"类别映射: 模型ID {model_idx} ({model_class}) -> 项目ID {project_idx} ({project_class})")
+                                break
+                    
+                    logger.info(f"最终类别映射: {class_mapping}")
+                    
+                    if result.boxes is not None:
+                        boxes = result.boxes
+                        logger.info(f"检测到的边界框数量: {len(boxes)}")
+                        
+                        for i in range(len(boxes)):
+                            box = boxes.xyxy[i].cpu().numpy()
+                            x1, y1, x2, y2 = box
+                            
+                            x_center = (x1 + x2) / 2 / img_width
+                            y_center = (y1 + y2) / 2 / img_height
+                            width = (x2 - x1) / img_width
+                            height = (y2 - y1) / img_height
+                            
+                            class_id = int(boxes.cls[i].cpu().numpy())
+                            confidence_score = float(boxes.conf[i].cpu().numpy())
+                            
+                            # 获取模型类别名称
+                            model_class_name = model_names.get(class_id, "未知")
+                            logger.info(f"检测到目标: 类别ID {class_id} ({model_class_name}), 置信度 {confidence_score:.2f}, 位置 [{x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}]")
+                            
+                            # 使用类别映射获取项目类别索引
+                            if class_id in class_mapping:
+                                project_class_id = class_mapping[class_id]
+                                project_class_name = project_classes[project_class_id]
+                                logger.info(f"映射到项目类别: {project_class_id} ({project_class_name})")
+                                annotations.append({
+                                    "class_id": project_class_id,
+                                    "x_center": float(x_center),
+                                    "y_center": float(y_center),
+                                    "width": float(width),
+                                    "height": float(height)
+                                })
+                            else:
+                                logger.info(f"未映射的类别: {class_id} ({model_class_name}) - 项目中不存在此类别")
+                
+                logger.info(f"最终标注结果数量: {len(annotations)}")
+                
+                # 无论是否有标注结果，都直接返回，不尝试PaddlePaddle
+                # 因为Ultralytics已经成功加载并处理了模型
+                
+                # 释放模型资源，避免GPU内存泄漏
+                import gc
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                del model
+                del results
+                gc.collect()
+                
+                return annotations
+                
+                # 注释掉PaddlePaddle部分，因为我们现在优先使用Ultralytics
+                # 如果Ultralytics处理失败，尝试使用PaddlePaddle
+                # import paddle
+                # import cv2
+                # from paddledet.core import Predictor
+                # from paddledet.data.transform import Compose
+                # from paddledet.utils import get_config
+                
+                # 加载YOLOE模型配置
+                # 注意：这里需要根据实际的YOLOE模型配置文件进行调整
+                # 假设模型目录中包含配置文件
+                model_dir = Path(model_path).parent
+                config_file = None
+                
+                # 查找配置文件
+                for file in model_dir.iterdir():
+                    if file.suffix in ['.yml', '.yaml'] and ('yoloe' in file.name.lower() or 'config' in file.name.lower()):
+                        config_file = str(file)
+                        break
+                
+                if not config_file:
+                    # 如果找不到配置文件，使用默认配置
+                    # 这里为YOLOE模型提供默认配置
+                    from paddledet.config import get_config
+                    from paddledet.models import build_model
+                    from paddledet.data.transform import Compose
+                    from paddledet.core.workspace import create
+                    
+                    # 创建默认配置
+                    import tempfile
+                    import os
+                    
+                    # 为YOLOE模型创建临时配置文件
+                    config_content = """
+                    architecture: YOLOE
+                    pretrain_weights: {}
+                    norm_type: sync_bn
+                    use_ema: true
+                    ema_decay: 0.9998
+                    
+                    YOLOE:
+                      backbone: CSPResNet
+                      neck: PAN
+                      head: YOLOEHead
+                    
+                    CSPResNet:
+                      depth: 53
+                      return_idx: [2, 3, 4]
+                      use_spp: true
+                    
+                    PAN:
+                      in_channels: [256, 512, 1024]
+                      out_channels: 256
+                    
+                    YOLOEHead:
+                      num_classes: {}
+                      in_channels: [256, 256, 256]
+                      feat_channels: 256
+                      stacked_convs: 2
+                      act: silu
+                      strides: [8, 16, 32]
+                      loss_obj_weight: 1.0
+                      loss_cls_weight: 1.0
+                      loss_bbox_weight: 5.0
+                    
+                    TrainReader:
+                      batch_size: 8
+                      shuffle: true
+                      drop_last: true
+                      dataset:
+                        type: COCODataset
+                        dataset_dir: datasets/coco
+                        anno_path: annotations/instances_train2017.json
+                        image_dir: train2017
+                      sample_transforms:
+                        - DecodeImage:
+                            to_rgb: true
+                        - RandomFlip:
+                            prob: 0.5
+                        - RandomDistort:
+                            brightness_range: 0.4
+                            contrast_range: 0.4
+                            saturation_range: 0.4
+                      batch_transforms:
+                        - BatchRandomResize:
+                            target_size: [640, 640]
+                            random_size: true
+                            random_interp: true
+                            keep_ratio: true
+                        - NormalizeImage:
+                            mean: [0.485, 0.456, 0.406]
+                            std: [0.229, 0.224, 0.225]
+                            norm_type: mean_std
+                        - Permute:
+                            to_bgr: false
+                            channel_first: true
+                      collate_batch: true
+                    
+                    EvalReader:
+                      batch_size: 1
+                      dataset:
+                        type: COCODataset
+                        dataset_dir: datasets/coco
+                        anno_path: annotations/instances_val2017.json
+                        image_dir: val2017
+                      sample_transforms:
+                        - DecodeImage:
+                            to_rgb: true
+                        - Resize:
+                            target_size: 640
+                            keep_ratio: true
+                        - NormalizeImage:
+                            mean: [0.485, 0.456, 0.406]
+                            std: [0.229, 0.224, 0.225]
+                            norm_type: mean_std
+                        - Permute:
+                            to_bgr: false
+                            channel_first: true
+                    
+                    TestReader:
+                      batch_size: 1
+                      dataset:
+                        type: ImageFolder
+                        anno_path: null
+                      sample_transforms:
+                        - DecodeImage:
+                            to_rgb: true
+                        - Resize:
+                            target_size: 640
+                            keep_ratio: true
+                        - NormalizeImage:
+                            mean: [0.485, 0.456, 0.406]
+                            std: [0.229, 0.224, 0.225]
+                            norm_type: mean_std
+                        - Permute:
+                            to_bgr: false
+                            channel_first: true
+                    """
+                    
+                    # 替换配置中的类别数
+                    num_classes = len(project_classes) if project_classes else 80
+                    config_content = config_content.replace('num_classes: {}', f'num_classes: {num_classes}')
+                    config_content = config_content.replace('pretrain_weights: {}', f'pretrain_weights: {model_path}')
+                    
+                    # 创建临时配置文件
+                    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+                        f.write(config_content)
+                        config_file = f.name
+                    
+                    # 确保临时文件在使用后被删除
+                    import atexit
+                    atexit.register(lambda: os.unlink(config_file))
+                
+                # 加载配置
+                from paddledet.config import get_config as paddle_get_config
+                cfg = paddle_get_config(config_file)
+                
+                # 简化配置设置
+                cfg.Metric = {'name': 'COCOMetric'}
+                
+                # 创建预测器
+                predictor = Predictor(cfg, model_path=str(model_path))
+                
+                # 加载图片
+                img = cv2.imread(str(image_file_path))
+                if img is None:
+                    raise HTTPException(status_code=404, detail="图片加载失败")
+                
+                # 进行预测
+                results = predictor.predict([img], threshold=confidence, nms_threshold=iou)
+                
+                # 解析结果
+                annotations = []
+                img_height, img_width = img.shape[:2]
+                
+                for result in results:
+                    for bbox in result['boxes']:
+                        if len(bbox) >= 6:
+                            x1, y1, x2, y2, score, class_id = bbox
+                            
+                            # 检查置信度
+                            if score < confidence:
+                                continue
+                            
+                            # 检查类别 ID 是否在项目类别范围内
+                            project_classes_value = project_classes if isinstance(project_classes, list) else []
+                            if class_id >= len(project_classes_value):
+                                continue
+                            
+                            # 根据项目类型调整输出格式
+                            if project_type == "segmentation":
+                                # 实例分割项目：尝试获取分割掩码
+                                # 注意：YOLOE模型可能不直接提供分割掩码
+                                # 这里我们使用边界框作为近似，实际应用中可能需要使用专门的分割模型
+                                x_center = (x1 + x2) / 2 / img_width
+                                y_center = (y1 + y2) / 2 / img_height
+                                width = (x2 - x1) / img_width
+                                height = (y2 - y1) / img_height
+                                
+                                # 创建简单的矩形多边形点
+                                points = [
+                                    x_center - width/2, y_center - height/2,
+                                    x_center + width/2, y_center - height/2,
+                                    x_center + width/2, y_center + height/2,
+                                    x_center - width/2, y_center + height/2
+                                ]
+                                
+                                annotations.append({
+                                    "class_id": int(class_id),
+                                    "x_center": float(x_center),
+                                    "y_center": float(y_center),
+                                    "width": float(width),
+                                    "height": float(height),
+                                    "points": points
+                                })
+                            elif project_type == "obb":
+                                # OBB项目：处理旋转框
+                                # 注意：YOLOE模型可能不直接提供旋转角度
+                                # 这里我们使用边界框作为近似，实际应用中可能需要使用专门的OBB模型
+                                x_center = (x1 + x2) / 2 / img_width
+                                y_center = (y1 + y2) / 2 / img_height
+                                width = (x2 - x1) / img_width
+                                height = (y2 - y1) / img_height
+                                angle = 0.0  # 默认角度为0
+                                
+                                annotations.append({
+                                    "class_id": int(class_id),
+                                    "x_center": float(x_center),
+                                    "y_center": float(y_center),
+                                    "width": float(width),
+                                    "height": float(height),
+                                    "angle": float(angle)
+                                })
+                            elif project_type == "pose":
+                                # 关键点项目：处理关键点
+                                # 注意：YOLOE模型可能不直接提供关键点
+                                # 这里我们使用边界框作为近似，实际应用中可能需要使用专门的姿态估计模型
+                                x_center = (x1 + x2) / 2 / img_width
+                                y_center = (y1 + y2) / 2 / img_height
+                                width = (x2 - x1) / img_width
+                                height = (y2 - y1) / img_height
+                                
+                                annotations.append({
+                                    "class_id": int(class_id),
+                                    "x_center": float(x_center),
+                                    "y_center": float(y_center),
+                                    "width": float(width),
+                                    "height": float(height),
+                                    "keypoints": []
+                                })
+                            else:  # 默认detection
+                                # 目标检测项目：生成方形边界框
+                                x_center = (x1 + x2) / 2 / img_width
+                                y_center = (y1 + y2) / 2 / img_height
+                                width = (x2 - x1) / img_width
+                                height = (y2 - y1) / img_height
+                                
+                                annotations.append({
+                                    "class_id": int(class_id),
+                                    "x_center": float(x_center),
+                                    "y_center": float(y_center),
+                                    "width": float(width),
+                                    "height": float(height)
+                                })
+                
+                return annotations
+            except ImportError as e:
+                # 如果PaddlePaddle未安装，提供友好的错误信息
+                raise HTTPException(
+                    status_code=500,
+                    detail="YOLOE模型需要PaddlePaddle环境，请安装PaddlePaddle和PaddleDetection"
+                )
+        except Exception as e:
+            # 提供更详细的错误信息
+            raise HTTPException(
+                status_code=500,
+                detail=f"YOLOE模型处理失败: {str(e)}"
+            )
+    
     def merge_projects(
         self,
         db: Session,

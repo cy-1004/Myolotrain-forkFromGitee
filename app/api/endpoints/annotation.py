@@ -615,13 +615,20 @@ def auto_annotate_image(
 ):
     """使用AI模型自动标注图片"""
     from app.services.annotation_service import AnnotationService
+    import uuid
 
-    
+    # 验证model_id格式
+    try:
+        # 尝试将model_id转换为UUID对象
+        uuid.UUID(model_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="模型ID格式无效，请使用有效的UUID格式")
+
     # 获取图片信息
     image = image_annotation.get(db, id=image_id)
     if not image:
         raise HTTPException(status_code=404, detail="图片未找到")
-    
+
     # 获取模型信息
     db_model = model.get(db, id=model_id)
     if not db_model:
@@ -638,14 +645,16 @@ def auto_annotate_image(
         project_classes_final = project_classes_value if isinstance(project_classes_value, list) else []
         
         annotations = service.auto_annotate_image(
-            db=db,
-            image_id=image_id,
-            model_path=str(db_model.path) if db_model.path is not None else "",
-            project_classes=project_classes_final,
-            confidence=confidence,
-            iou=iou,
-            overwrite=overwrite
-        )
+                db=db,
+                image_id=image_id,
+                model_path=str(db_model.path) if db_model.path is not None else "",
+                project_classes=project_classes_final,
+                model_type=db_model.type if db_model.type else "",
+                project_type=project.project_type if project.project_type else "detection",
+                confidence=confidence,
+                iou=iou,
+                overwrite=overwrite
+            )
         
         return {
             "success": True,
@@ -654,7 +663,18 @@ def auto_annotate_image(
             "annotation_count": len(annotations)
         }
         
+    except HTTPException as e:
+        # 重新抛出HTTPException，保持原始状态码和详细信息
+        raise
+    except ImportError as e:
+        raise HTTPException(status_code=500, detail=f"依赖库安装失败: {str(e)}")
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"文件未找到: {str(e)}")
     except Exception as e:
+        # 捕获其他所有异常，提供更详细的错误信息
+        import traceback
+        traceback_str = traceback.format_exc()
+        logging.error(f"自动标注失败: {traceback_str}")
         raise HTTPException(status_code=500, detail=f"自动标注失败: {str(e)}")
 
 

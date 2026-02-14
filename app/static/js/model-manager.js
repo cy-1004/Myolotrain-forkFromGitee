@@ -49,11 +49,27 @@ class ModelManager {
                     const row = document.createElement('tr');
                     // 直接使用模型名称
                     const displayName = model.name || `${model.type} (自定义模型)`;
+                    
+                    // 区分YOLOE模型类型
+                    let modelTypeDisplay = model.type;
+                    if (model.type && model.type.toLowerCase().includes('yoloe')) {
+                        // 根据模型名称或路径判断YOLOE模型类型
+                        const modelNameLower = (model.name || '').toLowerCase();
+                        const modelPathLower = (model.path || '').toLowerCase();
+                        
+                        if (modelNameLower.includes('prompt') || modelPathLower.includes('prompt') || 
+                            modelNameLower.includes('text') || modelPathLower.includes('text') ||
+                            modelNameLower.includes('vision') || modelPathLower.includes('vision')) {
+                            modelTypeDisplay = 'YOLOE (文本/视觉提示模型)';
+                        } else {
+                            modelTypeDisplay = 'YOLOE (无提示词模型)';
+                        }
+                    }
 
                     row.innerHTML = `
                         <td>${displayName}</td>
                         <td>${model.description || '-'}</td>
-                        <td>${model.type}</td>
+                        <td>${modelTypeDisplay}</td>
                         <td>${this.getTaskText(model.task)}</td>
                         <td>${this.getSourceText(model.source)}</td>
                         <td>${new Date(model.created_at).toLocaleString()}</td>
@@ -444,40 +460,99 @@ class ModelManager {
 
     // 删除模型
     deleteModel(modelId) {
-        if (!confirm('慎重！若使用是预加载模型，将删除原始文件！')) {
-            return;
-        }
+        // 创建删除确认对话框
+        const modalHtml = `
+            <div class="modal fade" id="deleteModelModal" tabindex="-1" aria-labelledby="deleteModelModalLabel" aria-hidden="true">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="deleteModelModalLabel">删除模型确认</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-4">慎重！若使用是预加载模型，将删除原始文件！</p>
+                            <div class="mb-4">
+                                <h6>删除选项：</h6>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="deleteOption" id="deleteOnlyList" value="only_list" checked>
+                                    <label class="form-check-label" for="deleteOnlyList">
+                                        仅从清单移除（保留模型文件）
+                                    </label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="deleteOption" id="deleteWithFile" value="with_file">
+                                    <label class="form-check-label" for="deleteWithFile">
+                                        从清单移除并删除模型文件
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                            <button type="button" class="btn btn-danger" id="confirmDeleteBtn">确认删除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
 
-        authenticatedFetch(`${API_URL}/models/${modelId}`, {
-            method: 'DELETE'
-        })
-            .then(response => {
-                if (response.ok) {
-                    this.loadModels();
-                    return;
-                }
+        // 添加模态框到页面
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
 
-                // 处理错误响应
-                return response.json().then(data => {
-                    throw new Error(data.detail || '删除模型失败');
-                });
+        // 显示模态框
+        const modal = new bootstrap.Modal(document.getElementById('deleteModelModal'));
+        modal.show();
+
+        // 绑定确认删除按钮事件
+        document.getElementById('confirmDeleteBtn').addEventListener('click', () => {
+            // 获取选中的删除选项
+            const deleteOption = document.querySelector('input[name="deleteOption"]:checked').value;
+            const deleteFile = deleteOption === 'with_file';
+
+            // 隐藏模态框
+            modal.hide();
+
+            // 执行删除操作
+            authenticatedFetch(`${API_URL}/models/${modelId}`, {
+                method: 'DELETE',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ delete_file: deleteFile })
             })
-            .catch(error => {
-                if (DEBUG_MODE) {
-                    console.error('Error deleting model:', error);
-                }
+                .then(response => {
+                    if (response.ok) {
+                        this.loadModels();
+                        return;
+                    }
 
-                // 显示更友好的错误提示
-                if (error.message.includes('being used by training tasks')) {
-                    alert('无法删除模型：该模型正在被训练任务使用');
-                } else if (error.message.includes('output of training tasks')) {
-                    alert('无法删除模型：该模型是训练任务的输出模型');
-                } else if (error.message.includes('being used by detection tasks')) {
-                    alert('无法删除模型：该模型正在被检测任务使用');
-                } else {
-                    alert('删除模型失败: ' + error.message);
-                }
-            });
+                    // 处理错误响应
+                    return response.json().then(data => {
+                        throw new Error(data.detail || '删除模型失败');
+                    });
+                })
+                .catch(error => {
+                    if (DEBUG_MODE) {
+                        console.error('Error deleting model:', error);
+                    }
+
+                    // 显示更友好的错误提示
+                    if (error.message.includes('being used by training tasks')) {
+                        alert('无法删除模型：该模型正在被训练任务使用');
+                    } else if (error.message.includes('output of training tasks')) {
+                        alert('无法删除模型：该模型是训练任务的输出模型');
+                    } else if (error.message.includes('being used by detection tasks')) {
+                        alert('无法删除模型：该模型正在被检测任务使用');
+                    } else {
+                        alert('删除模型失败: ' + error.message);
+                    }
+                });
+        });
+
+        // 模态框关闭时清理DOM
+        document.getElementById('deleteModelModal').addEventListener('hidden.bs.modal', function() {
+            this.remove();
+        });
     }
 
     // 查看模型结构

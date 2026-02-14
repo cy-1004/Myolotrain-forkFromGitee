@@ -1,5 +1,5 @@
 #!/bin/bash
-echo ¼¤»îYOLOv8ÑµÁ·»·¾³...
-source venv\bin\activate
-echo ĞéÄâ»·¾³ÒÑ¼¤»î£¬¿ÉÒÔÔËĞĞ 'python train.py' ¿ªÊ¼ÑµÁ·
-echo Ê¹ÓÃ 'deactivate' ÃüÁîÍË³öĞéÄâ»·¾³
+echo æ¿€æ´»YOLOv8è®­ç»ƒç¯å¢ƒ...
+source venv/bin/activate
+echo è™šæ‹Ÿç¯å¢ƒå·²æ¿€æ´»ï¼Œå¯ä»¥è¿è¡Œ 'python train.py' å¼€å§‹è®­ç»ƒ
+echo ä½¿ç”¨ 'deactivate' å‘½ä»¤é€€å‡ºè™šæ‹Ÿç¯å¢ƒ

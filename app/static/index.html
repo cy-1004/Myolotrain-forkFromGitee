@@ -2738,8 +2738,16 @@
             <div class="row mb-4">
                 <div class="col">
                     <div class="card">
-                        <div class="card-header">
+                        <div class="card-header d-flex justify-content-between align-items-center">
                             <h5>GPU信息</h5>
+                            <div class="btn-group" role="group" aria-label="GPU显示模式">
+                                <button type="button" class="btn btn-sm btn-outline-primary gpu-display-btn" data-mode="list">
+                                    <i class="bi bi-list"></i> 逐行显示
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary gpu-display-btn" data-mode="grid">
+                                    <i class="bi bi-grid"></i> 井格显示
+                                </button>
+                            </div>
                         </div>
                         <div class="card-body">
                             <div id="gpu-container">

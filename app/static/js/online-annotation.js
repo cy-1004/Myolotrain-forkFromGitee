@@ -16,7 +16,12 @@ class OnlineAnnotation {
     
     init() {
         console.log('Initializing OnlineAnnotation...');
-        this.loadAnnotationPage();
+        // 检查是否存在标注页面元素，只有在标注页面才执行相关操作
+        if (document.getElementById('annotation-projects-table-body')) {
+            this.loadAnnotationPage();
+        } else {
+            console.log('Not on annotation page, skipping OnlineAnnotation initialization');
+        }
     }
 
     // 加载标注页面
@@ -2014,16 +2019,6 @@ class OnlineAnnotation {
 
 // 创建全局实例
 window.onlineAnnotation = new OnlineAnnotation();
-
-// 在DOM加载完成后加载标注页面
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function() {
-        window.onlineAnnotation.loadAnnotationPage();
-    });
-} else {
-    // DOM已经加载完成，直接调用
-    window.onlineAnnotation.loadAnnotationPage();
-}
 
 // 导出供其他模块使用
 if (typeof module !== 'undefined' && module.exports) {

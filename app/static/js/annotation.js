@@ -68,6 +68,37 @@ class AnnotationTool {
         this.debounceTimer = null;
         this.pendingSave = false;
         
+        // 消息队列管理
+        this.messageQueue = [];
+        this.isShowingMessage = false;
+        
+        // 筛选相关属性
+        this.showCompleted = false;
+        this.showUncompleted = false;
+        this.showAnnotated = false;
+        this.showUnannotated = false;
+        
+        // 节流函数
+        this.throttle = function(func, limit) {
+            let inThrottle;
+            return function() {
+                const args = arguments;
+                const context = this;
+                if (!inThrottle) {
+                    func.apply(context, args);
+                    inThrottle = true;
+                    setTimeout(() => inThrottle = false, limit);
+                }
+            }
+        };
+        
+        // 应用节流的重绘方法
+        this.throttledRedraw = this.throttle(this.redraw.bind(this), 16); // 约60fps
+        
+        // 离屏Canvas，用于绘制辅助线
+        this.offscreenCanvas = document.createElement('canvas');
+        this.offscreenCtx = this.offscreenCanvas.getContext('2d');
+        
         this.init();
         this.loadSAM3Tool(); // 初始化SAM3工具
     }
@@ -274,11 +305,19 @@ class AnnotationTool {
         
         const filterCompletedBtn = document.getElementById('filter-completed');
         const filterUncompletedBtn = document.getElementById('filter-uncompleted');
+        const filterAnnotatedBtn = document.getElementById('filter-annotated');
+        const filterUnannotatedBtn = document.getElementById('filter-unannotated');
         if (filterCompletedBtn) {
             filterCompletedBtn.addEventListener('click', this.toggleCompletedFilter.bind(this));
         }
         if (filterUncompletedBtn) {
             filterUncompletedBtn.addEventListener('click', this.toggleUncompletedFilter.bind(this));
+        }
+        if (filterAnnotatedBtn) {
+            filterAnnotatedBtn.addEventListener('click', this.toggleAnnotatedFilter.bind(this));
+        }
+        if (filterUnannotatedBtn) {
+            filterUnannotatedBtn.addEventListener('click', this.toggleUnannotatedFilter.bind(this));
         }
         
         const guidelineColorPicker = document.getElementById('guideline-color');
@@ -735,14 +774,14 @@ class AnnotationTool {
                     
                     // 实时更新左侧列表信息
                     this.updateAnnotationList();
-                    this.redraw();
+                    this.throttledRedraw();
                     return;
                 } else if (this.isResizing && this.selectedAnnotation) {
                     // 调整关键点标注框大小
                     this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle, canvasX, canvasY);
                     
                     // 重新绘制
-                    this.redraw();
+                    this.throttledRedraw();
                     return;
                 }
             } else {
@@ -762,14 +801,14 @@ class AnnotationTool {
                     
                     // 实时更新左侧列表信息
                     this.updateAnnotationList();
-                    this.redraw();
+                    this.throttledRedraw();
                     return;
                 } else if (this.isResizing && this.selectedAnnotation) {
                     // 调整普通矩形框大小
                     this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle, canvasX, canvasY);
                     
                     // 重新绘制
-                    this.redraw();
+                    this.throttledRedraw();
                     return;
                 }
             }
@@ -787,7 +826,7 @@ class AnnotationTool {
                 };
             }
             
-            this.redraw();
+            this.throttledRedraw();
         } else if (this.isDragging && this.selectedAnnotation) {
             // 拖拽标注框
             const deltaX = canvasX - this.dragStartX;
@@ -803,21 +842,21 @@ class AnnotationTool {
             
             // 实时更新左侧列表信息
             this.updateAnnotationList();
-            this.redraw();
+            this.throttledRedraw();
         } else if (this.isResizing && this.selectedAnnotation) {
             // 调整标注框大小
             this.resizeAnnotation(this.selectedAnnotation, this.resizeHandle, canvasX, canvasY);
             
             // 实时更新左侧列表信息
             this.updateAnnotationList();
-            this.redraw();
+            this.throttledRedraw();
         } else if (this.isPanning) {
             // 拖动画布
             this.offsetX += this.mouseX - this.panStartX;
             this.offsetY += this.mouseY - this.panStartY;
             this.panStartX = this.mouseX;
             this.panStartY = this.mouseY;
-            this.redraw();
+            this.throttledRedraw();
         }
         
         // 更新鼠标样式
@@ -825,7 +864,7 @@ class AnnotationTool {
         
         // 每次鼠标移动都重绘，以确保辅助线跟随鼠标
         if (this.showGuidelines) {
-            this.redraw();
+            this.throttledRedraw();
         }
         
         // 如果正在使用实例分割工具绘制，也重绘以更新临时点
@@ -1388,8 +1427,11 @@ class AnnotationTool {
         
         // 应用筛选条件
         const filteredImages = this.imageList.filter(imageData => {
+            // 检查是否有标注
+            const hasAnnotations = imageData.annotations && imageData.annotations.length > 0;
+            
             // 如果没有启用任何筛选，则显示所有图片
-            if (!this.showCompleted && !this.showUncompleted) {
+            if (!this.showCompleted && !this.showUncompleted && !this.showAnnotated && !this.showUnannotated) {
                 return true;
             }
             
@@ -1403,6 +1445,16 @@ class AnnotationTool {
                 return true;
             }
             
+            // 如果启用了已标注筛选，则显示有标注的图片
+            if (this.showAnnotated && hasAnnotations) {
+                return true;
+            }
+            
+            // 如果启用了未标注筛选，则显示无标注的图片
+            if (this.showUnannotated && !hasAnnotations) {
+                return true;
+            }
+            
             // 其他情况不显示
             return false;
         });
@@ -1413,21 +1465,75 @@ class AnnotationTool {
             this.imageList.findIndex(img => img.id === filteredImg.id)
         );
         
-        this.filteredImageList.forEach((imageData, index) => {
-            const imageItem = document.createElement('div');
-            imageItem.className = `annotation-item ${this.filteredImageIndices[index] === this.currentImageIndex ? 'selected' : ''}`;
-            imageItem.innerHTML = `
-                <div class="d-flex justify-content-between align-items-center">
-                    <span class="text-truncate">${imageData.image_name}</span>
-                    <div>
-                        ${imageData.is_completed ? '<i class="fas fa-check text-success"></i>' : ''}
-                        <span class="badge bg-info">${imageData.annotations.length}</span>
+        // 设置容器样式，启用滚动
+        imageListContainer.style.overflowY = 'auto';
+        imageListContainer.style.height = '600px'; // 设置固定高度
+        imageListContainer.style.position = 'relative';
+        
+        // 计算每个图片项的高度
+        const itemHeight = 40; // 每个图片项的高度（包括padding和margin）
+        
+        // 创建虚拟滚动容器
+        const virtualContainer = document.createElement('div');
+        virtualContainer.style.height = `${filteredImages.length * itemHeight}px`;
+        virtualContainer.style.position = 'absolute';
+        virtualContainer.style.top = '0';
+        virtualContainer.style.left = '0';
+        virtualContainer.style.width = '100%';
+        imageListContainer.appendChild(virtualContainer);
+        
+        // 创建可见项目容器
+        const visibleContainer = document.createElement('div');
+        visibleContainer.style.position = 'absolute';
+        visibleContainer.style.top = '0';
+        visibleContainer.style.left = '0';
+        visibleContainer.style.width = '100%';
+        imageListContainer.appendChild(visibleContainer);
+        
+        // 渲染可视区域内的图片项
+        const renderVisibleItems = () => {
+            const scrollTop = imageListContainer.scrollTop;
+            const containerHeight = imageListContainer.clientHeight;
+            
+            // 计算可见区域的起始和结束索引
+            const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - 5); // 额外渲染5个项目，提高滚动流畅度
+            const endIndex = Math.min(filteredImages.length, Math.ceil((scrollTop + containerHeight) / itemHeight) + 5); // 额外渲染5个项目
+            
+            // 清空可见容器
+            visibleContainer.innerHTML = '';
+            
+            // 设置可见容器的位置
+            visibleContainer.style.transform = `translateY(${startIndex * itemHeight}px)`;
+            
+            // 渲染可见区域内的项目
+            for (let i = startIndex; i < endIndex; i++) {
+                const imageData = filteredImages[i];
+                const imageItem = document.createElement('div');
+                imageItem.className = `annotation-item ${this.filteredImageIndices[i] === this.currentImageIndex ? 'selected' : ''}`;
+                imageItem.style.height = `${itemHeight}px`;
+                imageItem.style.boxSizing = 'border-box';
+                imageItem.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center h-100">
+                        <span class="text-truncate">${imageData.image_name}</span>
+                        <div>
+                            ${imageData.is_completed ? '<i class="fas fa-check text-success"></i>' : ''}
+                            <span class="badge bg-info">${imageData.annotations.length}</span>
+                        </div>
                     </div>
-                </div>
-            `;
-            imageItem.addEventListener('click', () => this.loadImage(this.filteredImageIndices[index]));
-            imageListContainer.appendChild(imageItem);
-        });
+                `;
+                imageItem.addEventListener('click', () => this.loadImage(this.filteredImageIndices[i]));
+                visibleContainer.appendChild(imageItem);
+            }
+        };
+        
+        // 初始渲染
+        renderVisibleItems();
+        
+        // 监听滚动事件，动态渲染可见项目
+        imageListContainer.addEventListener('scroll', renderVisibleItems);
+        
+        // 保存渲染函数，以便在需要时重新渲染
+        this.renderVisibleItems = renderVisibleItems;
         
         document.getElementById('total-images').textContent = this.imageList.length;
     }
@@ -1490,7 +1596,12 @@ class AnnotationTool {
                         if (this.imageList && this.imageList[previousImageIndex] !== undefined) {
                             this.imageList[previousImageIndex].is_completed = true;
                         }
-                        this.updateImageList();
+                        // 重新渲染可见项目
+                        if (this.renderVisibleItems) {
+                            this.renderVisibleItems();
+                        } else {
+                            this.updateImageList();
+                        }
                         // 更新标注进度
                         await this.loadProjectStats();
                     }
@@ -1508,6 +1619,16 @@ class AnnotationTool {
         
         // 更新图片列表选中状态
         this.updateImageListSelection();
+        
+        // 释放之前加载的图片资源，减少内存占用
+        if (this.currentImage) {
+            // 直接设置为null，让垃圾回收器回收内存
+            // 避免设置src = ''，因为这可能会触发错误
+            this.currentImage = null;
+        }
+        
+        // 清空标注数据
+        this.annotations = [];
         
         // 加载图片
         const img = new Image();
@@ -1531,6 +1652,11 @@ class AnnotationTool {
                     console.error('更新进度失败:', error);
                 }
             })();
+        };
+        
+        img.onerror = (error) => {
+            console.error('图片加载失败:', error);
+            this.showMessage('图片加载失败，请重试', 'error');
         };
         
         // 使用API端点获取图片文件
@@ -2335,48 +2461,61 @@ class AnnotationTool {
             // 关键点工具的绘制逻辑
             this.keypointsTool.startAnnotation(e);
         } else {
-            // 检查是否点击了现有标注框
-            let clickedAnnotation = null;
-            // 从后往前遍历，优先选中上层的标注
+            // 优先检查是否点击了现有标注框的调整大小控制点（优先级最高）
+            let foundResizeHandle = false;
             for (let i = this.annotations.length - 1; i >= 0; i--) {
                 const ann = this.annotations[i];
                 if (ann.x !== undefined && ann.y !== undefined && 
-                    ann.width !== undefined && ann.height !== undefined &&
-                    !ann.points && !ann.keypoints) { // 排除分割和关键点标注
+                    ann.width !== undefined && ann.height !== undefined) {
                     
-                    if (canvasX >= ann.x && canvasX <= ann.x + ann.width &&
-                        canvasY >= ann.y && canvasY <= ann.y + ann.height) {
-                        
-                        // 检查是否点击了调整大小的控制点
-                        const handle = this.getResizeHandle(ann, canvasX, canvasY);
-                        if (handle) {
-                            this.selectedAnnotation = ann;
-                            this.isResizing = true;
-                            this.resizeHandle = handle;
-                            this.startX = canvasX;
-                            this.startY = canvasY;
-                            this.redraw();
-                            return;
-                        }
-                        
-                        // 选中标注框
-                        clickedAnnotation = ann;
+                    // 检查是否点击了调整大小的控制点
+                    const handle = this.getResizeHandle(ann, canvasX, canvasY);
+                    if (handle) {
+                        this.selectedAnnotation = ann;
+                        this.isResizing = true;
+                        this.resizeHandle = handle;
+                        this.startX = canvasX;
+                        this.startY = canvasY;
+                        this.redraw();
+                        this.updateAnnotationList();
+                        foundResizeHandle = true;
                         break;
                     }
                 }
             }
             
-            if (clickedAnnotation) {
-                // 开始拖拽标注框
-                this.selectedAnnotation = clickedAnnotation;
-                this.isDragging = true;
-                this.dragStartX = canvasX;
-                this.dragStartY = canvasY;
-            } else {
-                // 开始绘制新的标注框
-                this.isDrawing = true;
-                this.startX = canvasX;
-                this.startY = canvasY;
+            // 如果没有找到调整大小的控制点，检查是否点击了现有标注框
+            if (!foundResizeHandle) {
+                let clickedAnnotation = null;
+                // 从后往前遍历，优先选中上层的标注
+                for (let i = this.annotations.length - 1; i >= 0; i--) {
+                    const ann = this.annotations[i];
+                    if (ann.x !== undefined && ann.y !== undefined && 
+                        ann.width !== undefined && ann.height !== undefined &&
+                        !ann.points && !ann.keypoints) { // 排除分割和关键点标注
+                        
+                        if (canvasX >= ann.x && canvasX <= ann.x + ann.width &&
+                            canvasY >= ann.y && canvasY <= ann.y + ann.height) {
+                            
+                            // 选中标注框
+                            clickedAnnotation = ann;
+                            break;
+                        }
+                    }
+                }
+                
+                if (clickedAnnotation) {
+                    // 开始拖拽标注框
+                    this.selectedAnnotation = clickedAnnotation;
+                    this.isDragging = true;
+                    this.dragStartX = canvasX;
+                    this.dragStartY = canvasY;
+                } else {
+                    // 开始绘制新的标注框
+                    this.isDrawing = true;
+                    this.startX = canvasX;
+                    this.startY = canvasY;
+                }
             }
         }
         
@@ -2480,7 +2619,7 @@ class AnnotationTool {
     }
     
     getResizeHandle(annotation, x, y) {
-        const handleSize = 8;
+        const handleSize = 12; // 增大控制点检测范围
         const right = annotation.x + annotation.width;
         const bottom = annotation.y + annotation.height;
         
@@ -2512,25 +2651,25 @@ class AnnotationTool {
         // 四个边控制点
         // 右侧控制点
         if (x >= right - handleSize && x <= right + handleSize &&
-            y >= annotation.y && y <= bottom) {
+            y >= annotation.y - handleSize/2 && y <= bottom + handleSize/2) {
             return 'right';
         }
         
         // 底部控制点
         if (y >= bottom - handleSize && y <= bottom + handleSize &&
-            x >= annotation.x && x <= right) {
+            x >= annotation.x - handleSize/2 && x <= right + handleSize/2) {
             return 'bottom';
         }
         
         // 左侧控制点
         if (x >= annotation.x - handleSize && x <= annotation.x + handleSize &&
-            y >= annotation.y && y <= bottom) {
+            y >= annotation.y - handleSize/2 && y <= bottom + handleSize/2) {
             return 'left';
         }
         
         // 顶部控制点
         if (y >= annotation.y - handleSize && y <= annotation.y + handleSize &&
-            x >= annotation.x && x <= right) {
+            x >= annotation.x - handleSize/2 && x <= right + handleSize/2) {
             return 'top';
         }
         
@@ -2628,10 +2767,18 @@ class AnnotationTool {
     }
     
     drawGuidelines() {
-        this.ctx.save();
-        this.ctx.strokeStyle = this.guidelineColor; // 使用自定义颜色
-        this.ctx.lineWidth = 1;
-        this.ctx.setLineDash([5, 5]);
+        // 调整离屏Canvas尺寸
+        this.offscreenCanvas.width = this.canvas.width;
+        this.offscreenCanvas.height = this.canvas.height;
+        
+        // 清空离屏Canvas
+        this.offscreenCtx.clearRect(0, 0, this.offscreenCanvas.width, this.offscreenCanvas.height);
+        
+        // 绘制辅助线到离屏Canvas
+        this.offscreenCtx.save();
+        this.offscreenCtx.strokeStyle = this.guidelineColor; // 使用自定义颜色
+        this.offscreenCtx.lineWidth = 1;
+        this.offscreenCtx.setLineDash([5, 5]);
         
         // 绘制鼠标位置的垂直线
         if (this.mouseX !== undefined && this.mouseY !== undefined) {
@@ -2640,24 +2787,27 @@ class AnnotationTool {
             const canvasY = (this.mouseY - this.offsetY) / this.scale;
             
             // 垂直线（从顶部到底部）
-            this.ctx.beginPath();
-            this.ctx.moveTo(canvasX, 0);
-            this.ctx.lineTo(canvasX, this.canvas.height);
-            this.ctx.stroke();
+            this.offscreenCtx.beginPath();
+            this.offscreenCtx.moveTo(canvasX, 0);
+            this.offscreenCtx.lineTo(canvasX, this.canvas.height);
+            this.offscreenCtx.stroke();
             
             // 水平线（从左侧到右侧）
-            this.ctx.beginPath();
-            this.ctx.moveTo(0, canvasY);
-            this.ctx.lineTo(this.canvas.width, canvasY);
-            this.ctx.stroke();
+            this.offscreenCtx.beginPath();
+            this.offscreenCtx.moveTo(0, canvasY);
+            this.offscreenCtx.lineTo(this.canvas.width, canvasY);
+            this.offscreenCtx.stroke();
             
             // 显示鼠标坐标
-            this.ctx.fillStyle = this.guidelineColor; // 使用自定义颜色
-            this.ctx.font = '12px Arial';
-            this.ctx.fillText(`(${Math.round(canvasX)}, ${Math.round(canvasY)})`, canvasX + 5, canvasY - 5);
+            this.offscreenCtx.fillStyle = this.guidelineColor; // 使用自定义颜色
+            this.offscreenCtx.font = '12px Arial';
+            this.offscreenCtx.fillText(`(${Math.round(canvasX)}, ${Math.round(canvasY)})`, canvasX + 5, canvasY - 5);
         }
         
-        this.ctx.restore();
+        this.offscreenCtx.restore();
+        
+        // 将离屏Canvas的内容绘制到主Canvas
+        this.ctx.drawImage(this.offscreenCanvas, 0, 0);
     }
     
     drawBox(box, color, isDrawing = false, index = null, isSelected = false) {
@@ -3178,22 +3328,68 @@ class AnnotationTool {
     }
     
     showMessage(message, type) {
-        // 简单的消息提示
-        const alertClass = type === 'success' ? 'alert-success' : 'alert-danger';
+        // 将消息添加到队列
+        this.messageQueue.push({ message, type });
+        
+        // 如果没有消息正在显示，开始处理队列
+        if (!this.isShowingMessage) {
+            this.processMessageQueue();
+        }
+    }
+    
+    processMessageQueue() {
+        if (this.messageQueue.length === 0) {
+            this.isShowingMessage = false;
+            return;
+        }
+        
+        this.isShowingMessage = true;
+        const { message, type } = this.messageQueue.shift();
+        
+        // 根据消息类型设置不同的样式和显示时长
+        let alertClass;
+        let duration;
+        
+        switch (type) {
+            case 'success':
+                alertClass = 'alert-success';
+                duration = 1500; // 成功消息显示1.5秒
+                break;
+            case 'error':
+                alertClass = 'alert-danger';
+                duration = 3000; // 错误消息显示3秒
+                break;
+            case 'info':
+                alertClass = 'alert-info';
+                duration = 2000; // 信息消息显示2秒
+                break;
+            default:
+                alertClass = 'alert-info';
+                duration = 2000;
+        }
+        
+        // 创建消息提示元素
         const alertDiv = document.createElement('div');
         alertDiv.className = `alert ${alertClass} alert-dismissible fade show position-fixed`;
         alertDiv.style.top = '20px';
         alertDiv.style.right = '20px';
         alertDiv.style.zIndex = '9999';
+        alertDiv.style.minWidth = '200px';
+        alertDiv.style.maxWidth = '400px';
         alertDiv.innerHTML = `
             ${message}
             <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
         `;
         document.body.appendChild(alertDiv);
         
+        // 设置自动移除定时器
         setTimeout(() => {
             alertDiv.remove();
-        }, 3000);
+            // 处理下一条消息
+            setTimeout(() => {
+                this.processMessageQueue();
+            }, 300); // 消息之间的间隔
+        }, duration);
     }
     
     // 上一个类别
@@ -3223,6 +3419,15 @@ class AnnotationTool {
     
     // 显示自动标注模态框
     showAutoAnnotateModal() {
+        // 检查是否有正在进行的自动标注任务
+        if (this.isAutoAnnotating) {
+            if (confirm('有AI标注任务正在进行，是否停止之前的任务并开始新的标注？')) {
+                this.stopAutoAnnotate();
+            } else {
+                return;
+            }
+        }
+        
         if (this.availableModels.length === 0) {
             alert('没有可用的模型，请先上传模型文件');
             return;
@@ -3257,14 +3462,26 @@ class AnnotationTool {
                                 <label for="auto-annotate-iou" class="form-label">IoU阈值: <span id="auto-annotate-iou-value">0.45</span></label>
                                 <input type="range" class="form-range" id="auto-annotate-iou" min="0.1" max="1.0" step="0.05" value="0.45">
                             </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" id="auto-annotate-overwrite" checked>
-                                <label class="form-check-label" for="auto-annotate-overwrite">
-                                    覆盖现有标注
-                                </label>
+                            <div class="mb-3">
+                                <label class="form-label">标注选项</label>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="radio" name="auto-annotate-option" id="auto-annotate-overwrite-all" value="overwrite-all" checked>
+                                    <label class="form-check-label" for="auto-annotate-overwrite-all">
+                                        覆盖全部已有标注（无论是否完成）
+                                    </label>
+                                </div>
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input" type="radio" name="auto-annotate-option" id="auto-annotate-only-uncompleted" value="only-uncompleted">
+                                    <label class="form-check-label" for="auto-annotate-only-uncompleted">
+                                        只标注未完成图片
+                                    </label>
+                                </div>
                             </div>
                             <div class="alert alert-info mt-3">
-                                <i class="fas fa-info-circle"></i> 系统将使用选定的模型对所有未完成的图片进行自动标注。您可以随时停止并手动调整结果。
+                                <i class="fas fa-info-circle"></i> 系统将使用选定的模型对选择的图片进行自动标注。您可以随时停止并手动调整结果。
+                            </div>
+                            <div class="alert alert-warning mt-2" id="parameter-recommendation">
+                                <i class="fas fa-lightbulb"></i> 请选择模型查看建议参数
                             </div>
                         </div>
                         <div class="modal-footer">
@@ -3290,6 +3507,53 @@ class AnnotationTool {
             document.getElementById('auto-annotate-iou-value').textContent = e.target.value;
         });
         
+        // 添加模型选择事件监听器，根据模型类型设置建议参数
+        document.getElementById('auto-annotate-model').addEventListener('change', (e) => {
+            const modelId = e.target.value;
+            if (modelId) {
+                // 查找选中的模型
+                const selectedModel = this.availableModels.find(model => model.id === modelId);
+                if (selectedModel) {
+                    const modelType = selectedModel.type || '';
+                    const modelTypeLower = modelType.toLowerCase();
+                    
+                    let recommendedConfidence = 0.25;
+                    let recommendedIou = 0.45;
+                    let recommendationText = '建议根据模型类型调整参数';
+                    
+                    // 根据模型类型设置建议参数
+                    if (modelTypeLower.includes('yoloe')) {
+                        // YOLOE通用模型：需要更高的置信度来减少误检测
+                        recommendedConfidence = 0.55;
+                        recommendedIou = 0.55;
+                        recommendationText = 'YOLOE通用模型建议：置信度 0.5-0.6，IoU 0.5-0.6（减少误检测）';
+                    } else if (modelTypeLower.includes('yolov8') || modelTypeLower.includes('yolov11')) {
+                        // YOLOv8/v11模型：可以使用较低的置信度
+                        recommendedConfidence = 0.35;
+                        recommendedIou = 0.45;
+                        recommendationText = 'YOLOv8/v11模型建议：置信度 0.3-0.4，IoU 0.4-0.5';
+                    }
+                    
+                    // 更新参数值
+                    const confInput = document.getElementById('auto-annotate-conf');
+                    const iouInput = document.getElementById('auto-annotate-iou');
+                    const confValue = document.getElementById('auto-annotate-conf-value');
+                    const iouValue = document.getElementById('auto-annotate-iou-value');
+                    
+                    confInput.value = recommendedConfidence;
+                    iouInput.value = recommendedIou;
+                    confValue.textContent = recommendedConfidence;
+                    iouValue.textContent = recommendedIou;
+                    
+                    // 更新建议信息
+                    const recommendationElement = document.getElementById('parameter-recommendation');
+                    if (recommendationElement) {
+                        recommendationElement.textContent = recommendationText;
+                    }
+                }
+            }
+        });
+        
         document.getElementById('view-model-classes').addEventListener('click', () => {
             const modelId = document.getElementById('auto-annotate-model').value;
             if (modelId) {
@@ -3303,7 +3567,7 @@ class AnnotationTool {
             const modelId = document.getElementById('auto-annotate-model').value;
             const confidence = parseFloat(document.getElementById('auto-annotate-conf').value);
             const iou = parseFloat(document.getElementById('auto-annotate-iou').value);
-            const overwrite = document.getElementById('auto-annotate-overwrite').checked;
+            const annotateOption = document.querySelector('input[name="auto-annotate-option"]:checked').value;
             
             if (!modelId) {
                 alert('请选择模型');
@@ -3311,7 +3575,7 @@ class AnnotationTool {
             }
             
             modal.hide();
-            this.startAutoAnnotate(modelId, confidence, iou, overwrite);
+            this.startAutoAnnotate(modelId, confidence, iou, annotateOption);
         });
         
         // 模态框关闭时清理DOM
@@ -3323,7 +3587,7 @@ class AnnotationTool {
     }
     
     // 开始自动标注
-    async startAutoAnnotate(modelId, confidence, iou, overwrite) {
+    async startAutoAnnotate(modelId, confidence, iou, annotateOption) {
         this.isAutoAnnotating = true;
         this.autoAnnotateAbortController = new AbortController();
         
@@ -3332,21 +3596,32 @@ class AnnotationTool {
         document.getElementById('stop-auto-annotate').style.display = 'inline-block';
         
         try {
-            // 获取未完成的图片列表
-            const uncompletedImages = this.imageList.filter(img => !img.is_completed);
+            // 根据选择的选项决定标注范围
+            let targetImages;
+            let overwrite = true;
             
-            if (uncompletedImages.length === 0) {
-                this.showMessage('所有图片已完成标注', 'info');
+            if (annotateOption === 'overwrite-all') {
+                // 覆盖全部已有标注，处理所有图片
+                targetImages = this.imageList;
+                overwrite = true;
+            } else if (annotateOption === 'only-uncompleted') {
+                // 只标注未完成图片
+                targetImages = this.imageList.filter(img => !img.is_completed);
+                overwrite = true;
+            }
+            
+            if (targetImages.length === 0) {
+                this.showMessage('没有需要标注的图片', 'info');
                 this.stopAutoAnnotate();
                 return;
             }
             
-            this.showMessage(`开始自动标注 ${uncompletedImages.length} 张图片...`, 'info');
+            this.showMessage(`开始自动标注 ${targetImages.length} 张图片...`, 'info');
             
-            for (let i = 0; i < uncompletedImages.length; i++) {
+            for (let i = 0; i < targetImages.length; i++) {
                 if (!this.isAutoAnnotating) break;
                 
-                const imageData = uncompletedImages[i];
+                const imageData = targetImages[i];
                 const imageIndex = this.imageList.findIndex(img => img.id === imageData.id);
                 
                 // 切换到当前图片
@@ -3356,8 +3631,8 @@ class AnnotationTool {
                 await this.annotateImageWithAI(imageData.id, modelId, confidence, iou, overwrite);
                 
                 // 更新进度
-                const progress = Math.round(((i + 1) / uncompletedImages.length) * 100);
-                this.showMessage(`标注进度: ${progress}% (${i + 1}/${uncompletedImages.length})`, 'info');
+                const progress = Math.round(((i + 1) / targetImages.length) * 100);
+                this.showMessage(`标注进度: ${progress}% (${i + 1}/${targetImages.length})`, 'info');
                 
                 // 等待一小段时间避免过快请求
                 await new Promise(resolve => setTimeout(resolve, 500));
@@ -3648,6 +3923,36 @@ class AnnotationTool {
             } else {
                 btn.classList.remove('btn-warning');
                 btn.classList.add('btn-outline-warning');
+            }
+        }
+        this.updateImageList();
+    }
+    
+    toggleAnnotatedFilter() {
+        this.showAnnotated = !this.showAnnotated;
+        const btn = document.getElementById('filter-annotated');
+        if (btn) {
+            if (this.showAnnotated) {
+                btn.classList.remove('btn-outline-info');
+                btn.classList.add('btn-info');
+            } else {
+                btn.classList.remove('btn-info');
+                btn.classList.add('btn-outline-info');
+            }
+        }
+        this.updateImageList();
+    }
+    
+    toggleUnannotatedFilter() {
+        this.showUnannotated = !this.showUnannotated;
+        const btn = document.getElementById('filter-unannotated');
+        if (btn) {
+            if (this.showUnannotated) {
+                btn.classList.remove('btn-outline-secondary');
+                btn.classList.add('btn-secondary');
+            } else {
+                btn.classList.remove('btn-secondary');
+                btn.classList.add('btn-outline-secondary');
             }
         }
         this.updateImageList();
