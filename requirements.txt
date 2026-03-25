@@ -11,7 +11,7 @@
 
 # YOLO and dependencies
 ultralytics>=8.3.237
-numpy>=1.26.0   #仅有1.26.0以上支持python3.12
+numpy>=1.26.4   #仅有1.26.0以上支持python3.12
 opencv-python>=4.8.0
 PyYAML>=5.3.1
 tqdm>=4.41.0
