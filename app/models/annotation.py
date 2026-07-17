@@ -1,10 +1,14 @@
 import uuid
-from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, Boolean, ForeignKey
+from datetime import datetime, timedelta
+from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, Boolean, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
+
+# 标注租约有效期：持有者每 60 秒续期一次，超时未续期则视为已释放，
+# 避免标注员浏览器崩溃或直接关页面后图片被永久锁死
+ANNOTATION_LEASE_TTL = timedelta(minutes=5)
 
 class AnnotationProject(Base):
     __tablename__ = "annotation_projects"
@@ -38,5 +42,18 @@ class ImageAnnotation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # 多人协作字段
+    version = Column(Integer, nullable=False, default=1, server_default="1")  # 乐观锁版本号，每次保存自增
+    locked_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # 租约持有者
+    locked_at = Column(DateTime, nullable=True)  # 租约最后续期时间，配合 ANNOTATION_LEASE_TTL 判断是否过期
+    last_edited_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # 最后修改者
+
     # 关联关系
     project = relationship("AnnotationProject", back_populates="image_annotations")
+    locker = relationship("User", foreign_keys=[locked_by])
+    last_editor = relationship("User", foreign_keys=[last_edited_by])
+
+    # 认领接口按 (项目, 未完成, 租约) 过滤，走该索引避免全表扫描
+    __table_args__ = (
+        Index("ix_image_annotations_claim", "project_id", "is_completed", "locked_at"),
+    )

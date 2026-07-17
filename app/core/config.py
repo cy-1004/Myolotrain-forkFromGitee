@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # Database
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_USER: str = "postgres"
-    POSTGRES_PASSWORD: str = "postgres"
+    POSTGRES_PASSWORD: str = "123456"
     POSTGRES_DB: str = "yolov8_platform"
     SQLALCHEMY_DATABASE_URI: Optional[PostgresDsn] = None
 

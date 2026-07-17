@@ -1,20 +1,98 @@
 import logging
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body, BackgroundTasks
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from uuid import UUID
 from app.core.config import settings
 from app.db.session import get_db
 from app.crud import annotation_project, image_annotation
 from app.crud.crud_model import model
+from app.api.deps import get_current_active_user
+from app.models.annotation import ANNOTATION_LEASE_TTL, ImageAnnotation as ImageAnnotationModel
+from app.models.user import User, UserRole
 from app.schemas.annotation import (
     AnnotationProjectCreate, AnnotationProjectResponse, AnnotationProjectUpdate,
     ImageAnnotationCreate, ImageAnnotation, ImageAnnotationUpdate,
-    ProjectStats, ExportRequest, MergeProjectsRequest
+    ProjectStats, ExportRequest, MergeProjectsRequest,
+    LeaseHolder, LeaseResponse, NextImageResponse, PresenceEntry, PresenceResponse
 )
 from app.services.annotation_service import AnnotationService
 
 router = APIRouter()
+
+# ---------------------------------------------------------------------------
+# 多人协作：标注租约
+#
+# 标注是"一人一图"的独占工作，不存在同一张图共同编辑的需求，因此不引入
+# WebSocket 实时协同，只保证互斥：
+#   1. 打开图片时获取租约（软锁），他人看到只读提示；
+#   2. 租约 ANNOTATION_LEASE_TTL 后过期、前端定时续期，浏览器崩溃也不会把图锁死；
+#   3. 保存时再校验版本号，兜住"租约刚过期"这类边界情况，冲突返回 409 而非静默覆盖。
+# ---------------------------------------------------------------------------
+
+def _lease_available(user_id: int, now: datetime):
+    """租约可被 user_id 取得的条件：无人持有 / 自己持有 / 他人租约已过期"""
+    return or_(
+        ImageAnnotationModel.locked_by.is_(None),
+        ImageAnnotationModel.locked_by == user_id,
+        ImageAnnotationModel.locked_at < now - ANNOTATION_LEASE_TTL,
+    )
+
+def _lease_held_by_other(image: ImageAnnotationModel, user_id: int, now: datetime) -> bool:
+    """图片是否正被他人的有效租约占用"""
+    if image.locked_by is None or image.locked_by == user_id or image.locked_at is None:
+        return False
+    return image.locked_at >= now - ANNOTATION_LEASE_TTL
+
+def _username(db: Session, user_id: Optional[int]) -> Optional[str]:
+    if user_id is None:
+        return None
+    user = db.query(User).filter(User.id == user_id).first()
+    return user.username if user else None
+
+def _lease_conflict(db: Session, image: ImageAnnotationModel) -> HTTPException:
+    """423：图片被他人租约占用，前端据此进入只读模式并显示持有者"""
+    return HTTPException(status_code=423, detail={
+        "message": "该图片正在被他人标注",
+        "holder": {
+            "user_id": image.locked_by,
+            "username": _username(db, image.locked_by) or "未知用户",
+            "locked_at": image.locked_at.isoformat() if image.locked_at else None,
+        },
+    })
+
+def _acquire_lease(db: Session, image_id: UUID, user: User, force: bool = False) -> ImageAnnotationModel:
+    """原子地获取或续期租约
+
+    用单条带条件的 UPDATE 做 compare-and-swap，由数据库行锁保证互斥；
+    若先 SELECT 再 UPDATE，两个并发请求会双双通过检查。
+    """
+    now = datetime.utcnow()
+    conditions = [ImageAnnotationModel.id == image_id]
+    if not force:
+        conditions.append(_lease_available(user.id, now))
+
+    result = db.execute(
+        update(ImageAnnotationModel)
+        .where(*conditions)
+        .values(
+            locked_by=user.id,
+            locked_at=now,
+            # 自赋值以压制 updated_at 的 onupdate，否则每次心跳续期都会
+            # 把图片显示成"刚刚修改过"
+            updated_at=ImageAnnotationModel.updated_at,
+        )
+    )
+    db.commit()
+
+    image = image_annotation.get(db, id=image_id)
+    if not image:
+        raise HTTPException(status_code=404, detail="图片未找到")
+    if result.rowcount == 0:
+        raise _lease_conflict(db, image)
+    return image
 
 @router.get("/test")
 def test_annotation():
@@ -218,17 +296,187 @@ def get_image_annotation(
         raise HTTPException(status_code=404, detail="图片未找到")
     return image
 
+@router.post("/images/{image_id}/lease", response_model=LeaseResponse)
+def acquire_image_lease(
+    image_id: UUID,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """获取或续期图片标注租约
+
+    幂等：打开图片时调用一次，之后前端定时调用同一接口续期。
+    图片被他人占用时返回 423；管理员可用 force=true 强制接管。
+    """
+    if force and current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="只有管理员可以强制接管标注中的图片")
+
+    image = _acquire_lease(db, image_id, current_user, force=force)
+    return LeaseResponse(
+        image_id=image.id,
+        version=image.version,
+        holder=LeaseHolder(
+            user_id=current_user.id,
+            username=current_user.username,
+            locked_at=image.locked_at,
+        ),
+        expires_at=image.locked_at + ANNOTATION_LEASE_TTL,
+    )
+
+@router.delete("/images/{image_id}/lease")
+def release_image_lease(
+    image_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """释放图片标注租约（切换图片或关闭页面时调用）"""
+    # 条件里限定 locked_by 为自己，避免误释放他人在租约过期后重新获取的锁
+    db.execute(
+        update(ImageAnnotationModel)
+        .where(
+            ImageAnnotationModel.id == image_id,
+            ImageAnnotationModel.locked_by == current_user.id,
+        )
+        .values(
+            locked_by=None,
+            locked_at=None,
+            updated_at=ImageAnnotationModel.updated_at,
+        )
+    )
+    db.commit()
+    return {"message": "租约已释放"}
+
+@router.post("/projects/{project_id}/next", response_model=NextImageResponse)
+def claim_next_image(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """认领下一张待标注图片
+
+    跳过已完成和已被他人占用的图片。多人同时点"下一张"时，SKIP LOCKED 让每个人
+    各自拿到不同的行，不必预先给标注员分配图片，也不需要冲突重试。
+    """
+    now = datetime.utcnow()
+    image_id = db.execute(
+        select(ImageAnnotationModel.id)
+        .where(
+            ImageAnnotationModel.project_id == project_id,
+            # isnot(True) 而非 is_(False)：历史数据里 is_completed 可能为 NULL
+            ImageAnnotationModel.is_completed.isnot(True),
+            _lease_available(current_user.id, now),
+        )
+        .order_by(ImageAnnotationModel.image_name)
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    ).scalar_one_or_none()
+
+    if image_id is None:
+        return NextImageResponse(message="没有待标注的图片")
+
+    db.execute(
+        update(ImageAnnotationModel)
+        .where(ImageAnnotationModel.id == image_id)
+        .values(
+            locked_by=current_user.id,
+            locked_at=now,
+            updated_at=ImageAnnotationModel.updated_at,
+        )
+    )
+    db.commit()
+
+    return NextImageResponse(
+        image=image_annotation.get(db, id=image_id),
+        expires_at=now + ANNOTATION_LEASE_TTL,
+    )
+
+@router.get("/projects/{project_id}/presence", response_model=PresenceResponse)
+def get_project_presence(
+    project_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """项目内当前谁在标注哪张图（前端定时轮询，用于在图片列表上显示占用者）"""
+    now = datetime.utcnow()
+    rows = db.execute(
+        select(
+            ImageAnnotationModel.id,
+            ImageAnnotationModel.image_name,
+            User.id,
+            User.username,
+            ImageAnnotationModel.locked_at,
+        )
+        .join(User, User.id == ImageAnnotationModel.locked_by)
+        .where(
+            ImageAnnotationModel.project_id == project_id,
+            ImageAnnotationModel.locked_at >= now - ANNOTATION_LEASE_TTL,
+        )
+    ).all()
+
+    return PresenceResponse(entries=[
+        PresenceEntry(
+            image_id=row[0],
+            image_name=row[1],
+            user_id=row[2],
+            username=row[3],
+            locked_at=row[4],
+        )
+        for row in rows
+    ])
+
 @router.put("/images/{image_id}", response_model=ImageAnnotation)
 def update_image_annotation(
     image_id: UUID,
     annotation_update: ImageAnnotationUpdate,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
-    """更新图片标注"""
+    """更新图片标注
+
+    需持有租约（图片空闲时自动获取），并在客户端提供 expected_version 时做乐观锁校验。
+    租约冲突返回 423，版本冲突返回 409 并附带最新数据，交由前端决定重新加载还是覆盖，
+    绝不静默丢弃他人的标注。
+    """
+    update_data = annotation_update.dict(exclude_unset=True)
+    expected_version = update_data.pop("expected_version", None)
+
+    now = datetime.utcnow()
+    conditions = [
+        ImageAnnotationModel.id == image_id,
+        _lease_available(current_user.id, now),
+    ]
+    if expected_version is not None:
+        conditions.append(ImageAnnotationModel.version == expected_version)
+
+    values = dict(update_data)
+    values.update({
+        "version": ImageAnnotationModel.version + 1,
+        "last_edited_by": current_user.id,
+        # 保存即续租，标注员连续编辑时无需依赖心跳
+        "locked_by": current_user.id,
+        "locked_at": now,
+    })
+
+    result = db.execute(
+        update(ImageAnnotationModel).where(*conditions).values(**values)
+    )
+    db.commit()
+
     image = image_annotation.get(db, id=image_id)
     if not image:
         raise HTTPException(status_code=404, detail="图片未找到")
-    return image_annotation.update(db, db_obj=image, obj_in=annotation_update)
+
+    if result.rowcount == 0:
+        if _lease_held_by_other(image, current_user.id, now):
+            raise _lease_conflict(db, image)
+        raise HTTPException(status_code=409, detail={
+            "message": "该图片已被他人修改，请重新加载后再保存",
+            "version": image.version,
+            "annotations": image.annotations,
+            "last_edited_by": _username(db, image.last_edited_by),
+        })
+
+    return image
 
 @router.delete("/images/{image_id}")
 def delete_image_annotation(
@@ -611,7 +859,8 @@ def auto_annotate_image(
     confidence: float = Body(0.25),
     iou: float = Body(0.45),
     overwrite: bool = Body(True),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """使用AI模型自动标注图片"""
     from app.services.annotation_service import AnnotationService
@@ -624,10 +873,15 @@ def auto_annotate_image(
     except ValueError:
         raise HTTPException(status_code=400, detail="模型ID格式无效，请使用有效的UUID格式")
 
-    # 获取图片信息
-    image = image_annotation.get(db, id=image_id)
-    if not image:
+    # 自动标注会覆写标注内容，与手工保存一样需要先持有租约。
+    # 记录调用前是否已持有：批量自动标注不该把整个项目的图片都锁住 5 分钟，
+    # 因此标注完成后要把这类临时租约还回去。
+    existing = image_annotation.get(db, id=image_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="图片未找到")
+    lease_held_before = existing.locked_by == current_user.id
+
+    image = _acquire_lease(db, image_id, current_user)
 
     # 获取模型信息
     db_model = model.get(db, id=model_id)
@@ -655,12 +909,30 @@ def auto_annotate_image(
                 iou=iou,
                 overwrite=overwrite
             )
-        
+
+        # 服务层直接写库，这里补上版本自增，否则前端拿着旧版本号保存时
+        # 会以为期间无人改动，把自动标注的结果覆盖掉
+        lease_values = {
+            "version": ImageAnnotationModel.version + 1,
+            "last_edited_by": current_user.id,
+        }
+        if not lease_held_before:
+            # 归还临时租约，让其他标注员可以立刻接手这张图
+            lease_values.update({"locked_by": None, "locked_at": None})
+
+        db.execute(
+            update(ImageAnnotationModel)
+            .where(ImageAnnotationModel.id == image_id)
+            .values(**lease_values)
+        )
+        db.commit()
+
         return {
             "success": True,
             "message": "自动标注完成",
             "annotations": annotations,
-            "annotation_count": len(annotations)
+            "annotation_count": len(annotations),
+            "version": image_annotation.get(db, id=image_id).version
         }
         
     except HTTPException as e:
@@ -682,31 +954,41 @@ def auto_annotate_image(
 @router.post("/projects/{project_id}/mark-all-completed")
 def mark_all_completed(
     project_id: UUID,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
 ):
     """一键标记所有图片为已完成"""
     # 获取项目信息
     project = annotation_project.get(db, id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
-    
+
     try:
-        # 获取所有图片
-        images = image_annotation.get_by_project_id(db, project_id=project_id, skip=0, limit=10000)
-        
-        # 批量更新
-        updated_count = 0
-        for img in images:
-            img_is_completed = img.is_completed if img.is_completed is not None else False
-            if img_is_completed is False:
-                image_annotation.update(db, db_obj=img, obj_in={"is_completed": True})
-                updated_count += 1
-        
+        total_count = db.query(func.count(ImageAnnotationModel.id)).filter(
+            ImageAnnotationModel.project_id == project_id
+        ).scalar() or 0
+
+        # 单条批量 UPDATE 并自增版本号：正打开这些图片的标注员保存时会收到 409
+        # 提示重新加载，而不是用手里的旧状态把完成标记覆盖回去
+        result = db.execute(
+            update(ImageAnnotationModel)
+            .where(
+                ImageAnnotationModel.project_id == project_id,
+                ImageAnnotationModel.is_completed.isnot(True),
+            )
+            .values(
+                is_completed=True,
+                version=ImageAnnotationModel.version + 1,
+                last_edited_by=current_user.id,
+            )
+        )
+        db.commit()
+
         return {
             "success": True,
-            "message": f"已标记 {updated_count} 张图片为完成",
-            "updated_count": updated_count,
-            "total_count": len(images)
+            "message": f"已标记 {result.rowcount} 张图片为完成",
+            "updated_count": result.rowcount,
+            "total_count": total_count
         }
         
     except Exception as e:

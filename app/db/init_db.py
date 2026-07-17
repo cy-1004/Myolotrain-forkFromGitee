@@ -291,6 +291,33 @@ def init_db():
                     conn.commit()
                     logger.info("Added import_original_annotations column to annotation_projects table")
 
+        # 检查并添加 image_annotations 表的多人协作列
+        if 'image_annotations' in tables:
+            image_annotation_columns = [col['name'] for col in inspector.get_columns('image_annotations')]
+            collaboration_columns = {
+                'version': 'INTEGER NOT NULL DEFAULT 1',
+                'locked_by': 'INTEGER REFERENCES users(id) ON DELETE SET NULL',
+                'locked_at': 'TIMESTAMP',
+                'last_edited_by': 'INTEGER REFERENCES users(id) ON DELETE SET NULL',
+            }
+            with engine.connect() as conn:
+                for column_name, column_definition in collaboration_columns.items():
+                    if column_name not in image_annotation_columns:
+                        logger.info(f"Adding {column_name} column to image_annotations table")
+                        conn.execute(text(f"""
+                            ALTER TABLE image_annotations
+                            ADD COLUMN {column_name} {column_definition}
+                        """))
+                        conn.commit()
+                        logger.info(f"Added {column_name} column to image_annotations table")
+
+                # 认领接口按 (project_id, is_completed, locked_at) 过滤，需要复合索引
+                conn.execute(text("""
+                    CREATE INDEX IF NOT EXISTS ix_image_annotations_claim
+                    ON image_annotations (project_id, is_completed, locked_at)
+                """))
+                conn.commit()
+
         # 检查并添加 datasets 表的 task 列
         if 'datasets' in tables:
             with engine.connect() as conn:

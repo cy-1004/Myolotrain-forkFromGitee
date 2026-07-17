@@ -1,4 +1,5 @@
 import os
+os.environ["PGCLIENTENCODING"] = "utf-8"
 import sys
 import subprocess
 import psycopg2

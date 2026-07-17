@@ -1,3 +1,29 @@
+// annotation.html 是独立打开的新标签页，没有加载 main.js，因此这里自带一份带认证的
+// fetch。token 由主页面登录后写入 localStorage，同源标签页可直接读取。
+function annotationFetch(url, options = {}) {
+    const accessToken = localStorage.getItem('access_token');
+    const tokenType = localStorage.getItem('token_type') || 'bearer';
+
+    if (!accessToken) {
+        window.location.href = '/login';
+        return Promise.reject(new Error('未登录'));
+    }
+
+    const headers = Object.assign({}, options.headers, {
+        'Authorization': `${tokenType} ${accessToken}`
+    });
+
+    return fetch(url, Object.assign({}, options, { headers })).then(response => {
+        if (response.status === 401) {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('token_type');
+            window.location.href = '/login';
+            throw new Error('登录已过期');
+        }
+        return response;
+    });
+}
+
 class AnnotationTool {
     constructor() {
         this.canvas = document.getElementById('annotation-canvas');
@@ -21,6 +47,12 @@ class AnnotationTool {
         this.currentImageIndex = 0;
         this.isAutoAnnotating = false;
         this.autoAnnotateAbortController = null;
+        // 多人协作：标注租约状态
+        this.leaseImageId = null;          // 当前持有租约的图片 id
+        this.leaseHeartbeatTimer = null;   // 续期定时器
+        this.isReadOnly = false;           // 图片被他人占用时进入只读，禁止编辑与保存
+        this.readOnlyHolder = null;        // 占用者信息，用于提示条文案
+        this.currentUser = null;           // 用于判断能否显示"强制接管"
         this.availableModels = [];
         this.selectedModel = null;
         // 新增属性：辅助线开关
@@ -105,7 +137,24 @@ class AnnotationTool {
     
     init() {
         this.setupEventListeners();
+        this.setupLeaseHandlers();
+        this.loadCurrentUser();
         this.loadProject();
+    }
+
+    setupLeaseHandlers() {
+        const takeoverBtn = document.getElementById('lease-takeover-btn');
+        if (takeoverBtn) {
+            takeoverBtn.addEventListener('click', () => this.takeoverLease());
+        }
+
+        // 关页面时主动还锁，别人无需等 5 分钟过期即可接手。
+        // keepalive 保证请求在页面销毁后仍会发出；即便失败也有租约过期兜底。
+        window.addEventListener('beforeunload', () => {
+            if (this.leaseImageId) {
+                this.releaseLease(this.leaseImageId, { keepalive: true });
+            }
+        });
     }
     
     // 加载SAM3工具
@@ -1267,7 +1316,7 @@ class AnnotationTool {
         
         try {
             // 加载项目信息
-            const response = await fetch(`/api/annotation/projects/${this.projectId}`);
+            const response = await annotationFetch(`/api/annotation/projects/${this.projectId}`);
             this.projectData = await response.json();
             
             this.updateProjectInfo();
@@ -1354,7 +1403,7 @@ class AnnotationTool {
         }
         
         try {
-            const response = await fetch(`/api/annotation/images/${this.currentImageData.id}`, {
+            const response = await annotationFetch(`/api/annotation/images/${this.currentImageData.id}`, {
                 method: 'DELETE',
                 headers: {
                     'Content-Type': 'application/json'
@@ -1405,7 +1454,7 @@ class AnnotationTool {
     
     async loadImages() {
         try {
-            const response = await fetch(`/api/annotation/projects/${this.projectId}/images?limit=10000`);
+            const response = await annotationFetch(`/api/annotation/projects/${this.projectId}/images?limit=10000`);
             this.imageList = await response.json();
             
             console.log('加载图片列表:', this.imageList);
@@ -1572,27 +1621,33 @@ class AnnotationTool {
         this.currentImageIndex = index;
         this.currentImageData = this.imageList[index];
         
+        // 申请当前图片的租约；被他人占用时会自动转入只读模式
+        await this.acquireLease(this.currentImageData.id);
+
         // 检查并自动标记上一张图片（如果有标注且未完成）
-        if (previousImageData && 
-            previousImageData.annotations && 
-            previousImageData.annotations.length > 0 && 
+        if (previousImageData &&
+            previousImageData.annotations &&
+            previousImageData.annotations.length > 0 &&
             !previousImageData.is_completed) {
             // 创建临时函数来标记上一张图片
             const markPreviousCompleted = async () => {
                 try {
-                    const response = await fetch(`/api/annotation/images/${previousImageData.id}`, {
+                    const response = await annotationFetch(`/api/annotation/images/${previousImageData.id}`, {
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            is_completed: true
+                            is_completed: true,
+                            expected_version: previousImageData.version
                         })
                     });
-                    
+
                     if (response.ok) {
                         // 更新本地数据
+                        const updated = await response.json();
                         previousImageData.is_completed = true;
+                        previousImageData.version = updated.version;
                         if (this.imageList && this.imageList[previousImageIndex] !== undefined) {
                             this.imageList[previousImageIndex].is_completed = true;
                         }
@@ -1609,14 +1664,18 @@ class AnnotationTool {
                     console.error('自动标记完成失败:', error);
                 }
             };
-            
+
             (async () => {
                 await markPreviousCompleted();
+                // 必须等标记完成后再释放，否则这次 PUT 会因为没有租约而被拒
+                await this.releaseLease(previousImageData.id);
             })().catch(err => {
                 console.error('执行标记完成过程中出错:', err);
             });
+        } else if (previousImageData) {
+            this.releaseLease(previousImageData.id);
         }
-        
+
         // 更新图片列表选中状态
         this.updateImageListSelection();
         
@@ -1889,7 +1948,187 @@ class AnnotationTool {
         this.updateAnnotationList();
     }
     
+    // ---------- 多人协作：标注租约 ----------
+    //
+    // 打开一张图片就向后端申请租约（软锁）。拿不到说明有人正在标，此时进入只读，
+    // 而不是让两个人同时改同一张图、最后互相覆盖。
+
+    async acquireLease(imageId, { force = false } = {}) {
+        if (!imageId) return false;
+
+        try {
+            const response = await annotationFetch(
+                `/api/annotation/images/${imageId}/lease${force ? '?force=true' : ''}`,
+                { method: 'POST' }
+            );
+
+            if (response.status === 423) {
+                const data = await response.json().catch(() => ({}));
+                this.enterReadOnly(data.detail ? data.detail.holder : null);
+                return false;
+            }
+
+            if (!response.ok) {
+                console.error('获取标注租约失败:', response.status, response.statusText);
+                return false;
+            }
+
+            const lease = await response.json();
+            this.leaseImageId = imageId;
+            // 以服务端版本号为准，后续保存靠它做乐观锁校验
+            if (this.currentImageData && this.currentImageData.id === imageId) {
+                this.currentImageData.version = lease.version;
+            }
+            this.exitReadOnly();
+            this.startLeaseHeartbeat();
+            return true;
+
+        } catch (error) {
+            console.error('获取标注租约失败:', error);
+            return false;
+        }
+    }
+
+    // 租约 5 分钟过期，60 秒续一次。浏览器崩溃或断网时心跳停止，
+    // 图片会在过期后自动释放，不会被永久锁死。
+    startLeaseHeartbeat() {
+        this.stopLeaseHeartbeat();
+        this.leaseHeartbeatTimer = setInterval(() => {
+            if (!this.leaseImageId) return;
+            annotationFetch(`/api/annotation/images/${this.leaseImageId}/lease`, { method: 'POST' })
+                .then(response => {
+                    // 续期被拒说明租约已过期且被他人抢走，立刻转只读避免白标
+                    if (response.status === 423) {
+                        return response.json()
+                            .catch(() => ({}))
+                            .then(data => this.enterReadOnly(data.detail ? data.detail.holder : null));
+                    }
+                })
+                .catch(error => console.error('租约续期失败:', error));
+        }, 60000);
+    }
+
+    stopLeaseHeartbeat() {
+        if (this.leaseHeartbeatTimer) {
+            clearInterval(this.leaseHeartbeatTimer);
+            this.leaseHeartbeatTimer = null;
+        }
+    }
+
+    // keepalive 使请求在页面关闭后仍能送达；sendBeacon 只能发 POST，也带不了认证头
+    releaseLease(imageId, { keepalive = false } = {}) {
+        if (!imageId) return Promise.resolve();
+
+        if (this.leaseImageId === imageId) {
+            this.leaseImageId = null;
+            this.stopLeaseHeartbeat();
+        }
+
+        return annotationFetch(`/api/annotation/images/${imageId}/lease`, {
+            method: 'DELETE',
+            keepalive
+        }).catch(error => console.error('释放标注租约失败:', error));
+    }
+
+    enterReadOnly(holder) {
+        this.isReadOnly = true;
+        this.readOnlyHolder = holder || null;
+        this.leaseImageId = null;
+        this.stopLeaseHeartbeat();
+        this.updateLeaseBanner();
+    }
+
+    exitReadOnly() {
+        this.isReadOnly = false;
+        this.readOnlyHolder = null;
+        this.updateLeaseBanner();
+    }
+
+    updateLeaseBanner() {
+        const banner = document.getElementById('lease-banner');
+        const text = document.getElementById('lease-banner-text');
+        const takeoverBtn = document.getElementById('lease-takeover-btn');
+        if (!banner || !text || !takeoverBtn) return;
+
+        if (!this.isReadOnly) {
+            banner.style.setProperty('display', 'none', 'important');
+            return;
+        }
+
+        const holderName = this.readOnlyHolder ? this.readOnlyHolder.username : '其他用户';
+        const since = this.readOnlyHolder ? this.formatLeaseAge(this.readOnlyHolder.locked_at) : '';
+        text.textContent = `${holderName} 正在标注此图片${since}，当前为只读模式。`;
+
+        // 只有管理员能抢占，避免标注员之间互相打断
+        takeoverBtn.style.display = (this.currentUser && this.currentUser.role === 'admin') ? '' : 'none';
+        banner.style.setProperty('display', 'flex', 'important');
+    }
+
+    formatLeaseAge(lockedAt) {
+        if (!lockedAt) return '';
+        // 后端 locked_at 是 UTC naive 时间，补上 Z 才能被正确解析为 UTC
+        const stamp = /[zZ]|[+-]\d{2}:?\d{2}$/.test(lockedAt) ? lockedAt : `${lockedAt}Z`;
+        const elapsedMs = Date.now() - new Date(stamp).getTime();
+        if (!isFinite(elapsedMs) || elapsedMs < 0) return '';
+        const minutes = Math.floor(elapsedMs / 60000);
+        return minutes < 1 ? '（刚刚开始）' : `（${minutes} 分钟前开始）`;
+    }
+
+    async takeoverLease() {
+        if (!this.currentImageData) return;
+        if (!confirm('强制接管会中断对方的标注，确定继续吗？')) return;
+
+        const acquired = await this.acquireLease(this.currentImageData.id, { force: true });
+        if (acquired) {
+            this.showMessage('已接管该图片', 'success');
+            await this.reloadCurrentImageAnnotations();
+        } else {
+            this.showMessage('接管失败', 'error');
+        }
+    }
+
+    // 只读取服务端最新数据，不动画布，供调用方自行决定如何使用
+    async fetchLatestImage() {
+        if (!this.currentImageData) return null;
+
+        try {
+            const response = await annotationFetch(`/api/annotation/images/${this.currentImageData.id}`);
+            if (!response.ok) return null;
+            return await response.json();
+        } catch (error) {
+            console.error('获取最新标注失败:', error);
+            return null;
+        }
+    }
+
+    // 用服务端数据覆盖画布，会丢弃本地未保存的改动
+    async reloadCurrentImageAnnotations() {
+        const image = await this.fetchLatestImage();
+        if (!image) return;
+
+        this.currentImageData.annotations = image.annotations;
+        this.currentImageData.version = image.version;
+        this.currentImageData.is_completed = image.is_completed;
+        this.loadAnnotations();
+        this.updateAnnotationList();
+        this.redraw();
+    }
+
+    async loadCurrentUser() {
+        try {
+            const response = await annotationFetch('/api/auth/users/me');
+            if (response.ok) {
+                this.currentUser = await response.json();
+            }
+        } catch (error) {
+            console.error('获取当前用户失败:', error);
+        }
+    }
+
     async saveAnnotation() {
+        // 只读模式下不写回，否则会覆盖正在标注者的成果
+        if (this.isReadOnly) return;
+
         // 实现防抖机制，防止频繁保存
         if (this.debounceTimer) {
             // 如果已经有保存请求在等待，取消之前的请求
@@ -2122,32 +2361,74 @@ class AnnotationTool {
         console.log('转换后的YOLO格式标注:', yoloAnnotations);
         
         try {
-            const response = await fetch(`/api/annotation/images/${this.currentImageData.id}`, {
+            const response = await annotationFetch(`/api/annotation/images/${this.currentImageData.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    annotations: yoloAnnotations
+                    annotations: yoloAnnotations,
+                    // 乐观锁：服务端比对版本号，期间有他人改过就返回 409
+                    expected_version: this.currentImageData.version
                 })
             });
-            
+
             if (response.ok) {
+                const updated = await response.json();
                 this.currentImageData.annotations = yoloAnnotations;
+                this.currentImageData.version = updated.version;
                 this.updateImageList();
                 this.showMessage('标注保存成功', 'success');
                 console.log('标注保存成功');
+            } else if (response.status === 423) {
+                // 租约被他人持有，转只读，避免继续画下去白忙一场
+                const data = await response.json().catch(() => ({}));
+                this.enterReadOnly(data.detail ? data.detail.holder : null);
+                this.showMessage('该图片正在被他人标注，已切换为只读', 'error');
+            } else if (response.status === 409) {
+                await this.handleSaveConflict(await response.json().catch(() => ({})));
             } else {
                 this.showMessage('保存失败', 'error');
                 console.error('保存失败，服务器响应:', response.status, response.statusText);
             }
-            
+
         } catch (error) {
             console.error('保存标注失败:', error);
             this.showMessage('保存失败', 'error');
         }
     }
-    
+
+    // 版本冲突：绝不静默覆盖，交由标注员决定丢弃谁的改动
+    async handleSaveConflict(payload) {
+        const detail = payload.detail || {};
+        const editor = detail.last_edited_by || '其他用户';
+        const overwrite = confirm(
+            `该图片已被 ${editor} 修改。\n\n` +
+            `点击"确定"用你当前画布上的标注覆盖对方的改动；\n` +
+            `点击"取消"放弃本次保存并加载对方的最新标注。`
+        );
+
+        if (!overwrite) {
+            await this.reloadCurrentImageAnnotations();
+            this.showMessage('已加载最新标注', 'success');
+            return;
+        }
+
+        // 只同步版本号、保留画布上的标注，然后重发；若连版本号都取不到就放弃，
+        // 否则不带版本号的保存会退化成无条件覆盖
+        if (typeof detail.version === 'number') {
+            this.currentImageData.version = detail.version;
+        } else {
+            const latest = await this.fetchLatestImage();
+            if (!latest) {
+                this.showMessage('保存失败，请稍后重试', 'error');
+                return;
+            }
+            this.currentImageData.version = latest.version;
+        }
+        await this.performSave();
+    }
+
     updateAnnotationList() {
         const annotationList = document.getElementById('annotation-list');
         annotationList.innerHTML = '';
@@ -2325,6 +2606,9 @@ class AnnotationTool {
     }
     
     startDrawing(e) {
+        // 只读模式下允许缩放平移查看，但不能改动标注
+        if (this.isReadOnly) return;
+
         console.log('开始绘制，当前工具:', this.currentTool);
         // 使用通用坐标转换方法
         const { x: canvasX, y: canvasY } = this.getCanvasCoordinates(e);
@@ -2990,6 +3274,11 @@ class AnnotationTool {
     }
     
     removeAnnotation(index) {
+        if (this.isReadOnly) {
+            this.showMessage('该图片正在被他人标注，无法修改', 'error');
+            return;
+        }
+
         // 根据当前工具类型处理删除操作
         if (this.currentTool === 'segment') {
             this.segmentationTool.removeSegment(index);
@@ -3010,6 +3299,11 @@ class AnnotationTool {
     }
     
     clearAllAnnotations() {
+        if (this.isReadOnly) {
+            this.showMessage('该图片正在被他人标注，无法修改', 'error');
+            return;
+        }
+
         if (confirm('确定要清除所有标注吗？')) {
             this.annotations = [];
             this.updateAnnotationList();
@@ -3021,20 +3315,27 @@ class AnnotationTool {
     
     async markCompleted() {
         if (!this.currentImageData) return;
-        
+        if (this.isReadOnly) {
+            this.showMessage('该图片正在被他人标注，无法标记完成', 'error');
+            return;
+        }
+
         try {
-            const response = await fetch(`/api/annotation/images/${this.currentImageData.id}`, {
+            const response = await annotationFetch(`/api/annotation/images/${this.currentImageData.id}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    is_completed: true
+                    is_completed: true,
+                    expected_version: this.currentImageData.version
                 })
             });
-            
+
             if (response.ok) {
+                const updated = await response.json();
                 this.currentImageData.is_completed = true;
+                this.currentImageData.version = updated.version;
                 // 同步更新imageList中的状态
                 if (this.imageList && this.imageList[this.currentImageIndex]) {
                     this.imageList[this.currentImageIndex].is_completed = true;
@@ -3042,8 +3343,17 @@ class AnnotationTool {
                 this.updateImageList();
                 this.showMessage('标记完成成功', 'success');
                 await this.loadProjectStats();
+            } else if (response.status === 423) {
+                const data = await response.json().catch(() => ({}));
+                this.enterReadOnly(data.detail ? data.detail.holder : null);
+                this.showMessage('该图片正在被他人标注，已切换为只读', 'error');
+            } else if (response.status === 409) {
+                this.showMessage('该图片已被他人修改，正在重新加载', 'error');
+                await this.reloadCurrentImageAnnotations();
+            } else {
+                this.showMessage('标记完成失败', 'error');
             }
-            
+
         } catch (error) {
             console.error('标记完成失败:', error);
         }
@@ -3062,7 +3372,7 @@ class AnnotationTool {
         if (!confirm(message)) return;
         
         try {
-            const response = await fetch(`/api/annotation/projects/${this.projectId}/mark-all-completed`, {
+            const response = await annotationFetch(`/api/annotation/projects/${this.projectId}/mark-all-completed`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -3089,7 +3399,7 @@ class AnnotationTool {
     
     async loadProjectStats() {
         try {
-            const response = await fetch(`/api/annotation/projects/${this.projectId}/stats`);
+            const response = await annotationFetch(`/api/annotation/projects/${this.projectId}/stats`);
             const stats = await response.json();
             
             document.getElementById('progress-text').textContent = `${stats.completed_images}/${stats.total_images}`;
@@ -3304,6 +3614,11 @@ class AnnotationTool {
 
     
     deleteSelectedAnnotation() {
+        if (this.isReadOnly) {
+            this.showMessage('该图片正在被他人标注，无法修改', 'error');
+            return;
+        }
+
         if (this.selectedAnnotation) {
             const index = this.annotations.indexOf(this.selectedAnnotation);
             if (index > -1) {
@@ -3826,7 +4141,7 @@ class AnnotationTool {
     // 更新项目类别
     async updateProjectClasses(newClasses) {
         try {
-            const response = await fetch(`/api/annotation/projects/${this.projectId}`, {
+            const response = await annotationFetch(`/api/annotation/projects/${this.projectId}`, {
                 method: 'PUT',
                 headers: {
                     'Content-Type': 'application/json'
@@ -3854,7 +4169,7 @@ class AnnotationTool {
     // 使用AI模型标注单张图片
     async annotateImageWithAI(imageId, modelId, confidence, iou, overwrite) {
         try {
-            const response = await fetch(`/api/annotation/images/${imageId}/auto-annotate`, {
+            const response = await annotationFetch(`/api/annotation/images/${imageId}/auto-annotate`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -3867,24 +4182,36 @@ class AnnotationTool {
                 }),
                 signal: this.autoAnnotateAbortController?.signal
             });
-            
+
+            if (response.status === 423) {
+                const data = await response.json().catch(() => ({}));
+                const holder = data.detail ? data.detail.holder : null;
+                if (this.currentImageData && this.currentImageData.id === imageId) {
+                    this.enterReadOnly(holder);
+                }
+                throw new Error(`图片正在被 ${holder ? holder.username : '他人'} 标注`);
+            }
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            
+
             const result = await response.json();
-            
+
             // 更新当前图片的标注数据
             if (this.currentImageData && this.currentImageData.id === imageId) {
                 this.currentImageData.annotations = result.annotations;
+                // 自动标注在服务端改了数据，同步版本号，否则随后的手工保存会撞 409
+                this.currentImageData.version = result.version;
                 this.loadAnnotations();
                 this.redraw();
             }
-            
+
             // 更新图片列表中的数据
             const imageIndex = this.imageList.findIndex(img => img.id === imageId);
             if (imageIndex !== -1) {
                 this.imageList[imageIndex].annotations = result.annotations;
+                this.imageList[imageIndex].version = result.version;
                 this.updateImageList();
             }
             

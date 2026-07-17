@@ -117,15 +117,52 @@ class ImageAnnotationCreate(ImageAnnotationBase):
 class ImageAnnotationUpdate(BaseModel):
     annotations: Optional[List[Annotation]] = None
     is_completed: Optional[bool] = None
+    # 乐观锁：带上客户端读到的版本号，与库中不一致说明期间有他人改过，返回 409。
+    # 省略则跳过版本校验，此时仅由租约保证互斥（供服务端内部调用）
+    expected_version: Optional[int] = None
 
 class ImageAnnotation(ImageAnnotationBase):
     id: UUID
     project_id: UUID
     created_at: datetime
     updated_at: datetime
-    
+    version: int = 1
+    locked_by: Optional[int] = None
+    locked_at: Optional[datetime] = None
+    last_edited_by: Optional[int] = None
+
     class Config:
         from_attributes = True
+
+# 租约持有者信息
+class LeaseHolder(BaseModel):
+    user_id: int
+    username: str
+    locked_at: datetime
+
+# 获取/续期租约的响应
+class LeaseResponse(BaseModel):
+    image_id: UUID
+    version: int
+    holder: LeaseHolder
+    expires_at: datetime
+
+# 认领下一张待标注图片的响应
+class NextImageResponse(BaseModel):
+    image: Optional[ImageAnnotation] = None
+    expires_at: Optional[datetime] = None
+    message: Optional[str] = None
+
+# 项目内当前在线标注情况（谁正在标哪张图）
+class PresenceEntry(BaseModel):
+    image_id: UUID
+    image_name: str
+    user_id: int
+    username: str
+    locked_at: datetime
+
+class PresenceResponse(BaseModel):
+    entries: List[PresenceEntry] = []
 
 # 项目统计信息
 class ProjectStats(BaseModel):

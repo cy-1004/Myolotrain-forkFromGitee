@@ -239,6 +239,17 @@
                     </div>
                 </div>
 
+                <!-- 图片被他人标注时的只读提示 -->
+                <div id="lease-banner" class="alert alert-warning d-flex align-items-center justify-content-between py-2 mb-2" style="display: none !important;">
+                    <span>
+                        <i class="fas fa-lock me-1"></i>
+                        <span id="lease-banner-text"></span>
+                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="lease-takeover-btn" style="display: none;">
+                        强制接管
+                    </button>
+                </div>
+
                 <div class="text-center">
                     <div id="canvas-container" style="position: relative; display: inline-block;">
                         <canvas id="annotation-canvas" class="annotation-canvas"></canvas>
