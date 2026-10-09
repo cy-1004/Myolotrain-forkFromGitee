@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登录 - Myolotrain系统</title>
+    <title>登录 - yolo训练系统</title>
     <link href="static/libs/bootstrap.min.css" rel="stylesheet">
     <style>
         body {
@@ -38,24 +38,12 @@
             margin-top: 0.5rem;
             font-size: 0.875rem;
         }
-        .initial-account {
-            background-color: #e8f4ff;
-            border: 1px solid #a3c1ff;
-            border-radius: 6px;
-            padding: 12px;
-            margin-top: 1.5rem;
-            font-size: 0.9rem;
-        }
-        .account-highlight {
-            font-weight: bold;
-            color: #1a73e8;
-        }
     </style>
 </head>
 <body>
     <div class="login-container">
         <div class="login-card">
-            <h2 class="login-title">Myolotrain 系统登录</h2>
+            <h2 class="login-title">yolo训练系统登录</h2>
             <form id="login-form">
                 <div class="mb-3">
                     <label for="username" class="form-label">用户名</label>
@@ -68,25 +56,6 @@
                 <div id="login-error" class="error-message" style="display: none;"></div>
                 <button type="submit" class="btn btn-primary login-btn">登录</button>
             </form>
-            
-            <!-- 新增的初始账号提示 -->
-            <div class="initial-account mt-4">
-                <div class="text-center mb-2">
-                    <i class="bi bi-info-circle me-1"></i>
-                    <strong>初始账号信息</strong>
-                </div>
-                <div class="d-flex justify-content-between align-items-center mb-1">
-                    <span>用户名：</span>
-                    <span class="account-highlight">admin</span>
-                </div>
-                <div class="d-flex justify-content-between align-items-center">
-                    <span>密码：</span>
-                    <span class="account-highlight">admin@123</span>
-                </div>
-                <div class="mt-2 text-muted small">
-                    <em>首次登录后建议修改密码</em>
-                </div>
-            </div>
         </div>
     </div>
 
@@ -131,13 +100,10 @@
                     // 保存token到localStorage
                     localStorage.setItem('access_token', data.access_token);
                     localStorage.setItem('token_type', data.token_type);
-                    
-                    // 同时将token保存到Cookie中，有效期30分钟
-                    const tokenExpiry = new Date();
-                    tokenExpiry.setTime(tokenExpiry.getTime() + 30 * 60 * 1000);
-                    document.cookie = `access_token=${data.access_token}; expires=${tokenExpiry.toUTCString()}; path=/; SameSite=Lax`;
-                    document.cookie = `token_type=${data.token_type}; expires=${tokenExpiry.toUTCString()}; path=/; SameSite=Lax`;
-                    
+
+                    // 同时将token写入Cookie（根路由 "/" 依赖Cookie判断登录态）
+                    setAuthCookie(data.access_token, data.token_type);
+
                     // 简化登录流程，直接跳转到主页
                     // 避免因为/api/auth/users/me请求失败导致登录问题
                     window.location.href = '/';
@@ -159,6 +125,14 @@
             });
         });
         
+        // 将token写入Cookie，有效期与服务端令牌一致（8小时），供根路由 "/" 认证使用
+        function setAuthCookie(accessToken, tokenType) {
+            const expiry = new Date();
+            expiry.setTime(expiry.getTime() + 8 * 60 * 60 * 1000);
+            document.cookie = `access_token=${accessToken}; expires=${expiry.toUTCString()}; path=/; SameSite=Lax`;
+            document.cookie = `token_type=${tokenType || 'bearer'}; expires=${expiry.toUTCString()}; path=/; SameSite=Lax`;
+        }
+
         // 简化登录状态检查逻辑，避免因为/api/auth/users/me请求失败导致问题
         function checkLoginStatus() {
             const accessToken = localStorage.getItem('access_token');
@@ -174,7 +148,9 @@
                 })
                 .then(response => {
                     if (response.ok) {
-                        // 令牌有效，跳转到主页
+                        // 令牌有效：跳转前先补写Cookie，避免Cookie失效但localStorage仍有效时
+                        // 出现 "/" -> 307 -> /login -> "/" 的无限重定向循环
+                        setAuthCookie(accessToken, localStorage.getItem('token_type'));
                         window.location.href = '/';
                     } else {
                         // 令牌无效，留在登录页面

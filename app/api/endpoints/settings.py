@@ -18,6 +18,18 @@ def get_debug_mode():
     }
 
 
+@router.get("/runtime", tags=["settings"])
+def get_runtime_config():
+    """
+    前端需要知道的部署形态：按此隐藏当前部署下不可用的功能入口
+    （单端口部署没有 TensorBoard；对外部署模式下不能浏览/打开服务器本地目录）
+    """
+    return {
+        "tensorboard_enabled": settings.TENSORBOARD_ENABLED,
+        "external_mode": settings.EXTERNAL_MODE,
+    }
+
+
 @router.post("/debug-mode", tags=["settings"])
 def set_debug_mode(debug_mode: bool):
     """

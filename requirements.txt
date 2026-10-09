@@ -58,6 +58,12 @@ onnx>=1.19.1
 onnxslim>=0.1.71
 sympy>=1.13.0
 
+# TFLite support
+# 注意：Ultralytics自带的tflite导出依赖LiteRT，仅支持Linux x86/macOS，
+# 因此后端改为 ONNX -> onnx2tf -> TFLite 的路径，可在Windows上运行
+tensorflow>=2.16.1
+onnx2tf>=1.19.0
+
 # 剪枝
 torch-pruning>=1.6.1
 

@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
+from app.db.types import StoredPath
 
 class Dataset(Base):
     __tablename__ = "datasets"
@@ -12,7 +13,7 @@ class Dataset(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String, nullable=False, index=True)
     description = Column(Text, nullable=True)
-    path = Column(String, nullable=False)
+    path = Column(StoredPath, nullable=False)
     classes = Column(JSON, nullable=False)
     image_count = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

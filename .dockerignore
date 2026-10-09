@@ -1,40 +1,69 @@
-# 排除不需要的文件和目录
+# 构建上下文排除规则。原则：镜像里只放代码和前端资源，一切运行数据都在 /data 卷里。
+# 漏排数据目录会把本地几个 GB 的数据集/模型打进镜像，并且在容器里被当成"内置数据"。
+
+# Python 缓存与虚拟环境
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
+.pytest_cache/
 env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# 排除版本控制文件
-.git
-.gitignore
-
-# 排除日志和数据文件
-logs/
-*.log
-data/
-dataset/
-runs/
-
-# 排除开发环境文件
-.env
-.venv
+.venv/
 venv/
 ENV/
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 版本控制与 IDE
+.git
+.gitignore
 .idea/
 .vscode/
+
+# 本地配置与密钥（容器通过 compose 的 env_file 注入）
+.env
+.app_port
+
+# 运行数据：app/static 下除代码目录（css/js/libs/fonts/templates）外全部排除
+app/static/uploads/
+app/static/datasets/
+app/static/models/
+app/static/results/
+app/static/temp/
+app/static/annotations/
+app/static/extracted_frames/
+app/static/batch_tasks/
+app/static/mosaic_candidates/
+app/static/augmented_datasets/
+app/static/advanced_augmentations/
+app/static/processed_images/
+app/static/processed_videos/
+app/static/video_datasets/
+app/static/video_frames/
+
+# 其他本地数据
+data/
+logs/
+*.log
+models/
+datasets_import/
+dl/
+packages/
+bak/
+postgres_data/
+sam3_config.json
+*.pt
+!docker/weights/*.pt
+
+# Windows 启动器与说明素材
+*.exe
+*.bat
+介绍images/
+node_modules/
+
+# 测试与开发脚本
+tests/
+dev-test/

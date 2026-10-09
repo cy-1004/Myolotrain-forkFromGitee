@@ -1,8 +1,8 @@
 import os
 import sys
 import subprocess
-import uvicorn
 from pathlib import Path
+from app.core.server import run_server
 from app.db.init_db import init_db
 
 # 导入主初始化数据库函数
@@ -20,9 +20,9 @@ def start_app():
         print("初始化数据库表结构...")
         init_db()
         
-        # 启动应用程序
+        # 启动应用程序（端口被占用时自动顺延，见 app/core/server.py）
         print("启动Web服务器...")
-        uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+        run_server()
     else:
         print("数据库初始化失败，无法启动应用程序。")
         sys.exit(1)

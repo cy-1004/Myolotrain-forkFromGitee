@@ -82,6 +82,12 @@ class ModelManager {
                                 <button class="btn btn-sm btn-secondary download-model-onnx" data-id="${model.id}" title="转换并下载ONNX格式模型">
                                     <i class="bi bi-exchange"></i> ONNX
                                 </button>
+                                <button class="btn btn-sm btn-secondary download-model-tflite" data-id="${model.id}" title="转换并下载TFLite格式模型">
+                                    <i class="bi bi-exchange"></i> TFLite
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary verify-model-tflite" data-id="${model.id}" title="验证TFLite模型是否可用">
+                                    <i class="bi bi-check2-circle"></i> 验证
+                                </button>
                                 <button class="btn btn-sm btn-info view-model-structure" data-id="${model.id}" title="查看模型结构">
                                     <i class="bi bi-diagram-3"></i> 结构
                                 </button>
@@ -139,6 +145,35 @@ class ModelManager {
                             e.target.innerHTML = '<i class="bi bi-exchange"></i> ONNX';
                             e.target.disabled = false;
                         }, 30000); // 30秒超时
+                    });
+                });
+
+                // 绑定TFLite模型下载按钮事件
+                document.querySelectorAll('.download-model-tflite').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        const modelId = e.target.getAttribute('data-id');
+                        const downloadUrl = `${API_URL}/models/${modelId}/download/tflite`;
+                        console.log('TFLite模型下载URL:', downloadUrl);
+                        // 显示加载指示器
+                        e.target.innerHTML = '<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm"></i> 转换中...';
+                        e.target.disabled = true;
+
+                        // 开始下载
+                        window.location.href = downloadUrl;
+
+                        // 设置一个超时，恢复按钮状态（即使下载中断）
+                        setTimeout(() => {
+                            e.target.innerHTML = '<i class="bi bi-exchange"></i> TFLite';
+                            e.target.disabled = false;
+                        }, 30000); // 30秒超时
+                    });
+                });
+
+                // 绑定TFLite模型验证按钮事件
+                document.querySelectorAll('.verify-model-tflite').forEach(button => {
+                    button.addEventListener('click', (e) => {
+                        const modelId = e.target.getAttribute('data-id');
+                        this.verifyTfliteModel(modelId, e.target);
                     });
                 });
 
@@ -1408,6 +1443,132 @@ class ModelManager {
         return html;
     }
     
+    // 验证TFLite模型是否可用（重新转换一次并做一次推理测试）
+    verifyTfliteModel(modelId, buttonEl) {
+        if (!modelId || modelId === 'null' || modelId === 'undefined') {
+            alert('模型ID无效，无法验证TFLite模型');
+            return;
+        }
+
+        const useRealImage = confirm(
+            '是否上传一张真实图片进行验证？\n\n' +
+            '点击"确定"选择图片：会对比PT模型和TFLite模型的检测结果，验证结果更可靠。\n' +
+            '点击"取消"：使用随机图片，仅能验证模型能否正常加载和推理，检测结果本身没有参考意义。'
+        );
+
+        if (useRealImage) {
+            let fileInput = document.getElementById('tflite-verify-file-input');
+            if (!fileInput) {
+                fileInput = document.createElement('input');
+                fileInput.type = 'file';
+                fileInput.id = 'tflite-verify-file-input';
+                fileInput.accept = 'image/*';
+                fileInput.style.display = 'none';
+                document.body.appendChild(fileInput);
+            }
+            fileInput.value = '';
+            fileInput.onchange = () => {
+                const file = fileInput.files && fileInput.files[0];
+                if (file) {
+                    this.doVerifyTflite(modelId, file, buttonEl);
+                }
+            };
+            fileInput.click();
+        } else {
+            this.doVerifyTflite(modelId, null, buttonEl);
+        }
+    }
+
+    doVerifyTflite(modelId, file, buttonEl) {
+        const originalHtml = buttonEl ? buttonEl.innerHTML : null;
+        if (buttonEl) {
+            buttonEl.innerHTML = '<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm"></i> 验证中...';
+            buttonEl.disabled = true;
+        }
+        this.showLoadingOverlay('正在转换并验证TFLite模型，可能需要较长时间，请耐心等待...');
+
+        const formData = new FormData();
+        if (file) {
+            formData.append('file', file);
+        }
+
+        authenticatedFetch(`${API_URL}/models/${modelId}/verify-tflite`, {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                this.hideLoadingOverlay();
+                if (buttonEl) {
+                    buttonEl.innerHTML = originalHtml;
+                    buttonEl.disabled = false;
+                }
+                if (!ok) {
+                    alert('TFLite模型验证失败：' + (data.detail || '未知错误'));
+                    return;
+                }
+                this.showTfliteVerifyResultModal(data);
+            })
+            .catch(error => {
+                this.hideLoadingOverlay();
+                if (buttonEl) {
+                    buttonEl.innerHTML = originalHtml;
+                    buttonEl.disabled = false;
+                }
+                console.error('Error verifying tflite model:', error);
+                alert('TFLite模型验证失败：' + error.message);
+            });
+    }
+
+    showTfliteVerifyResultModal(data) {
+        const warningsHtml = data.warnings && data.warnings.length > 0
+            ? `<div class="alert alert-warning mb-3">
+                    <strong><i class="bi bi-exclamation-triangle"></i> 注意事项：</strong>
+                    <ul class="mb-0">
+                        ${data.warnings.map(w => `<li>${w}</li>`).join('')}
+                    </ul>
+               </div>`
+            : `<div class="alert alert-success mb-3"><i class="bi bi-check-circle"></i> 转换后的TFLite模型加载正常，且与PT模型的检测结果一致。</div>`;
+
+        const modalHtml = `
+        <div class="modal fade" id="tfliteVerifyModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-lg">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-check2-circle"></i> TFLite模型验证结果</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        ${warningsHtml}
+                        <table class="table table-bordered table-sm">
+                            <tbody>
+                                <tr><th style="width:40%">测试图片</th><td>${data.used_real_image ? '用户上传的真实图片' : '随机噪声图片（仅完整性检查）'}</td></tr>
+                                <tr><th>输入张量形状</th><td>${JSON.stringify(data.input_shape)}</td></tr>
+                                <tr><th>输出张量形状</th><td>${JSON.stringify(data.output_shape)}</td></tr>
+                                <tr><th>PT模型检测目标数</th><td>${data.pt_detection_count}</td></tr>
+                                <tr><th>TFLite模型检测目标数</th><td>${data.tflite_detection_count}</td></tr>
+                                <tr><th>PT模型识别类别</th><td>${JSON.stringify(data.pt_classes)}</td></tr>
+                                <tr><th>TFLite模型识别类别</th><td>${JSON.stringify(data.tflite_classes)}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">关闭</button>
+                    </div>
+                </div>
+            </div>
+        </div>`;
+
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        const modalElement = document.getElementById('tfliteVerifyModal');
+        const modal = new bootstrap.Modal(modalElement);
+        modal.show();
+
+        modalElement.addEventListener('hidden.bs.modal', function () {
+            modalElement.remove();
+        });
+    }
+
     // 更新模块树以适应结构化剪枝显示
     updateModuleTreeForStructuredPruning() {
         // 获取当前的结构化数据

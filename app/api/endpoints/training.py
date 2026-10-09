@@ -1,7 +1,7 @@
 from typing import List, Optional, Dict, Any
 import os
 import subprocess
-from fastapi import APIRouter, Depends, HTTPException, Body, Request
+from fastapi import APIRouter, Depends, HTTPException, Body, Query, Request
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 from pydantic import BaseModel
@@ -13,6 +13,8 @@ from app.services import training_service
 from app.services.training_service import DeviceManager, is_valid_uuid
 from app.services.ascend_service import AscendDeviceManager
 from app.services import model_service
+
+from app.api.deps import forbid_in_external_mode
 
 router = APIRouter()
 
@@ -465,6 +467,46 @@ def get_training_logs(
     
     return training_service.get_training_logs(db, task_id=task_id)
 
+@router.get("/{task_id}/logs/tail")
+def tail_training_logs(
+    task_id: str,
+    offset: int = Query(-65536, description="起始字节偏移；负数表示从文件末尾往前取多少字节"),
+    limit: int = Query(65536, ge=1, le=training_service.LOG_CHUNK_MAX_BYTES, description="最多返回的字节数"),
+    db: Session = Depends(get_db)
+):
+    """
+    增量读取训练日志：首次用负 offset 取最近一段，之后每次带上返回的 next_offset 只拿新增内容
+    """
+    if not is_valid_uuid(task_id):
+        raise HTTPException(status_code=400, detail="Invalid task ID format. Expected a valid UUID.")
+    task = training_service.get_training_task(db, task_id=task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    return {"status": task.status, **training_service.read_training_log_chunk(task, offset=offset, limit=limit)}
+
+@router.get("/{task_id}/metrics")
+def get_training_metrics(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    训练过程的逐 epoch 指标（来自 results.csv），用于绘制 loss / mAP 曲线，替代需要单独端口的 TensorBoard
+    """
+    if not is_valid_uuid(task_id):
+        raise HTTPException(status_code=400, detail="Invalid task ID format. Expected a valid UUID.")
+    task = training_service.get_training_task(db, task_id=task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="训练任务不存在")
+    rows = training_service.read_results_csv(task)
+    epochs_total = (task.parameters or {}).get("epochs") if isinstance(task.parameters, dict) else None
+    return {
+        "status": task.status,
+        "epochs_total": epochs_total,
+        "epochs_done": len(rows),
+        "columns": list(rows[0].keys()) if rows else [],
+        "rows": rows,
+    }
+
 @router.get("/{task_id}/results")
 def get_training_results(
     task_id: str,
@@ -522,7 +564,7 @@ def get_tensorboard_url(
 
     return {"url": tensorboard_url}
 
-@router.get("/{task_id}/logs-folder")
+@router.get("/{task_id}/logs-folder", dependencies=[Depends(forbid_in_external_mode)])
 def open_logs_folder(
     task_id: str,
     db: Session = Depends(get_db)
@@ -850,68 +892,12 @@ def upload_model_to_management(
     if task_status != "completed":
         raise HTTPException(status_code=400, detail="训练任务尚未完成")
     
-    # 获取输出目录
-    import json
-    parameters = {}
-    if hasattr(task, 'parameters') and task.parameters is not None:
-        parameters = task.parameters if isinstance(task.parameters, dict) else {}
-        # 如果parameters是字符串，尝试解析为JSON
-        if isinstance(task.parameters, str):
-            try:
-                parameters = json.loads(task.parameters)
-            except json.JSONDecodeError:
-                parameters = {}
-    
-    if isinstance(parameters, dict) and "output_dir" in parameters:
-        output_dir = parameters["output_dir"]
-        exp_weights_dir = os.path.join(str(output_dir), "exp", "weights")
-        
-        # 确定模型文件路径
-        if model_type == "best":
-            model_file_path = os.path.join(exp_weights_dir, "best.pt")
-            model_name = f"{task.name}_最佳模型"
-        elif model_type == "last":
-            model_file_path = os.path.join(exp_weights_dir, "last.pt")
-            model_name = f"{task.name}_最后模型"
-        else:
-            raise HTTPException(status_code=400, detail="无效的模型类型，必须是 'best' 或 'last'")
-        
-        # 检查模型文件是否存在
-        if not os.path.exists(model_file_path):
-            raise HTTPException(status_code=404, detail=f"模型文件不存在: {model_file_path}")
-        
-        # 创建模型记录
-        from app.schemas.model import ModelCreate
-        from app.crud import model as model_crud
-        
-        # 获取训练任务的任务类型
-        task_type = "detect"  # 默认任务类型
-        if hasattr(task, 'parameters') and task.parameters:
-            if isinstance(task.parameters, dict):
-                task_type = task.parameters.get('task_type', 'detect')
-            else:
-                import json
-                try:
-                    params_dict = json.loads(task.parameters)
-                    task_type = params_dict.get('task_type', 'detect')
-                except:
-                    task_type = 'detect'
-        
-        # 准备模型数据
-        model_data = ModelCreate(
-            name=model_name,
-            description=f"由训练任务 '{task.name}' 生成的{ '最佳' if model_type == 'best' else '最后' }模型",
-            type="yolov8",  # 默认模型类型
-            task=task_type,  # 使用训练任务的任务类型
-            path=model_file_path,
-            source="training"
-        )
-        
-        # 创建模型
-        try:
-            db_model = model_crud.create(db, obj_in=model_data)
-            return {"success": True, "model_id": str(db_model.id), "message": "模型已成功上传到模型管理"}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"创建模型记录失败: {str(e)}")
-    else:
-        raise HTTPException(status_code=404, detail="训练任务没有输出目录信息")
+    # 登记逻辑在 training_service.register_trained_model：训练成功后会自动登记 best，
+    # 这里供手动补登 last 或自动登记失败时使用；重复登记同一文件返回已有记录
+    try:
+        db_model = training_service.register_trained_model(db, task, model_type)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return {"success": True, "model_id": str(db_model.id), "message": "模型已成功上传到模型管理"}

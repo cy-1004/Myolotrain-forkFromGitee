@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
+from app.db.types import StoredPath
 
 # 标注租约有效期：持有者每 60 秒续期一次，超时未续期则视为已释放，
 # 避免标注员浏览器崩溃或直接关页面后图片被永久锁死
@@ -19,7 +20,7 @@ class AnnotationProject(Base):
     dataset_id = Column(UUID(as_uuid=True), ForeignKey("datasets.id"), nullable=True)
     classes = Column(JSON, nullable=False)  # 类别列表
     class_keypoints = Column(JSON, nullable=True)  # 类别和关键点的映射关系
-    image_directory = Column(String, nullable=False)  # 图片目录路径
+    image_directory = Column(StoredPath, nullable=False)  # 图片目录路径
     project_type = Column(String, default="detection")  # detection, segmentation, obb, keypoints
     import_original_annotations = Column(Boolean, default=False)  # 是否导入原标注
     created_at = Column(DateTime, default=datetime.utcnow)

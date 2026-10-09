@@ -21,6 +21,9 @@
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav">
                     <li class="nav-item">
+                        <a class="nav-link" href="#" data-page="frame-extraction">视频抽帧</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="#" data-page="annotation">在线标注</a>
                     </li>
                     <li class="nav-item">
@@ -540,6 +543,12 @@
                     <li class="nav-item" role="presentation">
                         <button class="nav-link" id="augment-tab" data-bs-toggle="tab" data-bs-target="#augment" type="button" role="tab" aria-controls="augment" aria-selected="false">数据增强</button>
                     </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="batch-tab" data-bs-toggle="tab" data-bs-target="#batch" type="button" role="tab" aria-controls="batch" aria-selected="false">批量处理</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="collage-tab" data-bs-toggle="tab" data-bs-target="#collage" type="button" role="tab" aria-controls="collage" aria-selected="false">拼图工坊</button>
+                    </li>
                 </ul>
             </div>
             <div class="card-body">
@@ -552,7 +561,8 @@
                         <form id="preprocess-form" enctype="multipart/form-data">
                             <div class="mb-3">
                                 <label for="image-upload" class="form-label">选择图像</label>
-                                <input class="form-control" type="file" id="image-upload" name="image" accept="image/*">
+                                <input class="form-control" type="file" id="image-upload" name="image" accept="image/*" multiple>
+                                <div class="form-text">可一次选多张。选多张时会自动走批量处理（异步 + 进度条 + 打包下载）。</div>
                             </div>
 
                             <div class="mb-3">
@@ -994,10 +1004,487 @@
                             </div>
                         </div>
                     </div>
+
+                    <!-- 批量处理 -->
+                    <div class="tab-pane fade" id="batch" role="tabpanel" aria-labelledby="batch-tab">
+                        <h5 class="card-title">批量图像处理</h5>
+                        <p class="card-text">一次处理多张图片。可以直接选服务器上已有的数据集 / 标注项目，并按比例随机抽样，不必经浏览器上传。</p>
+
+                        <form id="batch-form">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">图片来源</label>
+                                <select class="form-select" id="batch-source">
+                                    <option value="upload">上传本地图片（多选）</option>
+                                    <option value="dataset">服务器上的数据集</option>
+                                    <option value="annotation_project">标注项目</option>
+                                    <option value="path">服务器目录路径</option>
+                                </select>
+                            </div>
+
+                            <div class="mb-3 batch-source-block" data-for="upload">
+                                <input class="form-control" type="file" id="batch-files" accept="image/*" multiple>
+                                <div class="form-text">上传方式适合几十张的量级；上千张请改用数据集来源。</div>
+                            </div>
+
+                            <div class="mb-3 batch-source-block" data-for="dataset" style="display:none;">
+                                <select class="form-select" id="batch-dataset"><option value="">加载中...</option></select>
+                            </div>
+
+                            <div class="mb-3 batch-source-block" data-for="annotation_project" style="display:none;">
+                                <select class="form-select" id="batch-project"><option value="">加载中...</option></select>
+                            </div>
+
+                            <div class="mb-3 batch-source-block" data-for="path" style="display:none;">
+                                <input type="text" class="form-control" id="batch-path" placeholder="例如 D:/data/images">
+                            </div>
+
+                            <div class="row mb-3 batch-server-only" style="display:none;">
+                                <div class="col-md-4">
+                                    <label class="form-label">子集</label>
+                                    <select class="form-select" id="batch-split">
+                                        <option value="all">全部</option>
+                                        <option value="train">train</option>
+                                        <option value="val">val</option>
+                                        <option value="test">test</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">抽样方式</label>
+                                    <select class="form-select" id="batch-sample-mode">
+                                        <option value="all">全部处理</option>
+                                        <option value="ratio">按比例随机</option>
+                                        <option value="count">按张数随机</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4" id="batch-sample-value-wrap" style="display:none;">
+                                    <label class="form-label" id="batch-sample-value-label">比例 (%)</label>
+                                    <input type="number" class="form-control" id="batch-sample-value" value="20" min="1">
+                                </div>
+                            </div>
+
+                            <div class="mb-3 batch-server-only" style="display:none;">
+                                <label class="form-label">随机种子（可选）</label>
+                                <input type="number" class="form-control" id="batch-seed" placeholder="留空则自动生成">
+                                <div class="form-text">种子会记进 manifest.json。抽样不可复现的话，事后没法查是哪一批图被改了。</div>
+                            </div>
+
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">处理操作</label>
+
+                                <div class="border rounded p-2 mb-2">
+                                    <div class="small text-success mb-2">
+                                        <i class="fas fa-check-circle"></i> 像素类 —— 不影响标注框，标签原样复制
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-resize" data-op="resize_image">
+                                                <label class="form-check-label" for="b-resize">调整大小</label>
+                                            </div>
+                                            <div class="row g-1 mb-2 ms-3 batch-op-params" id="b-resize-params" style="display:none;">
+                                                <div class="col-6"><input type="number" class="form-control form-control-sm" id="b-resize-w" value="640" placeholder="宽"></div>
+                                                <div class="col-6"><input type="number" class="form-control form-control-sm" id="b-resize-h" value="640" placeholder="高"></div>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-denoise" data-op="denoise_image">
+                                                <label class="form-check-label" for="b-denoise">去噪</label>
+                                            </div>
+                                            <div class="mb-2 ms-3 batch-op-params" id="b-denoise-params" style="display:none;">
+                                                <label class="form-label small mb-0">强度 <span id="b-denoise-val">3</span></label>
+                                                <input type="range" class="form-range" id="b-denoise-strength" min="1" max="10" value="3">
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-bc" data-op="adjust_brightness_contrast">
+                                                <label class="form-check-label" for="b-bc">亮度 / 对比度</label>
+                                            </div>
+                                            <div class="mb-2 ms-3 batch-op-params" id="b-bc-params" style="display:none;">
+                                                <label class="form-label small mb-0">亮度 <span id="b-brightness-val">0</span></label>
+                                                <input type="range" class="form-range" id="b-brightness" min="-100" max="100" value="0">
+                                                <label class="form-label small mb-0">对比度 <span id="b-contrast-val">1.0</span></label>
+                                                <input type="range" class="form-range" id="b-contrast" min="0" max="30" value="10">
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-sharpen" data-op="sharpen_image">
+                                                <label class="form-check-label" for="b-sharpen">锐化</label>
+                                            </div>
+                                            <div class="mb-2 ms-3 batch-op-params" id="b-sharpen-params" style="display:none;">
+                                                <label class="form-label small mb-0">强度 <span id="b-sharpen-val">1.0</span></label>
+                                                <input type="range" class="form-range" id="b-sharpen-amount" min="1" max="50" value="10">
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="border rounded p-2 mb-2">
+                                    <div class="small text-primary mb-2">
+                                        <i class="fas fa-sync-alt"></i> 几何类 —— 会同步变换 YOLO 标注框
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-fliph" data-op="flip_image" data-flip="1">
+                                                <label class="form-check-label" for="b-fliph">水平翻转（左右镜像）</label>
+                                            </div>
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-flipv" data-op="flip_image" data-flip="0">
+                                                <label class="form-check-label" for="b-flipv">垂直翻转（上下翻转）</label>
+                                            </div>
+                                        </div>
+                                        <div class="col-md-6">
+                                            <div class="form-check">
+                                                <input class="form-check-input batch-op" type="checkbox" id="b-rotate" data-op="rotate_image">
+                                                <label class="form-check-label" for="b-rotate">旋转</label>
+                                            </div>
+                                            <div class="mb-2 ms-3 batch-op-params" id="b-rotate-params" style="display:none;">
+                                                <select class="form-select form-select-sm" id="b-rotate-angle">
+                                                    <option value="90">逆时针 90°</option>
+                                                    <option value="180">180°</option>
+                                                    <option value="270">逆时针 270°</option>
+                                                </select>
+                                                <div class="form-text">90° / 270° 会让画布长宽互换（如 640×480 → 480×640），画面不再被裁掉。</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="border rounded p-2">
+                                    <div class="small text-warning mb-2">
+                                        <i class="fas fa-exclamation-triangle"></i> 标签仅近似 —— 有标注的数据集请谨慎使用
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input batch-op" type="checkbox" id="b-perspective" data-op="apply_perspective_transform">
+                                        <label class="form-check-label" for="b-perspective">透视变换</label>
+                                    </div>
+                                    <div class="mb-2 ms-3 batch-op-params" id="b-perspective-params" style="display:none;">
+                                        <label class="form-label small mb-0">强度 <span id="b-perspective-val">0.2</span></label>
+                                        <input type="range" class="form-range" id="b-perspective-strength" min="1" max="10" value="2">
+                                        <div class="form-text">透视的角点偏移是随机的，标注框只能按强度等比缩小，并不精确。</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="alert alert-secondary py-2 small">
+                                结果一律写到新目录，<strong>不会覆盖原图</strong>。带标注的图片，其 labels/*.txt 会一并处理后输出。
+                            </div>
+
+                            <button type="submit" class="btn btn-primary" id="batch-submit">开始批量处理</button>
+                        </form>
+
+                        <div class="mt-4" id="batch-result" style="display:none;">
+                            <div id="batch-warnings"></div>
+                            <div class="alert alert-info">
+                                <div class="d-flex justify-content-between">
+                                    <span>任务 ID: <code id="batch-task-id"></code></span>
+                                    <span id="batch-seed-info" class="small"></span>
+                                </div>
+                                <div class="progress mt-2">
+                                    <div id="batch-progress" class="progress-bar progress-bar-striped progress-bar-animated" style="width:0%">0%</div>
+                                </div>
+                                <p class="mb-0 mt-2"><span id="batch-status-text">已提交...</span></p>
+                            </div>
+                            <div id="batch-actions" style="display:none;">
+                                <a id="batch-download" class="btn btn-success btn-sm" href="#">下载结果 (zip)</a>
+                                <a id="batch-manifest" class="btn btn-outline-secondary btn-sm" href="#" target="_blank">查看选中清单 / 种子</a>
+                            </div>
+                            <div id="batch-errors" class="mt-3"></div>
+                        </div>
+                    </div>
+
+                    <!-- 拼图工坊 -->
+                    <div class="tab-pane fade" id="collage" role="tabpanel" aria-labelledby="collage-tab">
+                        <ul class="nav nav-pills mb-3" role="tablist">
+                            <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#collage-grid" type="button">快速网格预览</button></li>
+                            <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#collage-mosaic" type="button">Mosaic 训练样本</button></li>
+                        </ul>
+                        <div class="tab-content">
+                            <!-- 快速网格 -->
+                            <div class="tab-pane fade show active" id="collage-grid" role="tabpanel">
+                                <p class="card-text">把多张图拼成一张网格图，用来快速看一批抽帧结果或增强效果。<strong>纯预览，不产出标注。</strong></p>
+                                <form id="grid-form">
+                                    <div class="mb-3">
+                                        <label class="form-label">选择图像（多选）</label>
+                                        <input class="form-control" type="file" id="grid-files" accept="image/*" multiple required>
+                                    </div>
+                                    <div class="row mb-3">
+                                        <div class="col-md-3">
+                                            <label class="form-label">行数</label>
+                                            <input type="number" class="form-control" id="grid-rows" value="2" min="1">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">列数</label>
+                                            <input type="number" class="form-control" id="grid-cols" value="2" min="1">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">单元格宽</label>
+                                            <input type="number" class="form-control" id="grid-cell-w" placeholder="默认取首图">
+                                        </div>
+                                        <div class="col-md-3">
+                                            <label class="form-label">单元格高</label>
+                                            <input type="number" class="form-control" id="grid-cell-h" placeholder="默认取首图">
+                                        </div>
+                                    </div>
+                                    <div class="form-check mb-3">
+                                        <input class="form-check-input" type="checkbox" id="grid-shuffle">
+                                        <label class="form-check-label" for="grid-shuffle">随机选取（打乱后取前 行×列 张）</label>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary">生成网格</button>
+                                </form>
+                                <div class="mt-3" id="grid-result" style="display:none;">
+                                    <p class="small text-muted" id="grid-note"></p>
+                                    <img id="grid-output" class="img-fluid border" alt="网格图">
+                                    <div class="mt-2"><a id="grid-download" class="btn btn-sm btn-success" download>下载</a></div>
+                                </div>
+                            </div>
+
+                            <!-- Mosaic 审核 -->
+                            <div class="tab-pane fade" id="collage-mosaic" role="tabpanel">
+                                <div class="alert alert-warning py-2 small">
+                                    Mosaic 产物会进训练集，所以四张子图的<strong>标注框会跟着一起变换</strong>。
+                                    预览图上已经画出变换后的框 —— 审核时请重点确认框有没有跟着拼对。
+                                    四张子图取自同一个数据集，否则 class_id 对不上。
+                                </div>
+                                <form id="mosaic-gen-form" class="row g-2 align-items-end mb-3">
+                                    <div class="col-md-4">
+                                        <label class="form-label">来源数据集</label>
+                                        <select class="form-select" id="mosaic-dataset"><option value="">加载中...</option></select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">子集</label>
+                                        <select class="form-select" id="mosaic-split">
+                                            <option value="train">train</option>
+                                            <option value="val">val</option>
+                                            <option value="test">test</option>
+                                            <option value="all">全部</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">生成张数</label>
+                                        <input type="number" class="form-control" id="mosaic-count" value="20" min="1" max="50">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <label class="form-label">种子（可选）</label>
+                                        <input type="number" class="form-control" id="mosaic-seed" placeholder="自动">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button type="submit" class="btn btn-primary w-100">批量生成</button>
+                                    </div>
+                                </form>
+
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <div>
+                                        待审核 <span id="mosaic-pending-count" class="badge bg-warning text-dark">0</span>
+                                        / 上限 <span id="mosaic-pending-limit">50</span>
+                                    </div>
+                                    <div>
+                                        <select class="form-select form-select-sm d-inline-block w-auto" id="mosaic-filter">
+                                            <option value="pending">待审核</option>
+                                            <option value="accepted">已采纳</option>
+                                            <option value="discarded">已丢弃</option>
+                                            <option value="all">全部</option>
+                                        </select>
+                                        <button class="btn btn-sm btn-outline-secondary" type="button" id="mosaic-refresh">刷新</button>
+                                    </div>
+                                </div>
+                                <div class="form-text mb-2">「暂留」= 什么都不点，保持待审核状态，稍后再决定。</div>
+                                <div class="row" id="mosaic-candidates"></div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
         <!-- OpenCV加载覆盖层已完全移除 -->
+    </template>
+
+    <!-- 视频抽帧页面 -->
+    <template id="frame-extraction-template">
+        <div class="row mb-4">
+            <div class="col">
+                <h2>视频抽帧与自动命名</h2>
+                <p class="lead">批量导入视频，按帧/时间间隔抽帧并结构化重命名，输出可直接用于标注的图像库。</p>
+            </div>
+        </div>
+        <div class="row">
+            <!-- 左侧：参数设置 -->
+            <div class="col-lg-5">
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">1. 选择视频</h5>
+                        <div class="mb-3">
+                            <div class="btn-group btn-group-sm mb-2" role="group">
+                                <input type="radio" class="btn-check" name="fe-input-mode" id="fe-mode-files" value="files" checked>
+                                <label class="btn btn-outline-primary" for="fe-mode-files">多选文件</label>
+                                <input type="radio" class="btn-check" name="fe-input-mode" id="fe-mode-folder" value="folder">
+                                <label class="btn btn-outline-primary" for="fe-mode-folder">整个文件夹</label>
+                            </div>
+                            <input class="form-control" type="file" id="fe-video-input" name="videos" accept=".mp4,.avi,.mov,.mkv,video/*" multiple>
+                            <div class="form-text">支持 .mp4 / .avi / .mov / .mkv，可一次选择多个文件或整个文件夹。</div>
+                            <div id="fe-selected-list" class="small text-muted mt-2"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">2. 抽帧策略</h5>
+                        <div class="mb-3">
+                            <label class="form-label">抽帧方式</label>
+                            <div class="btn-group btn-group-sm d-flex" role="group">
+                                <input type="radio" class="btn-check" name="fe-method" id="fe-method-time" value="time" checked>
+                                <label class="btn btn-outline-secondary w-100" for="fe-method-time">按时间间隔</label>
+                                <input type="radio" class="btn-check" name="fe-method" id="fe-method-frame" value="frame">
+                                <label class="btn btn-outline-secondary w-100" for="fe-method-frame">按帧间隔</label>
+                            </div>
+                        </div>
+                        <div class="mb-3" id="fe-time-row">
+                            <label for="fe-interval-seconds" class="form-label">时间间隔 (秒/帧)</label>
+                            <input type="number" class="form-control" id="fe-interval-seconds" value="1.0" min="0.1" step="0.1">
+                            <div class="form-text">每隔 N 秒提取 1 帧，支持小数（如 0.5）。</div>
+                        </div>
+                        <div class="mb-3" id="fe-frame-row" style="display:none;">
+                            <label for="fe-interval-frames" class="form-label">帧间隔 (每 N 帧取 1 帧)</label>
+                            <input type="number" class="form-control" id="fe-interval-frames" value="5" min="1" step="1">
+                        </div>
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <label for="fe-skip-start" class="form-label">跳过开头 (秒)</label>
+                                <input type="number" class="form-control" id="fe-skip-start" value="0" min="0" step="0.1">
+                            </div>
+                            <div class="col-6 mb-3">
+                                <label for="fe-skip-end" class="form-label">跳过结尾 (秒)</label>
+                                <input type="number" class="form-control" id="fe-skip-end" value="0" min="0" step="0.1">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <h5 class="card-title">3. 命名与输出</h5>
+                        <div class="mb-3">
+                            <label for="fe-template-preset" class="form-label">命名模板</label>
+                            <select class="form-select mb-2" id="fe-template-preset">
+                                <option value="{video_name}_{index:05d}">{video_name}_{index:05d}（如 Bronze_01_00001）</option>
+                                <option value="{video_name}_{index:04d}">{video_name}_{index:04d}</option>
+                                <option value="{video_name}_{timestamp:.2f}s">{video_name}_{timestamp:.2f}s（时间戳）</option>
+                                <option value="__custom__">自定义…</option>
+                            </select>
+                            <input type="text" class="form-control" id="fe-template-custom" value="{video_name}_{index:05d}" style="display:none;">
+                            <div class="form-text">
+                                可用变量：<code>{video_name}</code> 视频名、<code>{index}</code> 序号（<code>{index:05d}</code> 补零）、<code>{timestamp}</code> 秒时间戳。
+                                <span id="fe-template-feedback"></span>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <label for="fe-format" class="form-label">图像格式</label>
+                                <select class="form-select" id="fe-format">
+                                    <option value="jpg">JPG（推荐）</option>
+                                    <option value="png">PNG</option>
+                                </select>
+                            </div>
+                            <div class="col-6 mb-3" id="fe-quality-col">
+                                <label for="fe-quality" class="form-label">JPG 质量</label>
+                                <input type="number" class="form-control" id="fe-quality" value="95" min="1" max="100">
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">保存结构</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="fe-structure" id="fe-flat" value="flat" checked>
+                                <label class="form-check-label" for="fe-flat">扁平保存（所有帧放同一目录，适合直接标注）</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="fe-structure" id="fe-subfolder" value="subfolder">
+                                <label class="form-check-label" for="fe-subfolder">按视频建子目录保存</label>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="fe-resize-check">
+                                <label class="form-check-label" for="fe-resize-check">调整帧尺寸</label>
+                            </div>
+                            <div class="row mt-2" id="fe-resize-options" style="display:none;">
+                                <div class="col-6">
+                                    <input type="number" class="form-control" id="fe-resize-width" placeholder="宽" value="640">
+                                </div>
+                                <div class="col-6">
+                                    <input type="number" class="form-control" id="fe-resize-height" placeholder="高" value="480">
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary w-100" id="fe-start-btn">开始抽帧</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：进度与结果 -->
+            <div class="col-lg-7">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">处理进度</h5>
+                        <div id="fe-idle" class="text-muted">尚未开始。请在左侧设置参数后点击“开始抽帧”。</div>
+                        <div id="fe-progress-area" style="display:none;">
+                            <div class="progress mb-2" style="height: 22px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" id="fe-progress-bar" role="progressbar" style="width: 0%;">0%</div>
+                            </div>
+                            <p class="mb-1" id="fe-progress-text">正在准备…</p>
+                            <ul class="list-group list-group-flush small" id="fe-video-log"></ul>
+                        </div>
+
+                        <div id="fe-result-area" class="mt-3" style="display:none;">
+                            <div class="alert alert-success">
+                                <strong>抽帧完成！</strong> 共导出 <span id="fe-total-frames">0</span> 张图片
+                                （成功 <span id="fe-ok-videos">0</span> / 共 <span id="fe-all-videos">0</span> 个视频）。
+                            </div>
+                            <div class="mb-3">
+                                <button class="btn btn-success btn-sm me-2" id="fe-download-btn">下载全部帧 (ZIP)</button>
+                                <button class="btn btn-primary btn-sm me-2" id="fe-to-annotation-btn">一键送入在线标注</button>
+                                <button class="btn btn-outline-danger btn-sm" id="fe-delete-btn">删除服务器缓存</button>
+                            </div>
+                            <div class="row g-2" id="fe-gallery"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 送入标注 弹窗 -->
+        <div class="modal fade" id="fe-annotation-modal" tabindex="-1">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title">创建标注项目</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-3">
+                            <label for="fe-anno-name" class="form-label">项目名称</label>
+                            <input type="text" class="form-control" id="fe-anno-name" placeholder="如：文物检测数据集">
+                        </div>
+                        <div class="mb-3">
+                            <label for="fe-anno-type" class="form-label">标注类型</label>
+                            <select class="form-select" id="fe-anno-type">
+                                <option value="detection">目标检测 (detection)</option>
+                                <option value="segmentation">实例分割 (segmentation)</option>
+                                <option value="obb">旋转框 (obb)</option>
+                                <option value="keypoints">关键点 (keypoints)</option>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label for="fe-anno-classes" class="form-label">类别（英文逗号分隔）</label>
+                            <input type="text" class="form-control" id="fe-anno-classes" placeholder="如：tripod,vessel,mirror">
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+                        <button type="button" class="btn btn-primary" id="fe-anno-create-btn">创建并跳转</button>
+                    </div>
+                </div>
+            </div>
+        </div>
     </template>
 
     <!-- 视频处理页面 -->
@@ -2802,7 +3289,9 @@
     <script src="static/js/model-manager.js"></script>
     <script src="static/js/user-manager.js"></script>
     <script src="static/js/opencv-tools.js"></script>
+    <script src="static/js/batch-processing.js"></script>
     <script src="static/js/video-processor.js"></script>
+    <script src="static/js/frame-extraction.js"></script>
     <script src="static/js/online-annotation.js"></script>
     <script src="static/js/detection-manager.js"></script>
     <script src="static/js/settings-manager.js"></script>

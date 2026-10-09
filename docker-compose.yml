@@ -1,43 +1,55 @@
-version: '3.8'
+# Myolotrain 部署编排：app + postgres 两个容器，对外只开放一个端口（API 与控制台共用）。
+#
+# 推荐用启动脚本，它会在宿主机端口被占用时自动顺延（8000 → 8001 → ……），并自动判断是否启用 GPU：
+#   Linux:   scripts/start.sh
+#   Windows: powershell -ExecutionPolicy Bypass -File scripts/start.ps1
+# 也可以手动：APP_PORT=8000 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# 首次部署前：cp .env.example .env，并至少填写 SECRET_KEY、POSTGRES_PASSWORD。
+name: myolotrain
 
 services:
   db:
-    image: postgres:13
-    container_name: yolov8_db
+    image: postgres:16-alpine
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: yolov8_platform
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?请在 .env 中设置 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-yolov8_platform}
     volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    restart: always
+      - pgdata:/var/lib/postgresql/data
+    # 不映射端口：数据库只在 compose 内部网络可达
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+    restart: unless-stopped
 
-  web:
+  app:
     build:
       context: .
-    container_name: yolov8_web
+    image: myolotrain:latest
+    env_file: .env
+    environment:
+      # 以下几项与容器内的布局绑定，不受 .env 影响
+      POSTGRES_SERVER: db
+      POSTGRES_PORT: "5432"
+      SERVER_PORT: "8000"
+      DATA_DIR: /data
     ports:
-      - "8000:8000"
-      - "6006:6006"
+      # 唯一对外端口。宿主机端口由启动脚本选定（冲突时顺延），容器内固定 8000
+      - "${APP_PORT:-8000}:8000"
+    volumes:
+      - appdata:/data
+    # DataLoader 多进程依赖共享内存，Docker 默认的 64MB 会让训练报 "bus error"
+    shm_size: 8gb
+    # 给训练进程留时间在收到停止信号后保存 last.pt
+    stop_grace_period: 60s
     depends_on:
       db:
-          condition: service_healthy
-    environment:
-      - POSTGRES_SERVER=db
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=yolov8_platform
-    volumes:
-      - ./app/static:/app/app/static
-      - ./logs:/app/logs
-    restart: always
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
-  postgres_data:
+  pgdata:
+  appdata:

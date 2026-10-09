@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 import re
 
 from app.core.config import settings
+from app.core.paths import resolve_stored
 from app.crud import training_task, dataset, model
 from app.models.training_task import TrainingTask
 from app.schemas.training_task import TrainingTaskCreate, TrainingTaskUpdate
@@ -43,12 +44,303 @@ except AttributeError:
     pass
 
 # 设置TensorBoard为True
-# 使用Python解释器运行yolo模块，确保使用虚拟环境中的ultralytics
+# 用 Ultralytics 的 Python API 而不是 `yolo settings` 子进程：后者要求 yolo 命令在 PATH 上，
+# 找不到时抛 FileNotFoundError（原先只捕获了 CalledProcessError），会让整个应用在导入阶段崩溃
 try:
-    subprocess.run(['yolo', 'settings', 'tensorboard=true'], check=True)
-except subprocess.CalledProcessError as e:
+    from ultralytics import settings as _yolo_settings
+    _yolo_settings.update({"tensorboard": True})
+except Exception as e:
     print(f"警告: 设置TensorBoard时出错: {e}")
     # 继续执行，即使设置失败
+
+
+# 基础模型名只允许这些字符：它会被拼进文件路径，不能含路径分隔符
+_BASE_MODEL_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+# 历史约定：model_type 只传尺寸字母时表示 YOLOv8（"n" -> "yolov8n"）
+_YOLOV8_SIZE_LETTERS = {"n", "s", "m", "l", "x"}
+
+
+def resolve_base_weights(model_type: str) -> Path:
+    """把训练参数里的 model_type 解析为基础权重文件路径（文件不一定已存在）
+
+    - "n"/"s"/... -> yolov8n.pt（兼容旧前端）；"yolov8n"、"yolo11n"、"yolo11n.pt" 按原名
+      （原先的逻辑会把 "yolo11n" 拼成 "yolov8yolo11n"，导致 YOLO11 只能通过上传模型训练）
+    - 查找顺序：WEIGHTS_DIR（Docker 中为预置权重目录）→ 项目下的 models/（旧版本下载位置）
+    - 都不存在时返回 WEIGHTS_DIR 下的路径，由调用方决定是否下载
+
+    Raises:
+        ValueError: model_type 不是合法的模型名
+    """
+    name = (model_type or "").strip()
+    if name.endswith(".pt"):
+        name = name[:-3]
+    if name in _YOLOV8_SIZE_LETTERS:
+        name = f"yolov8{name}"
+    if not _BASE_MODEL_NAME_RE.match(name):
+        raise ValueError(f"不合法的模型类型: {model_type!r}")
+
+    filename = f"{name}.pt"
+    candidates = [Path(settings.WEIGHTS_DIR) / filename, settings.BASE_DIR / "models" / filename]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def download_base_weights(model_file: Path) -> Path:
+    """下载 Ultralytics 官方基础权重到指定路径
+
+    直接下载到目标路径；原先用 YOLO("xxx.pt") 触发下载，文件会落在当前目录或
+    Ultralytics 自己的权重目录，而不是后面训练脚本要读取的 models_dir。
+    """
+    from ultralytics.utils.downloads import attempt_download_asset
+
+    model_file.parent.mkdir(parents=True, exist_ok=True)
+    attempt_download_asset(str(model_file))
+    if not model_file.exists():
+        raise FileNotFoundError(f"下载后仍找不到权重文件: {model_file}（{model_file.name} 可能不是官方发布的模型名）")
+    return model_file
+
+
+def _training_subprocess_env() -> Dict[str, str]:
+    """训练子进程的环境变量（首次训练与续训共用）"""
+    env = os.environ.copy()
+    env['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
+    env['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
+    env['ULTRALYTICS_TENSORBOARD'] = '1'
+    # 子进程的输出直接写进日志文件描述符，编码由子进程决定：中文 Windows 上默认是 GBK，
+    # 与日志读取端约定的 UTF-8 不一致会乱码。这里强制子进程按 UTF-8 输出
+    env['PYTHONIOENCODING'] = 'utf-8'
+    env['PYTHONUTF8'] = '1'
+    return env
+
+
+# 用户主动停止后的状态。训练进程被杀时返回码非 0，监控线程不能把它们改写成 failed
+_USER_STOPPED_STATUSES = {"cancelled", "stopped"}
+
+# 当前进程内有监控线程在等待的训练任务。process_monitor 的定期巡检跳过这些任务，
+# 避免两边同时给同一个任务收尾
+_watched_task_ids = set()
+_watched_lock = threading.Lock()
+
+
+def is_task_watched(task_id) -> bool:
+    with _watched_lock:
+        return str(task_id) in _watched_task_ids
+
+
+def monitor_training_process(training_process, task_id) -> None:
+    """等待训练子进程结束并更新任务状态（在后台线程中运行）
+
+    必须自己创建数据库会话：原先复用的是发起训练那个请求的会话，请求结束后会话已关闭，
+    跨线程使用 SQLAlchemy 会话本身也不安全，导致训练结束后状态更新经常失败、任务一直停在 training。
+    """
+    from app.db.session import SessionLocal
+
+    with _watched_lock:
+        _watched_task_ids.add(str(task_id))
+    try:
+        training_process.wait()
+    except Exception as e:
+        print(f"\n=== 监控训练进程时出错: {e} ===")
+    return_code = training_process.returncode
+
+    db = SessionLocal()
+    try:
+        db_task = training_task.get(db, id=task_id)
+        if not db_task:
+            return
+        if db_task.status in _USER_STOPPED_STATUSES:
+            print(f"\n=== 训练任务 {task_id} 已被用户停止（返回码 {return_code}） ===")
+            return
+
+        best_pt = get_training_output_dir(db_task) / "exp" / "weights" / "best.pt"
+        if return_code == 0 and best_pt.exists():
+            training_task.update(db, db_obj=db_task, obj_in={
+                "status": "completed",
+                "end_time": datetime.now()
+            })
+            print(f"\n=== 训练任务 {task_id} 已成功完成 ===")
+            # 自动登记最佳模型并回填 output_model_id，不再需要手动点"上传到模型管理"
+            try:
+                db_model = register_trained_model(db, db_task, "best")
+                print(f"\n=== 已登记最佳模型: {db_model.id} ===")
+            except Exception as e:
+                print(f"\n=== 登记最佳模型失败（可在训练列表中手动上传）: {e} ===")
+        else:
+            # 返回码为 0 但没有 best.pt：训练脚本吞掉了异常，同样视为失败
+            reason = f"返回码 {return_code}" if return_code != 0 else "未生成 best.pt"
+            training_task.update(db, db_obj=db_task, obj_in={
+                "status": "failed",
+                "end_time": datetime.now()
+            })
+            print(f"\n=== 训练任务 {task_id} 失败（{reason}） ===")
+    except Exception as e:
+        print(f"\n=== 更新训练任务 {task_id} 状态时出错: {e} ===")
+    finally:
+        db.close()
+        with _watched_lock:
+            _watched_task_ids.discard(str(task_id))
+
+
+def _task_parameters(db_task) -> Dict[str, Any]:
+    """训练参数统一转成 dict（历史数据里有存成 JSON 字符串的）"""
+    params = db_task.parameters
+    if isinstance(params, str):
+        try:
+            params = json.loads(params)
+        except json.JSONDecodeError:
+            params = {}
+    return params if isinstance(params, dict) else {}
+
+
+def get_training_output_dir(db_task) -> Path:
+    """训练输出目录。训练脚本以 project=<该目录>, name='exp' 运行，产物在 <该目录>/exp/ 下"""
+    output_dir = resolve_stored(_task_parameters(db_task).get("output_dir"))
+    if not output_dir:
+        output_dir = os.path.join(settings.STATIC_DIR, "models", f"training_{db_task.id}")
+    return Path(output_dir)
+
+
+def _trained_model_type(db: Session, db_task, params: Dict[str, Any]) -> str:
+    """训练产物的模型类型：沿用基础模型的类型（如 yolo11n），而不是一律写成 yolov8"""
+    if db_task.model_id:
+        base = model.get(db, id=db_task.model_id)
+        if base and base.type:
+            return base.type
+    name = str(params.get("model_type") or "").strip()
+    if name.endswith(".pt"):
+        name = name[:-3]
+    if name in _YOLOV8_SIZE_LETTERS:
+        name = f"yolov8{name}"
+    return name if _BASE_MODEL_NAME_RE.match(name or "") else "yolov8"
+
+
+def register_trained_model(db: Session, db_task, which: str = "best"):
+    """把训练产出的 best.pt / last.pt 登记到模型管理，best 同时回填到任务的 output_model_id
+
+    幂等：同一个权重文件只登记一次，重复调用返回已有记录。
+    训练成功后由监控线程自动调用；"上传到模型管理"按钮也走这里。
+
+    Raises:
+        ValueError: which 不是 best/last
+        FileNotFoundError: 权重文件不存在
+    """
+    from app.models.model import Model as ModelORM
+    from app.schemas.model import ModelCreate
+
+    if which not in ("best", "last"):
+        raise ValueError("无效的模型类型，必须是 'best' 或 'last'")
+    weights_file = get_training_output_dir(db_task) / "exp" / "weights" / f"{which}.pt"
+    if not weights_file.exists():
+        raise FileNotFoundError(f"模型文件不存在: {weights_file}")
+
+    db_model = db.query(ModelORM).filter(ModelORM.path == str(weights_file)).first()
+    if db_model is None:
+        params = _task_parameters(db_task)
+        label = "最佳" if which == "best" else "最后"
+        db_model = model.create(db, obj_in=ModelCreate(
+            name=f"{db_task.name}_{label}模型",
+            description=f"由训练任务 '{db_task.name}' 生成的{label}模型",
+            type=_trained_model_type(db, db_task, params),
+            task=params.get("task_type", "detect"),
+            path=str(weights_file),
+            source="training",
+        ))
+
+    if which == "best" and db_task.output_model_id != db_model.id:
+        training_task.update(db, db_obj=db_task, obj_in={"output_model_id": db_model.id})
+    return db_model
+
+
+def read_results_csv(db_task) -> List[Dict[str, Any]]:
+    """读取训练的逐 epoch 指标（Ultralytics 写的 exp/results.csv），文件不存在时返回空列表
+
+    Ultralytics 的列名带有对齐用的空格（如 "      metrics/mAP50(B)"），这里统一去掉；
+    数值转 float，无法解析的保持原样。
+    """
+    import csv
+
+    csv_path = get_training_output_dir(db_task) / "exp" / "results.csv"
+    if not csv_path.exists():
+        return []
+    rows = []
+    with open(csv_path, newline="", encoding="utf-8") as f:
+        for raw in csv.DictReader(f):
+            row = {}
+            for key, value in raw.items():
+                if key is None:
+                    continue
+                value = (value or "").strip()
+                try:
+                    row[key.strip()] = float(value)
+                except ValueError:
+                    row[key.strip()] = value
+            if row:
+                rows.append(row)
+    return rows
+
+
+# 单次最多返回的日志字节数，防止前端一次拉取几十 MB 的日志把页面卡死
+LOG_CHUNK_MAX_BYTES = 256 * 1024
+
+
+def get_training_log_path(db_task) -> Path:
+    tensorboard_dir = db_task.tensorboard_path or os.path.join(settings.TENSORBOARD_LOGS_DIR, str(db_task.id))
+    return Path(tensorboard_dir) / "training_log.txt"
+
+
+def read_training_log_chunk(db_task, offset: int = 0, limit: int = 64 * 1024) -> Dict[str, Any]:
+    """按字节偏移增量读取训练日志
+
+    前端轮询时带上上次返回的 next_offset，只拿新增内容；原先的 /logs 接口每 5 秒返回整个日志文件。
+    offset < 0 表示从文件末尾往前取 |offset| 字节（打开日志弹窗时先看最近的内容）。
+    切块位置会对齐到 UTF-8 字符边界，避免中文被截成半个字符。
+
+    Returns:
+        {"text", "offset"（本次实际起点）, "next_offset", "size"（文件当前大小）, "exists"}
+    """
+    limit = max(1, min(int(limit), LOG_CHUNK_MAX_BYTES))
+    log_path = get_training_log_path(db_task)
+    if not log_path.exists():
+        return {"text": "", "offset": 0, "next_offset": 0, "size": 0, "exists": False}
+
+    size = log_path.stat().st_size
+    start = size + offset if offset < 0 else offset
+    # 日志被重新开始训练覆盖后会变短，旧偏移量越界时从头读
+    if start < 0 or start > size:
+        start = 0
+
+    with open(log_path, "rb") as f:
+        f.seek(start)
+        data = f.read(limit)
+
+    # 起点落在多字节字符中间（UTF-8 续字节为 10xxxxxx）：跳过残缺的前缀
+    head = 0
+    if start > 0:
+        while head < len(data) and head < 4 and (data[head] & 0xC0) == 0x80:
+            head += 1
+    # 终点截断了多字节字符：把残缺的尾巴留给下一次读取
+    tail = len(data)
+    if start + len(data) < size:
+        back = 0
+        while back < 4 and back < tail and (data[tail - 1 - back] & 0xC0) == 0x80:
+            back += 1
+        if back < tail:
+            lead = data[tail - 1 - back]
+            # 前导字节声明的字符长度：110xxxxx=2、1110xxxx=3、11110xxx=4
+            expected = 2 if (lead & 0xE0) == 0xC0 else 3 if (lead & 0xF0) == 0xE0 else 4 if (lead & 0xF8) == 0xF0 else 1
+            if lead >= 0xC0 and back + 1 < expected:
+                tail -= back + 1
+
+    chunk = data[head:tail]
+    return {
+        "text": chunk.decode("utf-8", errors="replace"),
+        "offset": start + head,
+        "next_offset": start + tail,
+        "size": size,
+        "exists": True,
+    }
 
 # 导入可能需要的PyTorch和Ultralytics模型类
 try:
@@ -678,7 +970,7 @@ def delete_training_task(db: Session, task_id: str) -> TrainingTask:
     try:
         # 删除输出目录
         if db_task.parameters and "output_dir" in db_task.parameters:
-            output_dir = db_task.parameters["output_dir"]
+            output_dir = resolve_stored(db_task.parameters["output_dir"])
             if output_dir:
                 output_path = Path(output_dir)
                 if output_path.exists():
@@ -760,7 +1052,7 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         dataset_yaml = Path(db_dataset.path) / "dataset.yaml"
     # 如果没有数据集ID，使用参数中的数据集路径
     elif "dataset_path" in db_task.parameters:
-        dataset_yaml = Path(db_task.parameters["dataset_path"])
+        dataset_yaml = Path(resolve_stored(db_task.parameters["dataset_path"]))
     else:
         raise HTTPException(
             status_code=400,
@@ -816,9 +1108,6 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     memory_limit = hardware_config.get("memory", 8192)  # 默认 8GB
 
     # 检查模型文件是否存在
-    models_dir = Path("models")
-    os.makedirs(models_dir, exist_ok=True)
-
     if weights_path and os.path.exists(weights_path):
         model_file = Path(weights_path)
         print(f"\n=== 使用用户上传的模型文件: {model_file} ===")
@@ -827,13 +1116,11 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         if weights_path:
             print(f"\n=== 警告: 用户指定的模型文件不存在: {weights_path}, 将使用默认模型 ===")
 
-        # 检查是否是YOLOv8模型类型
-        if not model_type.startswith("yolov8"):
-            model_type_full = f"yolov8{model_type}"
-        else:
-            model_type_full = model_type
-
-        model_file = models_dir / f"{model_type_full}.pt"
+        try:
+            model_file = resolve_base_weights(model_type)
+        except ValueError as e:
+            training_task.update(db, db_obj=db_task, obj_in={"status": "failed", "end_time": datetime.now()})
+            raise HTTPException(status_code=400, detail=str(e))
 
         # 如果模型文件不存在，则下载
         if not model_file.exists():
@@ -845,46 +1132,7 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
             })
 
             try:
-                # 确保添加安全全局变量
-                try:
-                    # 导入PyTorch核心类
-                    from torch.nn.modules.container import Sequential
-                    from torch.nn import Module, ModuleList, ModuleDict
-
-                    # 导入Ultralytics模型类
-                    from ultralytics.nn.tasks import DetectionModel
-
-                    # 导入Ultralytics模块类
-                    from ultralytics.nn.modules import conv
-                    from ultralytics.nn.modules import block
-                    from ultralytics.nn.modules import head
-
-                    # 添加PyTorch核心类到安全全局变量
-                    torch.serialization.add_safe_globals([Sequential, Module, ModuleList, ModuleDict])
-
-                    # 添加Ultralytics模型类到安全全局变量
-                    torch.serialization.add_safe_globals([DetectionModel])
-
-                    # 添加Ultralytics模块类
-                    torch.serialization.add_safe_globals([conv.Conv])
-
-                    # 添加所有Ultralytics模块类
-                    for module in [conv, block, head]:
-                        for name in dir(module):
-                            if name[0].isupper():  # 类名通常以大写字母开头
-                                try:
-                                    cls = getattr(module, name)
-                                    if isinstance(cls, type):  # 确保是类
-                                        torch.serialization.add_safe_globals([cls])
-                                except Exception as e:
-                                    print(f"Could not add {module.__name__}.{name} to safe globals: {e}")
-                except ImportError as e:
-                    print(f"Warning: Could not import required classes: {e}")
-
-                # 使用ultralytics下载模型
-                from ultralytics import YOLO
-                # 使用前面已经处理过的model_type_full
-                YOLO(f"{model_type_full}.pt")
+                download_base_weights(model_file)
                 print(f"\n=== 模型下载完成: {model_file} ===")
             except Exception as e:
                 print(f"\n=== 模型下载失败: {e} ===")
@@ -969,10 +1217,7 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     print(f"\n=== 等待训练进程启动... ===")
     try:
         # 显式传递环境变量，确保子进程环境一致性
-        env = os.environ.copy()
-        env['ULTRALYTICS_SKIP_DOWNLOAD'] = '1'
-        env['ULTRALYTICS_SKIP_AMP_CHECK'] = '1'
-        env['ULTRALYTICS_TENSORBOARD'] = '1'
+        env = _training_subprocess_env()
         
         # 如果是昇腾NPU设备，添加昇腾相关环境变量
         if device_type == 'ascend' or device_type == 'npu':
@@ -1029,41 +1274,11 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
         print(f"\n=== 训练进程已启动，PID: {training_process.pid} ===")
 
         # 启动一个线程来监控训练进程的状态
-        def monitor_training_process():
-            try:
-                # 等待训练进程结束
-                training_process.wait()
-                
-                # 训练完成后，更新任务状态
-                db_task_updated = training_task.get(db, id=task_id)
-                if db_task_updated:
-                    # 检查训练是否成功完成
-                    if training_process.returncode == 0:
-                        # 训练成功，更新状态为已完成
-                        training_task.update(db, db_obj=db_task_updated, obj_in={
-                            "status": "completed",
-                            "end_time": datetime.now()
-                        })
-                        print(f"\n=== 训练任务 {task_id} 已成功完成 ===")
-                    else:
-                        # 训练失败，更新状态为失败
-                        training_task.update(db, db_obj=db_task_updated, obj_in={
-                            "status": "failed",
-                            "end_time": datetime.now()
-                        })
-                        print(f"\n=== 训练任务 {task_id} 失败 ===")
-            except Exception as e:
-                print(f"\n=== 监控训练进程时出错: {e} ===")
-                # 更新任务状态为失败
-                db_task_updated = training_task.get(db, id=task_id)
-                if db_task_updated:
-                    training_task.update(db, db_obj=db_task_updated, obj_in={
-                        "status": "failed",
-                        "end_time": datetime.now()
-                    })
-
-        # 启动监控线程
-        monitor_thread = threading.Thread(target=monitor_training_process)
+        monitor_thread = threading.Thread(
+            target=monitor_training_process,
+            args=(training_process, task_id),
+            name=f"train-monitor-{task_id}",
+        )
         monitor_thread.daemon = True
         monitor_thread.start()
 
@@ -1129,7 +1344,7 @@ def stop_training(db: Session, task_id: str) -> TrainingTask:
     # 检查是否有最新的检查点文件
     last_checkpoint = None
     if db_task.parameters and "output_dir" in db_task.parameters:
-        output_dir = db_task.parameters["output_dir"]
+        output_dir = resolve_stored(db_task.parameters["output_dir"])
         if output_dir:
             # 检查可能的检查点路径
             possible_weights_dirs = [
@@ -1195,7 +1410,7 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
         )
 
     # 检查任务状态
-    if db_task.status not in ["completed", "failed", "cancelled"]:
+    if db_task.status not in ["completed", "failed", "cancelled", "interrupted"]:
         raise HTTPException(
             status_code=400,
             detail="只有中断、失败的任务才能继续训练",
@@ -1208,7 +1423,7 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
             detail="找不到输出目录",
         )
 
-    output_dir = db_task.parameters["output_dir"]
+    output_dir = resolve_stored(db_task.parameters["output_dir"])
     if not output_dir or not os.path.exists(output_dir):
         raise HTTPException(
             status_code=400,
@@ -1238,7 +1453,7 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
         dataset_yaml = Path(db_dataset.path) / "dataset.yaml"
     # 如果没有数据集ID，使用参数中的数据集路径
     elif "dataset_path" in db_task.parameters:
-        dataset_yaml = Path(db_task.parameters["dataset_path"])
+        dataset_yaml = Path(resolve_stored(db_task.parameters["dataset_path"]))
     else:
         raise HTTPException(
             status_code=400,
@@ -1259,7 +1474,7 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
     img_size = db_task.parameters.get("img_size", 640)
 
     # 使用原来的输出目录
-    output_dir = db_task.parameters.get("output_dir")
+    output_dir = resolve_stored(db_task.parameters.get("output_dir"))
     if not output_dir:
         output_dir = os.path.join(settings.STATIC_DIR, "models", f"training_{task_id}")
         os.makedirs(output_dir, exist_ok=True)
@@ -1376,8 +1591,9 @@ def resume_training(db: Session, task_id: str) -> TrainingTask:
 
     # 使用与start_training相同的日志文件路径
     log_file_path = os.path.join(tensorboard_dir, "training_log.txt")
-    # 使用gbk编码以追加模式打开日志文件，以确保中文显示正确
-    log_file = open(log_file_path, "a", encoding="gbk", errors="replace")
+    # 以追加模式续写同一个日志文件。编码必须与首次训练一致（UTF-8），
+    # 原先这里用 GBK，续训后的日志在页面上中英文混杂地乱码
+    log_file = open(log_file_path, "a", encoding="utf-8", errors="replace")
 
     print(f"\n=== 调用YOLO恢复训练... ===")
     
@@ -1436,7 +1652,8 @@ print(f"结果摘要: {{results}}")
             stdout=log_file,
             stderr=log_file,
             text=True,
-            cwd=os.getcwd()  # 使用当前工作目录
+            cwd=os.getcwd(),  # 使用当前工作目录
+            env=_training_subprocess_env()
         )
 
         # 等待一段时间，检查进程是否立即退出
@@ -1461,6 +1678,15 @@ print(f"结果摘要: {{results}}")
         })
 
         print(f"\n=== 继续训练进程已启动，PID: {training_process.pid} ===")
+
+        # 与首次训练一样启动监控线程；原先续训没有监控，结束后状态一直停在 training
+        monitor_thread = threading.Thread(
+            target=monitor_training_process,
+            args=(training_process, task_id),
+            name=f"train-monitor-{task_id}",
+        )
+        monitor_thread.daemon = True
+        monitor_thread.start()
 
         return db_task
     except Exception as e:
@@ -1566,7 +1792,7 @@ def get_training_logs(db: Session, task_id: str) -> Dict[str, Any]:
 
     # 如果有输出目录，添加到URL
     if db_task.parameters and "output_dir" in db_task.parameters:
-        output_dir = db_task.parameters["output_dir"]
+        output_dir = resolve_stored(db_task.parameters["output_dir"])
         if output_dir:
             # 从输出目录中提取任务ID
             task_id_part = os.path.basename(output_dir)
@@ -1592,9 +1818,12 @@ def get_training_logs(db: Session, task_id: str) -> Dict[str, Any]:
                 else:
                     print(f"警告: TensorBoard日志目录不存在: {exp_dir}")
 
-                # 使用简单的URL格式，不指定具体的run
-                # TensorBoard会自动显示找到的所有日志
-                tensorboard_url = f"{tensorboard_url}/"
+                # 用 run 过滤把 URL 定位到本次任务。
+                # 之前只返回根路径，TensorBoard 会把历史上所有训练的曲线一起画出来，
+                # 而 run 名是 training_{uuid}\exp 这种，肉眼分不出哪条是刚跑的，
+                # 看上去就像"打开还是上次的数据"。
+                # regexInput 是 TensorBoard 前端的 run 过滤正则（hash 参数，不发给服务端）。
+                tensorboard_url = f"{tensorboard_url}/#scalars&regexInput=training_{task_id}"
 
                 # 打印日志，帮助调试
                 print(f"生成的TensorBoard URL: {tensorboard_url}")

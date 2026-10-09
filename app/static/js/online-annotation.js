@@ -108,6 +108,7 @@ class OnlineAnnotation {
                                     <div class="btn-group">
                                         <a href="/static/annotation.html?project_id=${project.id}" target="_blank" class="btn btn-sm btn-primary">开始标注</a>
                                         <button class="btn btn-sm btn-info" onclick="onlineAnnotation.scanProjectImages('${project.id}')">扫描图片</button>
+                                        <button class="btn btn-sm btn-outline-info" title="从磁盘的 labels 目录补导入标注，不会覆盖已标好的内容" onclick="onlineAnnotation.importProjectAnnotations('${project.id}')">补导入标注</button>
                                         <button class="btn btn-sm btn-success" onclick="onlineAnnotation.exportAnnotations('${project.id}')">导出标注</button>
                                         <button class="btn btn-sm btn-warning" onclick="onlineAnnotation.exportToDataset('${project.id}')">导出为数据集</button>
                                         <button class="btn btn-sm btn-secondary" onclick="onlineAnnotation.showExpandDataModal('${project.id}', '${project.name}')">扩充数据</button>
@@ -134,6 +135,7 @@ class OnlineAnnotation {
                                     <div class="btn-group">
                                         <a href="/static/annotation.html?project_id=${project.id}" target="_blank" class="btn btn-sm btn-primary">开始标注</a>
                                         <button class="btn btn-sm btn-info" onclick="onlineAnnotation.scanProjectImages('${project.id}')">扫描图片</button>
+                                        <button class="btn btn-sm btn-outline-info" title="从磁盘的 labels 目录补导入标注，不会覆盖已标好的内容" onclick="onlineAnnotation.importProjectAnnotations('${project.id}')">补导入标注</button>
                                         <button class="btn btn-sm btn-success" onclick="onlineAnnotation.exportAnnotations('${project.id}')">导出</button>
                                         <button class="btn btn-sm btn-warning" onclick="onlineAnnotation.exportToDataset('${project.id}')">导出为数据集</button>
                                         <button class="btn btn-sm btn-secondary" onclick="onlineAnnotation.showExpandDataModal('${project.id}', '${project.name}')">扩充数据</button>
@@ -1202,6 +1204,52 @@ class OnlineAnnotation {
             });
     }
 
+    /**
+     * 为已存在的项目补导入磁盘上的标注。
+     * 建项目时没勾"导入原标注"的话，图片记录会是空的，但盘上的 labels/*.txt 一直都在。
+     * 默认不覆盖已标好的内容，所以对进行中的项目也是安全的。
+     */
+    importProjectAnnotations(projectId) {
+        if (!confirm('从磁盘的 labels 目录补导入标注？\n\n只会填补当前没有标注的图片，不会覆盖已经标好的内容。')) {
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('overwrite', 'false');
+
+        authenticatedFetch(`${API_URL}/annotation/projects/${projectId}/import-annotations`, {
+            method: 'POST',
+            body: formData
+        })
+            .then(response => response.json().then(data => {
+                if (!response.ok) throw new Error(data.detail || '导入失败');
+                return data;
+            }))
+            .then(data => {
+                let msg = `导入完成\n\n` +
+                    `图片总数：${data.total_images}\n` +
+                    `本次导入：${data.imported_images} 张，共 ${data.imported_annotations} 个标注框\n`;
+                if (data.skipped_has_annotations) {
+                    msg += `已有标注跳过：${data.skipped_has_annotations} 张\n`;
+                }
+                if (data.skipped_no_label_file) {
+                    msg += `找不到对应标签文件：${data.skipped_no_label_file} 张\n`;
+                }
+                if (data.skipped_empty_label) {
+                    msg += `标签文件为空：${data.skipped_empty_label} 张\n`;
+                }
+                if (data.labels_dir) {
+                    msg += `\n标签目录：${data.labels_dir}`;
+                }
+                if (data.errors && data.errors.length) {
+                    msg += `\n\n注意：\n- ${data.errors.slice(0, 5).join('\n- ')}`;
+                }
+                alert(msg);
+                this.loadAnnotationProjects();
+            })
+            .catch(error => alert('补导入标注失败: ' + error.message));
+    }
+
     // 扫描项目图片
     scanProjectImages(projectId) {
         if (!confirm('确定要扫描项目图片吗？这将重新扫描图片目录并更新图片列表。')) {
@@ -1435,18 +1483,18 @@ class OnlineAnnotation {
                 const isChecked = importOriginalAnnotationsCheckbox.checked;
                 const selectedImageSource = document.querySelector('input[name="image-source"]:checked').value;
                 
-                // 当选择服务器目录时，导入原标注功能不可用
+                // 服务器目录同样支持导入原标注：后端会去找同级的 labels/ 目录
+                // （标准 YOLO 布局 train/images + train/labels）。
+                // 以前这里强制禁用并取消勾选，导致从数据集目录建的项目
+                // 标注全是空的，但盘上的 labels/*.txt 其实一直都在。
                 if (selectedImageSource === 'directory') {
-                    importOriginalAnnotationsCheckbox.disabled = true;
-                    // 如果当前已勾选，则取消勾选
-                    if (isChecked) {
-                        importOriginalAnnotationsCheckbox.checked = false;
-                    }
-                    // 启用类别输入（因为导入原标注不可用）
+                    importOriginalAnnotationsCheckbox.disabled = false;
+                    // 目录模式下类别要自己填（后端靠类别表把 class_id 映射成类别名，
+                    // 类别不全的话超出范围的标注框会被丢弃）
                     annotationClassesTextarea.disabled = false;
                     annotationClassesTextarea.required = true;
                     defaultClassesDiv.classList.remove('disabled-area');
-                    originalClassesInfo.style.display = 'none';
+                    originalClassesInfo.style.display = isChecked ? 'block' : 'none';
                 } else {
                     // 其他情况：上传ZIP或关联数据集
                     importOriginalAnnotationsCheckbox.disabled = false;

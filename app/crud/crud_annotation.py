@@ -52,10 +52,28 @@ class CRUDAnnotationProject(CRUDBase[AnnotationProject, AnnotationProjectCreate,
         )
 
 class CRUDImageAnnotation(CRUDBase[ImageAnnotation, ImageAnnotationCreate, ImageAnnotationUpdate]):
-    def get_by_project_id(self, db: Session, *, project_id: UUID, skip: int = 0, limit: Optional[int] = None) -> List[ImageAnnotation]:
+    # 允许的排序方式。PostgreSQL 对没有 ORDER BY 的查询返回堆表物理顺序，
+    # 而租约(locked_by/locked_at)和保存标注都会 UPDATE 行、把行版本重写到堆尾，
+    # 于是"被人认领过的图片"会漂到列表末尾 —— 这就是图片列表乱序的根因。
+    # 每种排序都以 id 收尾做 tiebreaker，否则同名图片之间顺序依旧不稳定。
+    _ORDER_BY = {
+        "name": (ImageAnnotation.image_name, ImageAnnotation.id),
+        "created": (ImageAnnotation.created_at, ImageAnnotation.id),
+        "updated": (ImageAnnotation.updated_at.desc(), ImageAnnotation.id),
+    }
+
+    def get_by_project_id(
+        self,
+        db: Session,
+        *,
+        project_id: UUID,
+        skip: int = 0,
+        limit: Optional[int] = None,
+        order_by: str = "name",
+    ) -> List[ImageAnnotation]:
         query = db.query(ImageAnnotation).filter(
             ImageAnnotation.project_id == project_id
-        ).offset(skip)
+        ).order_by(*self._ORDER_BY.get(order_by, self._ORDER_BY["name"])).offset(skip)
         if limit is not None:
             query = query.limit(limit)
         return query.all()

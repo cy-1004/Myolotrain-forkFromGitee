@@ -1,300 +1,160 @@
-# Docker部署指南
+# Docker 部署指南
 
-本文档提供使用Docker部署YOLOv8训练平台的详细步骤。
+部署形态：`app`（平台）+ `db`（PostgreSQL）两个容器，**对外只开放一个端口**，API 与控制台共用。
+数据库不对外暴露；所有运行数据（数据集、模型、抽帧结果、训练日志）都在 `appdata` 数据卷里，镜像只包含代码。
 
-## 系统要求
+## 1. 系统要求
 
-- Docker 19.03+
-- Docker Compose 1.27+
-- 如果需要GPU支持，需要安装NVIDIA Container Toolkit
+| 项目 | 要求 |
+|---|---|
+| 系统 | Linux x86_64（推荐 Ubuntu 22.04+）；Windows 10/11 + Docker Desktop（WSL2 后端）可用于测试 |
+| Docker | Docker Engine 24+，自带 `docker compose`（v2） |
+| GPU（可选） | NVIDIA 驱动 ≥ 535（推荐 ≥ 560）+ nvidia-container-toolkit。没有 GPU 也能运行，训练会用 CPU |
+| 磁盘 | 镜像约 10 GB；数据卷按数据量预留，建议 ≥ 100 GB |
+| 内存 | ≥ 16 GB（训练时 DataLoader 还会用到共享内存，compose 中已设 `shm_size: 8gb`） |
 
-## 部署步骤
-
-### 1. 安装Docker和Docker Compose
-
-#### Ubuntu/Debian
-
-```bash
-# 安装Docker
-sudo apt update
-sudo apt install -y apt-transport-https ca-certificates curl software-properties-common
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo apt-key add -
-sudo add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-sudo apt update
-sudo apt install -y docker-ce docker-ce-cli containerd.io
-
-# 安装Docker Compose
-sudo curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-
-# 将当前用户添加到docker组（可选，避免使用sudo）
-sudo usermod -aG docker $USER
-newgrp docker
-```
-
-#### Windows/macOS
-
-下载并安装Docker Desktop：
-- Windows: https://docs.docker.com/desktop/install/windows-install/
-- macOS: https://docs.docker.com/desktop/install/mac-install/
-
-### 2. 克隆代码仓库
+## 2. 安装 NVIDIA Container Toolkit（使用 GPU 时）
 
 ```bash
-git clone https://gitee.com/rock_kim/Myolotrain/
-cd Myolotrain
-```
-
-### 3. 配置环境变量（可选）
-
-如果需要自定义配置，可以创建`.env`文件：
-
-```bash
-# 创建.env文件
-cat > .env << EOF
-POSTGRES_USER=postgres
-POSTGRES_PASSWORD=postgres
-POSTGRES_DB=yolov8_platform
-POSTGRES_SERVER=db
-EOF
-```
-
-### 4. 使用CPU版本部署
-
-```bash
-# 构建并启动容器
-docker-compose up -d
-
-# 查看容器状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f
-```
-
-### 5. 使用GPU版本部署
-
-#### 安装NVIDIA Container Toolkit
-
-```bash
-# 添加NVIDIA软件包仓库
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
-
-# 安装NVIDIA Container Toolkit
-sudo apt update
-sudo apt install -y nvidia-container-toolkit
-
-# 重启Docker服务
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey \
+  | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list \
+  | sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' \
+  | sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
 sudo systemctl restart docker
+
+# 验证：能看到 GPU 列表即可
+docker run --rm --gpus all nvidia/cuda:12.6.0-base-ubuntu22.04 nvidia-smi
 ```
 
-#### 部署GPU版本
+Windows + Docker Desktop 只需在 Windows 侧装好 NVIDIA 驱动，无需额外安装。
+
+## 3. 配置
 
 ```bash
-# 构建并启动GPU版本容器
-docker-compose -f docker-compose-gpu.yml up -d
-
-# 查看容器状态
-docker-compose -f docker-compose-gpu.yml ps
-
-# 查看日志
-docker-compose -f docker-compose-gpu.yml logs -f
+cp .env.example .env
 ```
 
-### 6. 初始化数据库
+至少填写：
+
+| 配置项 | 说明 |
+|---|---|
+| `SECRET_KEY` | 登录令牌签名密钥，≥ 32 位，未配置时容器拒绝启动。生成：`python3 -c "import secrets;print(secrets.token_urlsafe(48))"` |
+| `POSTGRES_PASSWORD` | 数据库密码（只在 compose 内部网络使用） |
+| `ADMIN_INITIAL_PASSWORD` | 可选。首次启动创建 `admin` 账号的密码；留空则随机生成，**只在首次启动日志里打印一次** |
+| `APP_PORT` | 首选对外端口，默认 8000。被占用时自动顺延，见第 4 节 |
+
+其余配置项的含义见 `.env.example` 中的注释。
+
+## 4. 构建与启动
 
 ```bash
-# 进入容器
-docker-compose exec web bash
-
-# 初始化数据库
-python init_db.py
-
-# 退出容器
-exit
+docker compose build
+scripts/start.sh            # Windows：powershell -ExecutionPolicy Bypass -File scripts\start.ps1
 ```
 
-## 访问应用
+启动脚本做的事：
 
-应用将在以下URL可用：
+1. **自动判断 GPU**：检测到 NVIDIA 驱动和 Docker 的 NVIDIA 运行时就叠加 `docker-compose.gpu.yml`；可用 `USE_GPU=true/false` 强制指定。
+2. **端口被占用时自动顺延**：首选 `APP_PORT`（默认 8000），被其他程序占用就试 8001、8002……，最多 `APP_PORT_MAX_TRIES` 个（默认 20）。
+   - 实际端口记录在 `.app_port`。下次启动只要 `APP_PORT` 没改，就优先沿用上次的端口，保证接口调用方的地址不变；
+   - 本服务自己的容器占着的端口不算冲突，重复执行脚本不会换端口；
+   - 不希望顺延时设 `APP_PORT_STRICT=true`，冲突直接报错退出（防火墙/网关已固定端口的环境）；
+   - 端口与首选/上次不同时会醒目提示——调用方和 `PUBLIC_BASE_URL` 需要同步使用新端口。
+3. 打印访问地址，并等待服务就绪（`/api/health`）；首次启动要初始化数据库，可能需要一两分钟。
 
-- Web界面: http://localhost:8000
-- TensorBoard: http://localhost:6006
+输出示例：
 
-## 数据持久化
+```
+端口 8000 已被占用
+使用端口 8001 启动...
+============================================================
+注意：端口 8000 被占用，本次使用端口 8001
+      接口调用方和 PUBLIC_BASE_URL 需要使用新端口
+控制台:   http://10.0.0.5:8001/
+健康检查: http://10.0.0.5:8001/api/health
+实际端口已记录到 .app_port
+============================================================
+等待服务就绪...... 已就绪
+```
 
-Docker Compose配置中已经设置了数据持久化：
-
-- PostgreSQL数据存储在名为`postgres_data`的Docker卷中
-- 应用的静态文件（上传、数据集、模型、结果）挂载到主机的`app/static`目录
-- 日志文件挂载到主机的`logs`目录
-
-## 更新应用
+不用脚本、手动启动也可以（不会自动顺延端口）：
 
 ```bash
-# 拉取最新代码
+APP_PORT=8000 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+## 5. 验证
+
+```bash
+docker compose ps                                     # 两个容器都是 healthy
+curl -s http://127.0.0.1:<端口>/api/ready              # 数据库、数据目录、GPU 状态
+docker compose exec app python -c "import torch;print(torch.cuda.is_available())"
+docker compose exec app python tools/smoke_export.py  # TFLite 转换链路冒烟测试，输出 [PASS]
+```
+
+首次登录用 `admin` 和第 3 节的初始密码（或首次启动日志里打印的随机密码：`docker compose logs app | grep 初始密码`），登录后立即修改。
+
+## 6. 对外部署模式（镜像默认开启）
+
+镜像默认 `EXTERNAL_MODE=true`，与本地开发相比有这些差异：
+
+- 所有控制台接口和 `/static` 下的数据文件都要求登录；
+- 禁用浏览服务器文件系统、按服务器路径导入数据、打开日志文件夹等功能（数据一律通过上传进入平台）；
+- 500 错误不再回显异常原文，响应里带 `request_id`，凭它在日志中定位：`docker compose logs app | grep <request_id>`；
+- 不提供控制台内部接口的 `/docs`；
+- 不启动 TensorBoard（它要单独占一个端口），训练曲线在“训练日志”弹窗里查看。
+
+## 7. 数据与运维
+
+**数据位置**：`appdata` 卷挂载到容器的 `/data`，旧代码写死的 `app/static/<数据目录>`、`logs/` 在容器里都是指向它的软链；数据库在 `pgdata` 卷。
+
+**查看日志**：`docker compose logs -f app`
+
+**升级**：
+
+```bash
 git pull
-
-# 重新构建并启动容器
-docker-compose down
-docker-compose up -d --build
-
-# 如果使用GPU版本
-docker-compose -f docker-compose-gpu.yml down
-docker-compose -f docker-compose-gpu.yml up -d --build
+docker compose build
+scripts/start.sh
 ```
 
-## 常见问题
-
-### 1. 数据库连接错误
-
-检查Docker Compose配置中的数据库连接信息是否正确，特别是用户名、密码和主机名。
+**备份**：
 
 ```bash
-# 检查数据库容器是否正常运行
-docker-compose ps db
-
-# 检查数据库日志
-docker-compose logs db
+docker compose exec db pg_dump -U postgres yolov8_platform > backup.sql
+docker run --rm -v myolotrain_appdata:/data -v "$PWD":/backup alpine tar czf /backup/appdata.tgz -C /data .
 ```
 
-### 2. GPU不可用
+**从已有的本地（Windows）环境迁移数据**：
 
-如果使用GPU版本但无法使用GPU，请检查NVIDIA Container Toolkit是否正确安装：
+1. 导出旧数据库：`pg_dump -U postgres yolov8_platform > old.sql`，导入到容器：
+   `docker compose exec -T db psql -U postgres yolov8_platform < old.sql`
+2. 把旧项目的 `app/static/` 下的数据目录拷进数据卷的 `static/` 下，例如：
+   `docker run --rm -v myolotrain_appdata:/data -v /path/to/old/app/static:/src alpine sh -c "cp -a /src/datasets /src/models /src/annotations /data/static/"`
+3. 旧数据库里存的是旧机器上的绝对路径（如 `C:\workspace\Myolotrain\app\static\...`）。在 `.env` 中配置旧项目根目录，读取时会自动映射到容器内的路径：
+   `LEGACY_PATH_PREFIXES=["C:\\workspace\\Myolotrain"]`
+4. 重启：`scripts/start.sh`
 
-```bash
-# 检查NVIDIA驱动是否正常
-nvidia-smi
+## 8. 反向代理（可选）
 
-# 检查Docker中的GPU是否可用
-docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu20.04 nvidia-smi
-```
+前面加 nginx 等反向代理时：
 
-### 3. 容器内存不足
+- 代理到 `http://<宿主机>:<.app_port 中的端口>`，或把代理也放进 compose 网络直接代理 `app:8000`；
+- 设置 `FORWARDED_ALLOW_IPS=<代理的 IP>`，平台才会信任代理传来的 `X-Forwarded-*`；
+- 设置 `PUBLIC_BASE_URL=https://你的域名`，webhook 等需要绝对链接的地方会用它；
+- 上传大视频时调大代理的请求体限制（nginx：`client_max_body_size 4g;`）和超时。
 
-如果容器内存不足，可以在Docker Compose配置中增加内存限制：
+## 9. 常见问题
 
-```yaml
-services:
-  web:
-    # ... 其他配置 ...
-    deploy:
-      resources:
-        limits:
-          memory: 8G
-```
-
-### 4. 端口冲突
-
-如果端口8000或6006已被占用，可以修改Docker Compose配置中的端口映射：
-
-```yaml
-services:
-  web:
-    # ... 其他配置 ...
-    ports:
-      - "8080:8000"  # 将主机的8080端口映射到容器的8000端口
-      - "6007:6006"  # 将主机的6007端口映射到容器的6006端口
-```
-
-## 生产环境部署
-
-对于生产环境，建议添加Nginx反向代理和HTTPS支持：
-
-### 1. 创建Nginx配置
-
-```bash
-# 创建Nginx配置文件
-cat > nginx.conf << EOF
-server {
-    listen 80;
-    server_name your_domain.com;
-
-    location / {
-        proxy_pass http://web:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
-
-    location /tensorboard/ {
-        proxy_pass http://web:6006/;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-EOF
-```
-
-### 2. 添加Nginx服务到Docker Compose
-
-```yaml
-services:
-  # ... 其他服务 ...
-  
-  nginx:
-    image: nginx:latest
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - web
-    restart: always
-```
-
-### 3. 添加HTTPS支持（使用Certbot）
-
-```bash
-# 安装Certbot
-sudo apt install -y certbot
-
-# 获取SSL证书
-sudo certbot certonly --standalone -d your_domain.com
-
-# 复制证书到项目目录
-sudo mkdir -p ssl
-sudo cp /etc/letsencrypt/live/your_domain.com/fullchain.pem ssl/
-sudo cp /etc/letsencrypt/live/your_domain.com/privkey.pem ssl/
-
-# 更新Nginx配置
-cat > nginx.conf << EOF
-server {
-    listen 80;
-    server_name your_domain.com;
-    return 301 https://\$host\$request_uri;
-}
-
-server {
-    listen 443 ssl;
-    server_name your_domain.com;
-
-    ssl_certificate /etc/nginx/ssl/fullchain.pem;
-    ssl_certificate_key /etc/nginx/ssl/privkey.pem;
-
-    location / {
-        proxy_pass http://web:8000;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-    }
-
-    location /tensorboard/ {
-        proxy_pass http://web:6006/;
-        proxy_set_header Host \$host;
-        proxy_set_header X-Real-IP \$remote_addr;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
-EOF
-
-# 重启Nginx容器
-docker-compose restart nginx
-```
+| 现象 | 处理 |
+|---|---|
+| 容器启动后立即退出，日志提示 SECRET_KEY | `.env` 中设置 ≥ 32 位的 `SECRET_KEY` |
+| `could not select device driver "nvidia"` | 未安装 nvidia-container-toolkit；安装后重启 Docker，或 `USE_GPU=false` 用 CPU 运行 |
+| 训练时报 `bus error` / DataLoader 崩溃 | 共享内存不足，调大 compose 中的 `shm_size` |
+| 端口全部被占用 | 释放端口，或调大 `APP_PORT_MAX_TRIES`，或修改 `APP_PORT` |
+| 页面能打开但图片/模型 401 | 登录已过期，重新登录 |
+| 迁移后旧数据集/模型找不到文件 | 检查第 7 节的数据拷贝位置和 `LEGACY_PATH_PREFIXES` |
+| 容器重启后训练任务显示“已中断” | 训练进程随容器一起被终止，在训练列表点“继续训练”从 last.pt 续训 |

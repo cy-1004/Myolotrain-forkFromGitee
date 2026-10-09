@@ -1,0 +1,11 @@
+# GPU 覆盖文件：与 docker-compose.yml 叠加使用，为 app 容器申请 NVIDIA GPU。
+# 需要宿主机安装 NVIDIA 驱动和 nvidia-container-toolkit；scripts/start.* 检测到 GPU 时会自动带上本文件。
+services:
+  app:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

@@ -4,3 +4,4 @@ from app.models.training_task import TrainingTask
 from app.models.detection_task import DetectionTask
 from app.models.annotation import AnnotationProject, ImageAnnotation
 from app.models.user import User
+from app.models.mosaic import MosaicCandidate

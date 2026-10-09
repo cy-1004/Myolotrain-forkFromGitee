@@ -1,15 +1,53 @@
 """
 进程监控服务 - 用于监控和更新训练进程状态
+
+训练任务正常情况下由启动它的监控线程收尾（training_service.monitor_training_process）。
+这里兜底处理"没有监控线程在等它"的任务，典型场景是服务重启：
+  - 服务启动时巡检一次：上次运行留下的训练中任务，进程已不在的按产物和日志收尾；
+  - 之后每 30 秒巡检一次，处理本进程之外启动的、或监控线程意外退出的任务。
 """
-import os
-import time
-import subprocess
-import threading
 import datetime
-from sqlalchemy.orm import Session
-from app.db.session import SessionLocal
-from app.crud import training_task
+import os
+import threading
+import time
+
+import psutil
+
 from app.core.config import settings
+from app.crud import training_task
+from app.db.session import SessionLocal
+
+# 需要巡检的任务状态。pending 是建好但还没点开始的任务，没有进程，不属于巡检范围
+ACTIVE_STATUSES = ["running", "training", "downloading_model"]
+
+CHECK_INTERVAL_SECONDS = 30
+
+
+def _parse_pid(process_id):
+    try:
+        return int(process_id) if process_id else None
+    except (TypeError, ValueError):
+        return None
+
+
+def is_training_process_alive(pid: int, task_id) -> bool:
+    """训练进程是否还在运行
+
+    不能只看 PID 是否存在：服务重启（尤其容器重启）后 PID 会被系统复用，
+    同一个 PID 可能已经是别的进程。训练进程的命令行里一定包含任务 ID
+    （训练脚本路径 logs/tensorboard/<任务ID>/train_script.py，续训代码里的输出目录 training_<任务ID>），
+    以此确认它就是这个任务的进程。
+    """
+    try:
+        proc = psutil.Process(pid)
+        if proc.status() == psutil.STATUS_ZOMBIE:
+            return False
+        cmdline = " ".join(proc.cmdline())
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        # AccessDenied：读不了命令行，说明是别的用户的进程，不可能是我们启动的训练进程
+        return False
+    return str(task_id) in cmdline
+
 
 class ProcessMonitor:
     """进程监控器，用于监控训练进程状态并更新数据库"""
@@ -19,12 +57,17 @@ class ProcessMonitor:
         self.monitor_thread = None
 
     def start(self):
-        """启动监控线程"""
+        """启动监控：先同步巡检一次（处理服务重启前遗留的任务），再启动定期巡检线程"""
         if self.running:
             return
 
+        try:
+            self.sweep(startup=True)
+        except Exception as e:
+            print(f"启动巡检训练任务出错: {e}")
+
         self.running = True
-        self.monitor_thread = threading.Thread(target=self._monitor_loop)
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, name="process-monitor")
         self.monitor_thread.daemon = True
         self.monitor_thread.start()
         print("进程监控服务已启动")
@@ -41,73 +84,65 @@ class ProcessMonitor:
         """监控循环，定期检查所有训练进程状态"""
         while self.running:
             try:
-                # 创建数据库会话
-                db = SessionLocal()
-
-                # 获取所有正在运行的训练任务
-                running_tasks = training_task.get_multi_by_status(
-                    db,
-                    status=["running", "training", "downloading_model", "pending"]
-                )
-
-                # 检查每个任务的进程状态
-                for task in running_tasks:
-                    # 正确访问数据库模型的属性
-                    process_id = getattr(task, 'process_id', None)
-                    if process_id:
-                        try:
-                            pid = int(process_id)
-                            is_running = self._is_process_running(pid)
-
-                            # 如果进程不再运行，分析日志判断状态
-                            if not is_running:
-                                # 分析训练日志内容
-                                status = self._analyze_training_log(task.id)
-
-                                if status == "completed":
-                                    # 日志中发现成功标记，训练成功
-                                    print(f"训练任务 {task.id} 处理完成")
-                                elif status == "failed":
-                                    # 日志中发现失败标记，训练失败
-                                    training_task.update(db, db_obj=task, obj_in={
-                                        "status": "failed",
-                                        "end_time": datetime.datetime.now()
-                                    })
-                                    print(f"训练任务 {task.id} 失败")
-                                else:
-                                    # 日志中没有明确标记，保持原状态
-                                    print(f"训练任务 {task.id} 状态未知，保持原状态")
-                        except Exception as e:
-                            print(f"检查任务 {task.id} 状态时出错: {e}")
-
-                # 关闭数据库会话
-                db.close()
-
+                self.sweep(startup=False)
             except Exception as e:
                 print(f"进程监控循环出错: {e}")
 
-            # 每30秒检查一次
-            time.sleep(30)
+            # 分段睡眠，stop() 时能及时退出
+            for _ in range(CHECK_INTERVAL_SECONDS):
+                if not self.running:
+                    break
+                time.sleep(1)
 
-    def _is_process_running(self, pid):
-        """检查进程是否在运行"""
+    def sweep(self, startup: bool = False):
+        """巡检一遍处于运行态的训练任务，给进程已经不在的任务收尾"""
+        from app.services import training_service
+
+        db = SessionLocal()
         try:
-            if os.name == 'nt':  # Windows
-                # 使用tasklist命令检查进程
-                output = subprocess.check_output(f'tasklist /FI "PID eq {pid}"', shell=True).decode()
-                return str(pid) in output
-            else:  # Unix/Linux
-                # 使用ps命令检查进程
-                try:
-                    os.kill(pid, 0)
-                    return True
-                except OSError:
-                    return False
-        except:
-            return False
+            tasks = training_task.get_multi_by_status(db, status=ACTIVE_STATUSES)
+            for task in tasks:
+                if training_service.is_task_watched(task.id):
+                    continue  # 本进程的监控线程正在等它，交给监控线程收尾
+                pid = _parse_pid(task.process_id)
+                if pid is None:
+                    # 没有 PID：还在下载基础模型等同步阶段，或者没来得及启动训练进程服务就退出了。
+                    # 只在服务启动时处理——此刻本进程里不可能有进行中的同步阶段
+                    if startup:
+                        self._finalize(db, task)
+                    continue
+                if is_training_process_alive(pid, task.id):
+                    continue
+                self._finalize(db, task)
+        finally:
+            db.close()
+
+    def _finalize(self, db, task):
+        """训练进程已经不在、又没有监控线程知道它的返回码：根据日志和产物判断结果"""
+        from app.services import training_service
+
+        log_status = self._analyze_training_log(task.id)
+        best_pt = training_service.get_training_output_dir(task) / "exp" / "weights" / "best.pt"
+        now = datetime.datetime.now()
+
+        if log_status == "completed" and best_pt.exists():
+            training_task.update(db, db_obj=task, obj_in={"status": "completed", "end_time": now})
+            print(f"训练任务 {task.id} 已完成（巡检收尾）")
+            try:
+                training_service.register_trained_model(db, task, "best")
+            except Exception as e:
+                print(f"训练任务 {task.id} 登记最佳模型失败: {e}")
+        elif log_status == "failed":
+            training_task.update(db, db_obj=task, obj_in={"status": "failed", "end_time": now})
+            print(f"训练任务 {task.id} 失败（日志中有错误）")
+        else:
+            # 日志里既没有完成标记也没有报错：进程是被外力终止的（服务/容器重启、被系统杀掉）。
+            # 标记为"已中断"而不是失败，用户可以从 last.pt 继续训练
+            training_task.update(db, db_obj=task, obj_in={"status": "interrupted", "end_time": now})
+            print(f"训练任务 {task.id} 已中断（进程已不在，可继续训练）")
 
     def _analyze_training_log(self, task_id):
-        """分析训练日志，判断训练是否成功或失败
+        """分析训练日志，判断训练是否成功或失败（只读，不修改任务状态）
 
         参数:
             task_id: 训练任务ID
@@ -118,7 +153,7 @@ class ProcessMonitor:
         base_log_dir = os.path.join(settings.TENSORBOARD_LOGS_DIR, str(task_id))
         resume_log_path = os.path.join(base_log_dir, "resume_training_log.txt")
         log_path = resume_log_path if os.path.exists(resume_log_path) else os.path.join(base_log_dir, "training_log.txt")
-        
+
         if not os.path.exists(log_path):
             print(f"训练日志文件不存在: {log_path}")
             return "unknown"
@@ -137,25 +172,10 @@ class ProcessMonitor:
                 "Results saved to",
                 "results saved to",
                 "results_dict"
-
             ]
             for marker in success_markers:
                 if marker in log_content:
                     print(f"训练日志中发现成功标记: {marker}")
-                    # 更新任务状态为已完成
-                    from app.db.session import SessionLocal
-                    from app.crud import training_task
-                    db = SessionLocal()
-                    try:
-                        task = training_task.get(db, id=task_id)
-                        if task and task.status in ["running", "training", "downloading_model", "pending"]:
-                            training_task.update(db, db_obj=task, obj_in={
-                                "status": "completed",
-                                "end_time": datetime.datetime.now()
-                            })
-                            print(f"训练任务 {task_id} 状态已更新为已完成")
-                    finally:
-                        db.close()
                     return "completed"
 
             # 检查失败标记

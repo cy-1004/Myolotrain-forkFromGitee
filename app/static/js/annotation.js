@@ -104,11 +104,14 @@ class AnnotationTool {
         this.messageQueue = [];
         this.isShowingMessage = false;
         
-        // 筛选相关属性
-        this.showCompleted = false;
-        this.showUncompleted = false;
-        this.showAnnotated = false;
-        this.showUnannotated = false;
+        // 筛选相关属性：两个独立维度，组内单选、组间取交集
+        this.completedFilter = 'all';   // all | completed | uncompleted
+        this.annotatedFilter = 'all';   // all | annotated | unannotated
+        this.searchTerm = '';           // 搜索词并入同一条过滤链，不再直接操作 DOM
+        this.sortMode = 'name';         // name | created | updated
+        // 文件名自然排序：让 frame_2 排在 frame_10 前面，中文文件名也能正确比较
+        this.nameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+        this.imageListScrollBound = false;
         
         // 节流函数
         this.throttle = function(func, limit) {
@@ -352,21 +355,25 @@ class AnnotationTool {
             toggleGuidelinesBtn.addEventListener('click', this.toggleGuidelines.bind(this));
         }
         
-        const filterCompletedBtn = document.getElementById('filter-completed');
-        const filterUncompletedBtn = document.getElementById('filter-uncompleted');
-        const filterAnnotatedBtn = document.getElementById('filter-annotated');
-        const filterUnannotatedBtn = document.getElementById('filter-unannotated');
-        if (filterCompletedBtn) {
-            filterCompletedBtn.addEventListener('click', this.toggleCompletedFilter.bind(this));
-        }
-        if (filterUncompletedBtn) {
-            filterUncompletedBtn.addEventListener('click', this.toggleUncompletedFilter.bind(this));
-        }
-        if (filterAnnotatedBtn) {
-            filterAnnotatedBtn.addEventListener('click', this.toggleAnnotatedFilter.bind(this));
-        }
-        if (filterUnannotatedBtn) {
-            filterUnannotatedBtn.addEventListener('click', this.toggleUnannotatedFilter.bind(this));
+        // 筛选按钮：组内单选，再点已激活的按钮则回到"全部"
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const group = btn.dataset.filterGroup;
+                const value = btn.dataset.filterValue;
+                const prop = group === 'completed' ? 'completedFilter' : 'annotatedFilter';
+                this[prop] = (this[prop] === value) ? 'all' : value;
+                this.updateFilterButtons();
+                this.updateImageList();
+            });
+        });
+
+        const sortSelect = document.getElementById('image-sort');
+        if (sortSelect) {
+            sortSelect.addEventListener('change', (e) => {
+                this.sortMode = e.target.value;
+                // "扫描顺序"靠服务端的 ORDER BY 决定，本地排不出来，所以要重新拉一次
+                this.reloadImageOrder();
+            });
         }
         
         const guidelineColorPicker = document.getElementById('guideline-color');
@@ -1454,65 +1461,122 @@ class AnnotationTool {
     
     async loadImages() {
         try {
-            const response = await annotationFetch(`/api/annotation/projects/${this.projectId}/images?limit=10000`);
+            const response = await annotationFetch(
+                `/api/annotation/projects/${this.projectId}/images?limit=10000&order_by=${this.sortMode}`
+            );
             this.imageList = await response.json();
-            
+
             console.log('加载图片列表:', this.imageList);
-            
+
+            this.sortImageList();
+            this.updateFilterButtons();
             this.updateImageList();
-            
+
             if (this.imageList.length > 0) {
                 await this.loadImage(0);
             }
-            
+
         } catch (error) {
             console.error('加载图片列表失败:', error);
         }
     }
-    
+
+    /**
+     * 切换排序方式时重新拉一次列表。
+     * 不复用 loadImages()：那个会跳回第一张，而这里应该停在当前这张图上。
+     */
+    async reloadImageOrder() {
+        try {
+            const response = await annotationFetch(
+                `/api/annotation/projects/${this.projectId}/images?limit=10000&order_by=${this.sortMode}`
+            );
+            const fresh = await response.json();
+
+            // 复用原有对象（用服务端数据覆盖其字段）而不是整个换掉：
+            // currentImageData 持有的是数组里那个对象的引用，换掉就断了
+            const localById = new Map(this.imageList.map(img => [img.id, img]));
+            this.imageList = fresh.map(img => {
+                const local = localById.get(img.id);
+                return local ? Object.assign(local, img) : img;
+            });
+
+            this.sortImageList();
+            this.updateImageList();
+        } catch (error) {
+            console.error('切换排序失败:', error);
+            this.showMessage('切换排序失败', 'error');
+        }
+    }
+
+    /**
+     * 按当前排序方式重排 imageList。
+     * 后端已按同样的字段排过序，这里主要是为"文件名"补上自然排序
+     * （数据库的 ORDER BY 是字典序，会把 frame_10 排到 frame_2 前面）。
+     * 重排会打乱下标，所以要按 id 把 currentImageIndex 重新定位回去。
+     */
+    sortImageList() {
+        const currentId = this.currentImageData ? this.currentImageData.id : null;
+
+        if (this.sortMode === 'name') {
+            this.imageList.sort((a, b) => this.nameCollator.compare(a.image_name, b.image_name));
+        } else if (this.sortMode === 'updated') {
+            this.imageList.sort((a, b) => String(b.updated_at || '').localeCompare(String(a.updated_at || '')));
+        }
+        // created：后端已按 created_at 返回，保持服务端顺序
+
+        if (currentId) {
+            const idx = this.imageList.findIndex(img => img.id === currentId);
+            if (idx !== -1) this.currentImageIndex = idx;
+        }
+    }
+
+    /** 同步两组筛选按钮的选中态 */
+    updateFilterButtons() {
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            const group = btn.dataset.filterGroup;
+            const value = btn.dataset.filterValue;
+            const active = (group === 'completed' ? this.completedFilter : this.annotatedFilter) === value;
+            const solid = group === 'completed' ? 'btn-success' : 'btn-info';
+            const outline = group === 'completed' ? 'btn-outline-success' : 'btn-outline-info';
+            btn.classList.toggle(solid, active);
+            btn.classList.toggle(outline, !active);
+        });
+    }
+
     updateImageList() {
         const imageListContainer = document.getElementById('image-list');
         imageListContainer.innerHTML = '';
         
         // 应用筛选条件
-        const filteredImages = this.imageList.filter(imageData => {
-            // 检查是否有标注
-            const hasAnnotations = imageData.annotations && imageData.annotations.length > 0;
-            
-            // 如果没有启用任何筛选，则显示所有图片
-            if (!this.showCompleted && !this.showUncompleted && !this.showAnnotated && !this.showUnannotated) {
-                return true;
-            }
-            
-            // 如果启用了已完成筛选，则显示已完成的图片
-            if (this.showCompleted && imageData.is_completed) {
-                return true;
-            }
-            
-            // 如果启用了未完成筛选，则显示未完成的图片
-            if (this.showUncompleted && !imageData.is_completed) {
-                return true;
-            }
-            
-            // 如果启用了已标注筛选，则显示有标注的图片
-            if (this.showAnnotated && hasAnnotations) {
-                return true;
-            }
-            
-            // 如果启用了未标注筛选，则显示无标注的图片
-            if (this.showUnannotated && !hasAnnotations) {
-                return true;
-            }
-            
-            // 其他情况不显示
-            return false;
+        // 两个维度取交集（AND），再叠加搜索词。
+        // 旧实现是 OR 并集，导致"未完成 + 未标注"几乎等于全部、
+        // "已完成 + 已标注"反而让列表变长，看上去就是"筛选时灵时不灵"。
+        const keyword = this.searchTerm;
+        const filteredImages = [];
+        const filteredIndices = [];
+
+        this.imageList.forEach((imageData, originalIndex) => {
+            const hasAnnotations = !!(imageData.annotations && imageData.annotations.length > 0);
+
+            if (this.completedFilter === 'completed' && !imageData.is_completed) return;
+            if (this.completedFilter === 'uncompleted' && imageData.is_completed) return;
+            if (this.annotatedFilter === 'annotated' && !hasAnnotations) return;
+            if (this.annotatedFilter === 'unannotated' && hasAnnotations) return;
+            if (keyword && !imageData.image_name.toLowerCase().includes(keyword)) return;
+
+            filteredImages.push(imageData);
+            filteredIndices.push(originalIndex);
         });
-        
+
         // 保存筛选后的图片列表和对应的原始索引
+        // （原来用 findIndex 逐个反查是 O(n²)，一万张图每次切筛选要跑一亿次比较）
         this.filteredImageList = filteredImages;
-        this.filteredImageIndices = filteredImages.map(filteredImg => 
-            this.imageList.findIndex(img => img.id === filteredImg.id)
-        );
+        this.filteredImageIndices = filteredIndices;
+
+        const shownEl = document.getElementById('image-list-shown');
+        const totalEl = document.getElementById('image-list-total');
+        if (shownEl) shownEl.textContent = filteredImages.length;
+        if (totalEl) totalEl.textContent = this.imageList.length;
         
         // 设置容器样式，启用滚动
         imageListContainer.style.overflowY = 'auto';
@@ -1557,10 +1621,14 @@ class AnnotationTool {
             // 渲染可见区域内的项目
             for (let i = startIndex; i < endIndex; i++) {
                 const imageData = filteredImages[i];
+                const originalIndex = this.filteredImageIndices[i];
                 const imageItem = document.createElement('div');
-                imageItem.className = `annotation-item ${this.filteredImageIndices[i] === this.currentImageIndex ? 'selected' : ''}`;
+                imageItem.className = `annotation-item ${originalIndex === this.currentImageIndex ? 'selected' : ''}`;
                 imageItem.style.height = `${itemHeight}px`;
                 imageItem.style.boxSizing = 'border-box';
+                // DOM 里只有可视窗口的十几项，下标 != 数据下标，
+                // 所以把原始下标写在元素上，选中高亮等逻辑一律按它取值
+                imageItem.dataset.originalIndex = originalIndex;
                 imageItem.innerHTML = `
                     <div class="d-flex justify-content-between align-items-center h-100">
                         <span class="text-truncate">${imageData.image_name}</span>
@@ -1570,21 +1638,28 @@ class AnnotationTool {
                         </div>
                     </div>
                 `;
-                imageItem.addEventListener('click', () => this.loadImage(this.filteredImageIndices[i]));
+                imageItem.addEventListener('click', () => this.loadImage(originalIndex));
                 visibleContainer.appendChild(imageItem);
             }
         };
-        
-        // 初始渲染
-        renderVisibleItems();
-        
-        // 监听滚动事件，动态渲染可见项目
-        imageListContainer.addEventListener('scroll', renderVisibleItems);
-        
+
         // 保存渲染函数，以便在需要时重新渲染
         this.renderVisibleItems = renderVisibleItems;
-        
-        document.getElementById('total-images').textContent = this.imageList.length;
+
+        // 初始渲染
+        renderVisibleItems();
+
+        // 滚动监听只绑一次。原来每次 updateImageList() 都新绑一个闭包且从不解绑，
+        // 标注一小时后会挂着上百个监听器，各自持有已被摘除的 DOM 和过期的列表快照。
+        if (!this.imageListScrollBound) {
+            imageListContainer.addEventListener('scroll', () => {
+                if (this.renderVisibleItems) this.renderVisibleItems();
+            });
+            this.imageListScrollBound = true;
+        }
+
+        const totalImagesEl = document.getElementById('total-images');
+        if (totalImagesEl) totalImagesEl.textContent = this.imageList.length;
     }
     
     async loadImage(index) {
@@ -1968,6 +2043,18 @@ class AnnotationTool {
                 return false;
             }
 
+            // 404 = 这张图的记录已经不在库里了。通常是项目被重新扫描过：
+            // scan_images 会删掉目录里已不存在的文件对应的记录，重新出现的文件
+            // 会以新的 UUID 重建。此时本页面持有的还是旧列表，之后每次切图都会 404。
+            // 不明确提示的话，用户会一直标下去，最后保存也失败。
+            if (response.status === 404) {
+                this.leaseImageId = null;
+                this.stopLeaseHeartbeat();
+                this.enterReadOnly(null);
+                this.showMessage('这张图片已不在项目中（项目可能被重新扫描过），请刷新页面获取最新列表', 'error');
+                return false;
+            }
+
             if (!response.ok) {
                 console.error('获取标注租约失败:', response.status, response.statusText);
                 return false;
@@ -2002,6 +2089,13 @@ class AnnotationTool {
                         return response.json()
                             .catch(() => ({}))
                             .then(data => this.enterReadOnly(data.detail ? data.detail.holder : null));
+                    }
+                    // 图片记录已被删除（项目被重新扫描过），继续心跳只会每 60 秒刷一条 404
+                    if (response.status === 404) {
+                        this.leaseImageId = null;
+                        this.stopLeaseHeartbeat();
+                        this.enterReadOnly(null);
+                        this.showMessage('这张图片已不在项目中（项目可能被重新扫描过），请刷新页面', 'error');
                     }
                 })
                 .catch(error => console.error('租约续期失败:', error));
@@ -3633,13 +3727,12 @@ class AnnotationTool {
     }
     
     filterImages() {
-        const searchTerm = document.getElementById('image-search').value.toLowerCase();
-        const imageItems = document.querySelectorAll('#image-list .annotation-item');
-        
-        imageItems.forEach((item, index) => {
-            const imageName = this.imageList[index].image_name.toLowerCase();
-            item.style.display = imageName.includes(searchTerm) ? 'block' : 'none';
-        });
+        // 搜索并入 updateImageList() 的过滤链，走同一条数据流。
+        // 旧实现直接改 DOM 的 display，但列表是虚拟滚动：DOM 里只有可视窗口的十几项，
+        // 却拿 DOM 下标去索引全量 imageList，匹配的名字和隐藏的行根本不是同一张图，
+        // 而且一滚动重建 DOM，display:none 就全丢了。
+        this.searchTerm = document.getElementById('image-search').value.trim().toLowerCase();
+        this.updateImageList();
     }
     
     showMessage(message, type) {
@@ -4225,71 +4318,11 @@ class AnnotationTool {
         }
     }
     
-    toggleCompletedFilter() {
-        this.showCompleted = !this.showCompleted;
-        const btn = document.getElementById('filter-completed');
-        if (btn) {
-            if (this.showCompleted) {
-                btn.classList.remove('btn-outline-success');
-                btn.classList.add('btn-success');
-            } else {
-                btn.classList.remove('btn-success');
-                btn.classList.add('btn-outline-success');
-            }
-        }
-        this.updateImageList();
-    }
-    
-    toggleUncompletedFilter() {
-        this.showUncompleted = !this.showUncompleted;
-        const btn = document.getElementById('filter-uncompleted');
-        if (btn) {
-            if (this.showUncompleted) {
-                btn.classList.remove('btn-outline-warning');
-                btn.classList.add('btn-warning');
-            } else {
-                btn.classList.remove('btn-warning');
-                btn.classList.add('btn-outline-warning');
-            }
-        }
-        this.updateImageList();
-    }
-    
-    toggleAnnotatedFilter() {
-        this.showAnnotated = !this.showAnnotated;
-        const btn = document.getElementById('filter-annotated');
-        if (btn) {
-            if (this.showAnnotated) {
-                btn.classList.remove('btn-outline-info');
-                btn.classList.add('btn-info');
-            } else {
-                btn.classList.remove('btn-info');
-                btn.classList.add('btn-outline-info');
-            }
-        }
-        this.updateImageList();
-    }
-    
-    toggleUnannotatedFilter() {
-        this.showUnannotated = !this.showUnannotated;
-        const btn = document.getElementById('filter-unannotated');
-        if (btn) {
-            if (this.showUnannotated) {
-                btn.classList.remove('btn-outline-secondary');
-                btn.classList.add('btn-secondary');
-            } else {
-                btn.classList.remove('btn-secondary');
-                btn.classList.add('btn-outline-secondary');
-            }
-        }
-        this.updateImageList();
-    }
-    
     updateImageListSelection() {
-        const imageItems = document.querySelectorAll('#image-list .annotation-item');
-        imageItems.forEach((item, index) => {
-            // 获取原始索引
-            const originalIndex = this.filteredImageIndices[index];
+        // 按元素上记录的原始下标取值：DOM 里只有可视窗口的十几项，
+        // 用 forEach 的下标去索引 filteredImageIndices 会标错行
+        document.querySelectorAll('#image-list .annotation-item').forEach(item => {
+            const originalIndex = parseInt(item.dataset.originalIndex, 10);
             item.classList.toggle('selected', originalIndex === this.currentImageIndex);
         });
     }

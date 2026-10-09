@@ -303,15 +303,35 @@
                         <h5><i class="fas fa-images"></i> 图片列表</h5>
                     </div>
                     <div class="card-body">
-                        <div class="mb-3">
-                            <input type="text" id="image-search" class="form-control" placeholder="搜索图片...">
+                        <div class="mb-2">
+                            <input type="text" id="image-search" class="form-control form-control-sm" placeholder="搜索图片...">
                         </div>
-                        <!-- 筛选按钮 -->
-                        <div class="mb-3 d-flex gap-2">
-                            <button id="filter-completed" class="btn btn-outline-success btn-sm flex-fill">已完成</button>
-                            <button id="filter-uncompleted" class="btn btn-outline-warning btn-sm flex-fill">未完成</button>
-                            <button id="filter-annotated" class="btn btn-outline-info btn-sm flex-fill">已标注</button>
-                            <button id="filter-unannotated" class="btn btn-outline-secondary btn-sm flex-fill">未标注</button>
+                        <div class="mb-2">
+                            <select id="image-sort" class="form-select form-select-sm">
+                                <option value="name" selected>按文件名排序</option>
+                                <option value="created">按扫描顺序</option>
+                                <option value="updated">按最近修改</option>
+                            </select>
+                        </div>
+                        <!-- 筛选：两组组内单选，组间取交集 -->
+                        <div class="mb-1 d-flex align-items-center gap-2">
+                            <small class="text-muted flex-shrink-0" style="width: 2.6rem;">完成</small>
+                            <div class="btn-group btn-group-sm flex-fill" role="group" aria-label="完成状态筛选">
+                                <button type="button" class="btn btn-success filter-btn" data-filter-group="completed" data-filter-value="all">全部</button>
+                                <button type="button" class="btn btn-outline-success filter-btn" data-filter-group="completed" data-filter-value="completed">已完成</button>
+                                <button type="button" class="btn btn-outline-success filter-btn" data-filter-group="completed" data-filter-value="uncompleted">未完成</button>
+                            </div>
+                        </div>
+                        <div class="mb-2 d-flex align-items-center gap-2">
+                            <small class="text-muted flex-shrink-0" style="width: 2.6rem;">标注</small>
+                            <div class="btn-group btn-group-sm flex-fill" role="group" aria-label="标注状态筛选">
+                                <button type="button" class="btn btn-info filter-btn" data-filter-group="annotated" data-filter-value="all">全部</button>
+                                <button type="button" class="btn btn-outline-info filter-btn" data-filter-group="annotated" data-filter-value="annotated">已标注</button>
+                                <button type="button" class="btn btn-outline-info filter-btn" data-filter-group="annotated" data-filter-value="unannotated">未标注</button>
+                            </div>
+                        </div>
+                        <div class="mb-2 small text-muted">
+                            显示 <span id="image-list-shown">0</span> / 共 <span id="image-list-total">0</span> 张
                         </div>
                         <div id="image-list" style="max-height: 600px; overflow-y: auto;">
                             <!-- 图片列表将在这里显示 -->

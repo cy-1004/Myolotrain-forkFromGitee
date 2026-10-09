@@ -3,6 +3,8 @@ class TrainingManager {
     constructor() {
         // 训练管理相关属性
         this.trainingTasksRefreshInterval = null;
+        // 单端口（Docker）部署不启动 TensorBoard，加载到部署形态之前先不显示入口
+        this.tensorboardEnabled = false;
     }
 
     // 获取状态文本
@@ -26,6 +28,8 @@ class TrainingManager {
                 return '失败';
             case 'cancelled':
                 return '已取消';
+            case 'interrupted':
+                return '已中断';
             case 'active':
                 return '进行中';
             case 'inactive':
@@ -42,6 +46,7 @@ class TrainingManager {
         switch (status) {
             case 'processing':
             case 'pending':
+            case 'interrupted':
                 return 'bg-warning';
             case 'available':
             case 'completed':
@@ -107,7 +112,9 @@ class TrainingManager {
 
     // 加载训练任务列表
     loadTrainingTasks() {
-        authenticatedFetch(`${API_URL}/training/`)
+        getRuntimeConfig()
+            .then(cfg => { this.tensorboardEnabled = cfg.tensorboard_enabled; })
+            .then(() => authenticatedFetch(`${API_URL}/training/`))
             .then(response => response.json())
             .then(tasks => {
                 const tableBody = document.getElementById('training-table-body');
@@ -142,10 +149,10 @@ class TrainingManager {
                         <td>
                             ${task.status === 'pending' ? `<button class="btn btn-sm btn-success start-training" data-id="${task.id}">开始训练</button>` : ''}
                             ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'pending' ? `<button class="btn btn-sm btn-warning stop-training" data-id="${task.id}">停止训练</button>` : ''}
-                            ${(task.status === 'cancelled' || task.status === 'failed') ? `<button class="btn btn-sm btn-success resume-training" data-id="${task.id}">继续训练</button>` : ''}
-                            ${task.status === 'running' || task.status === 'completed' ? `<button class="btn btn-sm btn-info tensorboard" data-id="${task.id}">TensorBoard</button>` : ''}
+                            ${(task.status === 'cancelled' || task.status === 'failed' || task.status === 'interrupted') ? `<button class="btn btn-sm btn-success resume-training" data-id="${task.id}">继续训练</button>` : ''}
+                            ${this.tensorboardEnabled && (task.status === 'running' || task.status === 'completed') ? `<button class="btn btn-sm btn-info tensorboard" data-id="${task.id}">TensorBoard</button>` : ''}
                             <button class="btn btn-sm btn-primary view-details" data-id="${task.id}">训练详情</button>
-                            ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' ? `<button class="btn btn-sm btn-secondary view-logs" data-id="${task.id}">查看日志</button>` : ''}
+                            ${task.status === 'running' || task.status === 'training' || task.status === 'downloading_model' || task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted' ? `<button class="btn btn-sm btn-secondary view-logs" data-id="${task.id}">查看日志</button>` : ''}
                             ${task.status === 'completed' ? `<button class="btn btn-sm btn-success export-models" data-id="${task.id}">导出模型</button>` : ''}
                             ${task.status !== 'running' && task.status !== 'training' && task.status !== 'downloading_model' ? `<button class="btn btn-sm btn-danger delete-training" data-id="${task.id}">删除</button>` : ''}
                         </td>
@@ -1550,6 +1557,38 @@ class TrainingManager {
     viewTrainingLogs(taskId) {
         // 创建一个模态框来显示日志
         const modal = this.createModal();
+        const self = this;
+
+        // 日志增量拉取的状态：nextOffset 为下次请求的起点（字节偏移），rawLog 为已拉取的原始文本。
+        // 原先每 5 秒拉一次整个日志文件，训练几小时后日志有几 MB，弹窗会越来越卡
+        let nextOffset = -65536;            // 首次只取最近 64KB
+        let rawLog = '';
+        let truncatedHead = false;          // 是否只显示了日志的后半部分
+        const MAX_RAW_LOG_CHARS = 2 * 1024 * 1024;
+        let autoRefresh = null;
+        let metricsChart = null;
+        let lastMetricsFetch = 0;
+        let closed = false;
+
+        // 统一的关闭逻辑：原先关闭按钮只移除 DOM，依赖一个浏览器根本不会触发的 'remove' 事件来清理，
+        // 定时器一直在后台每 5 秒请求一次
+        const closeModal = () => {
+            if (closed) return;
+            closed = true;
+            if (autoRefresh) window.memoryManager.clearInterval(autoRefresh);
+            if (typeof PollingManager !== 'undefined') {
+                PollingManager.removePoll(`training_logs_${taskId}`);
+            }
+            if (metricsChart) metricsChart.destroy();
+            if (modal.parentNode) modal.parentNode.removeChild(modal);
+            if (window.onclick === outsideClickHandler) window.onclick = null;
+        };
+        const stopPolling = () => {
+            if (autoRefresh) {
+                window.memoryManager.clearInterval(autoRefresh);
+                autoRefresh = null;
+            }
+        };
 
         // 创建模态框内容
         const modalContent = document.createElement('div');
@@ -1559,7 +1598,7 @@ class TrainingManager {
         modalContent.style.padding = '20px';
         modalContent.style.border = '1px solid #888';
         modalContent.style.width = '80%';
-        modalContent.style.maxHeight = '80%';
+        modalContent.style.maxHeight = '85%';
         modalContent.style.overflow = 'auto';
 
         // 添加标题
@@ -1569,18 +1608,36 @@ class TrainingManager {
 
         // 添加关闭按钮
         const closeBtn = document.createElement('span');
-        closeBtn.textContent = '\u00D7';
+        closeBtn.textContent = '×';
         closeBtn.style.color = '#aaa';
         closeBtn.style.float = 'right';
         closeBtn.style.fontSize = '28px';
         closeBtn.style.fontWeight = 'bold';
         closeBtn.style.cursor = 'pointer';
-        closeBtn.onclick = function() {
-            document.body.removeChild(modal);
-        };
+        closeBtn.onclick = closeModal;
         modalContent.appendChild(closeBtn);
 
+        // 训练曲线（来自 results.csv，替代需要单独端口的 TensorBoard）
+        const metricsBox = document.createElement('div');
+        metricsBox.style.display = 'none';
+        metricsBox.style.marginBottom = '15px';
+        const metricsSummary = document.createElement('div');
+        metricsSummary.className = 'text-muted small mb-2';
+        const canvasWrap = document.createElement('div');
+        canvasWrap.style.position = 'relative';
+        canvasWrap.style.height = '260px';
+        const metricsCanvas = document.createElement('canvas');
+        canvasWrap.appendChild(metricsCanvas);
+        metricsBox.appendChild(metricsSummary);
+        metricsBox.appendChild(canvasWrap);
+        modalContent.appendChild(metricsBox);
+
         // 添加日志内容区域
+        const logNotice = document.createElement('div');
+        logNotice.className = 'text-muted small mb-1';
+        logNotice.style.display = 'none';
+        modalContent.appendChild(logNotice);
+
         const logContent = document.createElement('pre');
         logContent.style.backgroundColor = '#f8f9fa';
         logContent.style.padding = '10px';
@@ -1609,21 +1666,19 @@ class TrainingManager {
         refreshBtn.className = 'btn btn-primary';
         refreshBtn.style.marginRight = '10px';
         refreshBtn.onclick = () => {
-            fetchLogs();
+            fetchLogs(true);
         };
         leftButtons.appendChild(refreshBtn);
 
-        // 添加下载日志按钮
+        // 添加下载日志按钮（完整日志文件）
         const downloadLogBtn = document.createElement('button');
-        downloadLogBtn.textContent = '下载日志';
+        downloadLogBtn.textContent = '下载完整日志';
         downloadLogBtn.className = 'btn btn-success';
         downloadLogBtn.style.marginRight = '10px';
         downloadLogBtn.onclick = () => {
-            // 创建下载链接
-            const downloadUrl = `${API_URL}/training/${taskId}/logs/download`;
-            // 创建一个隐藏的a标签用于下载
+            // 普通链接下载会自动带上登录 Cookie
             const a = document.createElement('a');
-            a.href = downloadUrl;
+            a.href = `${API_URL}/training/${taskId}/logs/download`;
             a.download = `training_logs_${taskId}.txt`;
             a.style.display = 'none';
             document.body.appendChild(a);
@@ -1632,18 +1687,19 @@ class TrainingManager {
         };
         leftButtons.appendChild(downloadLogBtn);
 
-        // 添加TensorBoard按钮
+        // 添加TensorBoard按钮（单端口部署时 TensorBoard 不可用，不显示）
         const tensorboardBtn = document.createElement('button');
         tensorboardBtn.textContent = '打开TensorBoard';
         tensorboardBtn.className = 'btn btn-info';
         tensorboardBtn.style.marginRight = '10px';
-        // 保存TrainingManager实例的引用
-        const self = this;
+        tensorboardBtn.style.display = 'none';
         tensorboardBtn.onclick = function() {
-            // 使用保存的实例引用调用openTensorBoard函数
             self.openTensorBoard(taskId);
         };
         leftButtons.appendChild(tensorboardBtn);
+        getRuntimeConfig().then(cfg => {
+            if (cfg.tensorboard_enabled) tensorboardBtn.style.display = 'inline-block';
+        });
 
         // 添加停止训练按钮（只在训练中显示）
         const stopBtn = document.createElement('button');
@@ -1653,17 +1709,14 @@ class TrainingManager {
         stopBtn.style.display = 'none'; // 默认隐藏，根据状态显示
         stopBtn.onclick = () => {
             if (confirm('确定要停止训练吗？这将终止当前的训练过程。')) {
-                fetch(`${API_URL}/training/${taskId}/stop`, {
+                authenticatedFetch(`${API_URL}/training/${taskId}/stop`, {
                     method: 'POST'
                 })
                 .then(response => {
                     if (response.ok) {
                         alert('训练已停止');
-                        // 重新加载训练任务列表
                         this.loadTrainingTasks();
-                        // 刷新日志
-                        fetchLogs();
-                        // 隐藏停止按钮
+                        fetchLogs(true);
                         stopBtn.style.display = 'none';
                     } else {
                         throw new Error('停止训练失败');
@@ -1685,141 +1738,161 @@ class TrainingManager {
         const closeButton = document.createElement('button');
         closeButton.textContent = '关闭';
         closeButton.className = 'btn btn-secondary';
-        closeButton.onclick = function() {
-            document.body.removeChild(modal);
-        };
+        closeButton.onclick = closeModal;
         rightButtons.appendChild(closeButton);
 
         // 将模态框添加到文档中
         modal.appendChild(modalContent);
         document.body.appendChild(modal);
 
-        // 获取日志内容和任务状态
-        const fetchLogs = () => {
-            // 获取任务状态
-            authenticatedFetch(`${API_URL}/training/${taskId}`)
-                .then(response => {
-                    if (!response.ok) {
-                        // 如果是404错误，表示任务不存在
-                        if (response.status === 404) {
-                            // 停止轮询
-                            clearInterval(autoRefresh);
-                            if (typeof PollingManager !== 'undefined') {
-                                PollingManager.removePoll(`training_logs_${taskId}`);
-                            }
+        const showTaskGone = () => {
+            stopPolling();
+            logContent.innerHTML = '<div class="alert alert-warning">该训练任务不存在或已被删除</div>';
+            refreshBtn.style.display = 'none';
+            tensorboardBtn.style.display = 'none';
+            stopBtn.style.display = 'none';
+        };
 
-                            // 显示错误信息
-                            logContent.innerHTML = '<div class="alert alert-warning">该训练任务不存在或已被删除</div>';
+        // 进度条用 \r 回到行首反复重画同一行；直接显示会堆出成百上千行重复内容，
+        // 这里每行只保留最后一次重画的结果
+        const renderLog = (text) => text
+            .split('\n')
+            .map(line => {
+                const parts = line.split('\r').filter(p => p.length > 0);
+                return parts.length ? parts[parts.length - 1] : '';
+            })
+            .join('\n');
 
-                            // 隐藏所有按钮
-                            refreshBtn.style.display = 'none';
-                            tensorboardBtn.style.display = 'none';
-                            stopBtn.style.display = 'none';
+        const isActiveStatus = (status) =>
+            ['training', 'running', 'pending', 'downloading_model'].includes(status);
 
-                            throw new Error('训练任务不存在或已被删除');
-                        }
-                        throw new Error('获取任务状态失败');
-                    }
-                    return response.json();
-                })
-                .then(taskData => {
-                    // 根据任务状态显示/隐藏停止按钮
-                    if (taskData.status === 'training' || taskData.status === 'running' ||
-                        taskData.status === 'pending' || taskData.status === 'downloading_model') {
-                        stopBtn.style.display = 'inline-block';
+        // 训练曲线
+        const fetchMetrics = (force) => {
+            const now = Date.now();
+            if (!force && now - lastMetricsFetch < 15000) return;   // 曲线每个 epoch 才变一次，不必跟日志同频
+            lastMetricsFetch = now;
+            authenticatedFetch(`${API_URL}/training/${taskId}/metrics`)
+                .then(response => response.ok ? response.json() : null)
+                .then(data => {
+                    if (closed || !data || !data.rows || data.rows.length === 0) return;
+                    if (typeof Chart === 'undefined') return;
+                    const rows = data.rows;
+                    const pick = (key) => rows.map(r => (typeof r[key] === 'number' ? r[key] : null));
+                    const labels = rows.map(r => r.epoch);
+                    const series = [
+                        { key: 'metrics/mAP50(B)', label: 'mAP50', axis: 'y', color: '#198754' },
+                        { key: 'metrics/mAP50-95(B)', label: 'mAP50-95', axis: 'y', color: '#0d6efd' },
+                        { key: 'train/box_loss', label: 'train box_loss', axis: 'y1', color: '#dc3545' },
+                        { key: 'val/box_loss', label: 'val box_loss', axis: 'y1', color: '#fd7e14' },
+                    ].filter(s => s.key in rows[0]);
+                    const datasets = series.map(s => ({
+                        label: s.label, data: pick(s.key), yAxisID: s.axis,
+                        borderColor: s.color, backgroundColor: s.color,
+                        borderWidth: 2, pointRadius: 0, tension: 0.2,
+                    }));
+
+                    const last = rows[rows.length - 1];
+                    const total = data.epochs_total ? ` / ${data.epochs_total}` : '';
+                    const map = last['metrics/mAP50-95(B)'];
+                    metricsSummary.textContent = `已完成 ${data.epochs_done}${total} 个 epoch` +
+                        (typeof map === 'number' ? `，当前 mAP50-95 = ${map.toFixed(4)}` : '');
+                    metricsBox.style.display = 'block';
+
+                    if (metricsChart) {
+                        metricsChart.data.labels = labels;
+                        metricsChart.data.datasets = datasets;
+                        metricsChart.update('none');
                     } else {
-                        stopBtn.style.display = 'none';
-                        
-                        // 如果任务已完成，停止轮询
-                        if (taskData.status === 'completed') {
-                            clearInterval(autoRefresh);
-                            if (typeof PollingManager !== 'undefined') {
-                                PollingManager.removePoll(`training_logs_${taskId}`);
-                            }
-                        }
+                        metricsChart = new Chart(metricsCanvas, {
+                            type: 'line',
+                            data: { labels, datasets },
+                            options: {
+                                responsive: true, maintainAspectRatio: false, animation: false,
+                                interaction: { mode: 'index', intersect: false },
+                                scales: {
+                                    x: { title: { display: true, text: 'epoch' } },
+                                    y: { position: 'left', title: { display: true, text: 'mAP' }, suggestedMin: 0, suggestedMax: 1 },
+                                    y1: { position: 'right', title: { display: true, text: 'loss' }, grid: { drawOnChartArea: false } },
+                                },
+                            },
+                        });
                     }
                 })
-                .catch(error => {
-                    console.error('Error fetching task status:', error);
-                    // 如果不是任务不存在的错误，显示错误信息
-                    if (!error.message.includes('不存在')) {
-                        logContent.innerHTML += `<div class="alert alert-danger">获取任务状态失败: ${error.message}</div>`;
-                    }
-                });
+                .catch(error => console.error('Error fetching metrics:', error));
+        };
 
-            // 获取日志
-            authenticatedFetch(`${API_URL}/training/${taskId}/logs`)
+        // 获取日志内容和任务状态（增量）
+        const fetchLogs = (force = false) => {
+            if (closed) return;
+            authenticatedFetch(`${API_URL}/training/${taskId}/logs/tail?offset=${nextOffset}`)
                 .then(response => {
-                    if (!response.ok) {
-                        // 如果是404错误，表示任务不存在
-                        if (response.status === 404) {
-                            // 停止轮询
-                            clearInterval(autoRefresh);
-                            if (typeof PollingManager !== 'undefined') {
-                                PollingManager.removePoll(`training_logs_${taskId}`);
-                            }
-
-                            // 显示错误信息
-                            logContent.innerHTML = '<div class="alert alert-warning">该训练任务不存在或已被删除</div>';
-
-                            // 隐藏所有按钮
-                            refreshBtn.style.display = 'none';
-                            tensorboardBtn.style.display = 'none';
-                            stopBtn.style.display = 'none';
-
-                            throw new Error('训练任务不存在或已被删除');
-                        }
-                        throw new Error('获取日志失败');
+                    if (response.status === 404) {
+                        showTaskGone();
+                        throw new Error('训练任务不存在或已被删除');
                     }
+                    if (!response.ok) throw new Error('获取日志失败');
                     return response.json();
                 })
                 .then(data => {
-                    logContent.textContent = data.logs || '暂无日志';
-                    // 滚动到日志底部
-                    logContent.scrollTop = logContent.scrollHeight;
+                    if (closed) return;
+                    // 日志文件比已读位置还短：任务被重新开始，日志被覆盖了，从头显示
+                    if (nextOffset > 0 && data.offset === 0 && data.size < nextOffset) {
+                        rawLog = '';
+                        truncatedHead = false;
+                    }
+                    if (nextOffset < 0 && data.offset > 0) truncatedHead = true;
+
+                    const atBottom = logContent.scrollHeight - logContent.scrollTop - logContent.clientHeight < 40;
+                    rawLog += data.text;
+                    if (rawLog.length > MAX_RAW_LOG_CHARS) {
+                        rawLog = rawLog.slice(rawLog.length - MAX_RAW_LOG_CHARS);
+                        truncatedHead = true;
+                    }
+                    nextOffset = data.next_offset;
+
+                    // 一次没拉完（新增内容超过单次上限）就紧接着继续拉
+                    const moreAvailable = data.next_offset < data.size;
+
+                    logContent.textContent = rawLog ? renderLog(rawLog) : (data.exists ? '暂无日志' : '日志尚未生成');
+                    logNotice.textContent = truncatedHead ? '仅显示最近的日志，完整内容请点击"下载完整日志"' : '';
+                    logNotice.style.display = truncatedHead ? 'block' : 'none';
+                    // 用户往上翻看历史时不强行滚到底
+                    if (atBottom || force) logContent.scrollTop = logContent.scrollHeight;
+
+                    if (isActiveStatus(data.status)) {
+                        stopBtn.style.display = 'inline-block';
+                    } else {
+                        stopBtn.style.display = 'none';
+                        // 任务已结束且日志已读完，停止轮询
+                        if (!moreAvailable) stopPolling();
+                    }
+                    fetchMetrics(force || !isActiveStatus(data.status));
+                    if (moreAvailable) fetchLogs(false);
                 })
                 .catch(error => {
                     console.error('Error fetching logs:', error);
-                    // 如果不是任务不存在的错误，显示错误信息
-                    if (!error.message.includes('不存在')) {
+                    if (!error.message.includes('不存在') && !rawLog) {
                         logContent.textContent = '获取日志失败';
                     }
                 });
-        }
+        };
 
         // 初始加载日志
-        fetchLogs();
+        fetchLogs(true);
 
-        // 每 5 秒自动刷新一次日志
-        const autoRefresh = window.memoryManager.setInterval(fetchLogs, 5000);
+        // 每 5 秒自动刷新一次日志（只拉新增部分）
+        autoRefresh = window.memoryManager.setInterval(() => fetchLogs(false), 5000);
 
         // 将定时器添加到轮询管理器
         if (typeof PollingManager !== 'undefined') {
             PollingManager.addPoll(`training_logs_${taskId}`, autoRefresh);
         }
 
-        // 当模态框关闭时清除定时器
-        modal.addEventListener('remove', function() {
-            window.memoryManager.clearInterval(autoRefresh);
-
-            // 从轮询管理器中移除
-            if (typeof PollingManager !== 'undefined') {
-                PollingManager.removePoll(`training_logs_${taskId}`);
-            }
-        });
-
         // 点击模态框外部关闭
-        window.onclick = (event) => {
-            if (event.target === modal) {
-                document.body.removeChild(modal);
-                window.memoryManager.clearInterval(autoRefresh);
-
-                // 从轮询管理器中移除
-                if (typeof PollingManager !== 'undefined') {
-                    PollingManager.removePoll(`training_logs_${taskId}`);
-                }
-            }
+        const outsideClickHandler = (event) => {
+            if (event.target === modal) closeModal();
         };
+        window.onclick = outsideClickHandler;
     }
 
     // 查看训练详情
@@ -2008,7 +2081,13 @@ class TrainingManager {
                 if (task.status === 'training' || task.status === 'running' ||
                     task.status === 'pending' || task.status === 'downloading_model') {
                     const statusRefresh = window.memoryManager.setInterval(() => {
-                        fetch(`${API_URL}/training/${taskId}`)
+                        // 弹窗已关闭（无论通过哪个按钮）就停止刷新。原先依赖的 'remove' 事件浏览器并不会触发，
+                        // 关掉弹窗后定时器仍在后台一直请求
+                        if (!modal.isConnected) {
+                            window.memoryManager.clearInterval(statusRefresh);
+                            return;
+                        }
+                        authenticatedFetch(`${API_URL}/training/${taskId}`)
                             .then(response => response.json())
                             .then(updatedTask => {
                                 // 更新状态
@@ -2039,11 +2118,6 @@ class TrainingManager {
                                 window.memoryManager.clearInterval(statusRefresh);
                             });
                     }, 5000);
-
-                    // 当模态框关闭时清除定时器
-                    modal.addEventListener('remove', function() {
-                        window.memoryManager.clearInterval(statusRefresh);
-                    });
 
                     // 点击模态框外部关闭时清除定时器
                     window.onclick = (event) => {

@@ -20,6 +20,43 @@ class OpenCVService:
     OpenCV 服务类，提供图像处理、数据增强和可视化功能
     """
 
+    # ==================== 中文路径安全的读写 ====================
+    #
+    # Windows 上 cv2.imread / cv2.imwrite 用 ANSI 编码打开文件，遇到中文路径：
+    #   - imread  直接返回 None
+    #   - imwrite 返回 False 且不抛异常 —— 最危险，会造成"报告处理成功但一个文件都没写出"
+    # 项目里 export_to_dataset 用 UUID 目录就是在绕这个坑，但数据集导入目录
+    # （如 datasets_import/汽车道路（小））和标注项目目录仍可能是中文。
+    # 这里统一改走 np.fromfile + imdecode / imencode + tofile，从根上绕开路径编码。
+
+    @staticmethod
+    def imread_unicode(path: Union[str, Path], flags: int = cv2.IMREAD_COLOR) -> Optional[np.ndarray]:
+        """读取图像，兼容中文/非 ASCII 路径。失败返回 None（与 cv2.imread 语义一致）"""
+        try:
+            data = np.fromfile(str(path), dtype=np.uint8)
+        except Exception as e:
+            logger.error(f"读取文件失败 {path}: {e}")
+            return None
+        if data.size == 0:
+            return None
+        return cv2.imdecode(data, flags)
+
+    @staticmethod
+    def imwrite_unicode(path: Union[str, Path], image: np.ndarray,
+                        params: Optional[List[int]] = None) -> bool:
+        """写出图像，兼容中文/非 ASCII 路径。返回是否成功"""
+        path = str(path)
+        ext = os.path.splitext(path)[1] or '.jpg'
+        try:
+            ok, buf = cv2.imencode(ext, image, params or [])
+            if not ok:
+                return False
+            buf.tofile(path)
+            return True
+        except Exception as e:
+            logger.error(f"写出文件失败 {path}: {e}")
+            return False
+
     @staticmethod
     def read_image(image_path: Union[str, Path]) -> np.ndarray:
         """
@@ -36,10 +73,12 @@ class OpenCVService:
         """
         try:
             image_path = str(image_path)
-            img = cv2.imread(image_path)
+            img = OpenCVService.imread_unicode(image_path)
             if img is None:
                 raise ValueError(f"无法读取图像: {image_path}")
             return img
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"读取图像失败: {str(e)}")
             raise HTTPException(status_code=400, detail=f"读取图像失败: {str(e)}")
@@ -61,9 +100,16 @@ class OpenCVService:
         """
         try:
             output_path = str(output_path)
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            cv2.imwrite(output_path, image)
+            parent = os.path.dirname(output_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            # 必须检查返回值：写失败时 imwrite/imencode 不抛异常，
+            # 不检查就会"报告成功但没有文件"
+            if not OpenCVService.imwrite_unicode(output_path, image):
+                raise ValueError(f"写出图像失败: {output_path}")
             return output_path
+        except HTTPException:
+            raise
         except Exception as e:
             logger.error(f"保存图像失败: {str(e)}")
             raise HTTPException(status_code=500, detail=f"保存图像失败: {str(e)}")
@@ -154,7 +200,10 @@ class OpenCVService:
 
         Args:
             image: 输入图像
-            flip_code: 翻转代码 (0: 水平翻转, 1: 垂直翻转, -1: 同时水平和垂直翻转)
+            flip_code: 翻转代码，语义同 cv2.flip
+                0  : 绕 x 轴翻转 = 上下翻转（垂直翻转），配 transform_labels_flip_vertical
+                >0 : 绕 y 轴翻转 = 左右翻转（水平翻转），配 transform_labels_flip_horizontal
+                -1 : 同时上下+左右翻转
 
         Returns:
             np.ndarray: 翻转后的图像
@@ -166,21 +215,39 @@ class OpenCVService:
         """
         旋转图像
 
+        画布会自动扩展到刚好容纳旋转后的内容，不再裁掉画面。
+        原实现固定输出 (width, height)，640x480 的图转 90 度后内容变成 480x640，
+        上下会被直接裁掉，而配套的标签变换却是按"画布跟着变"推导的，两者对不上。
+
         Args:
             image: 输入图像
-            angle: 旋转角度 (度)
+            angle: 旋转角度 (度)，正值为逆时针（与 cv2.getRotationMatrix2D 一致）
 
         Returns:
-            np.ndarray: 旋转后的图像
+            np.ndarray: 旋转后的图像，尺寸见 rotated_canvas_size()
         """
         height, width = image.shape[:2]
-        center = (width // 2, height // 2)
+        center = (width / 2.0, height / 2.0)
 
         # 获取旋转矩阵
         rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
 
+        # 扩展画布到刚好容纳旋转后的内容，并把平移量修正到新画布中心
+        new_width, new_height = OpenCVService.rotated_canvas_size(width, height, angle)
+        rotation_matrix[0, 2] += new_width / 2.0 - center[0]
+        rotation_matrix[1, 2] += new_height / 2.0 - center[1]
+
         # 应用旋转
-        return cv2.warpAffine(image, rotation_matrix, (width, height))
+        return cv2.warpAffine(image, rotation_matrix, (new_width, new_height))
+
+    @staticmethod
+    def rotated_canvas_size(width: int, height: int, angle: float) -> Tuple[int, int]:
+        """旋转后刚好容纳全部内容所需的画布尺寸 (宽, 高)"""
+        cos_a = abs(math.cos(math.radians(angle)))
+        sin_a = abs(math.sin(math.radians(angle)))
+        new_width = int(round(width * cos_a + height * sin_a))
+        new_height = int(round(width * sin_a + height * cos_a))
+        return max(1, new_width), max(1, new_height)
 
     @staticmethod
     def add_noise(image: np.ndarray, noise_type: str = 'gaussian', amount: float = 0.05) -> np.ndarray:
@@ -504,87 +571,74 @@ class OpenCVService:
     @staticmethod
     def transform_labels_rotate(labels: List[List[float]], angle: float, img_width: int, img_height: int) -> List[List[float]]:
         """
-        旋转标签坐标
+        旋转标签坐标，与 rotate_image 的几何严格对齐
+
+        做法：把每个框的四个角点用与 rotate_image 完全相同的仿射矩阵前向映射到新画布，
+        再取轴对齐外接框、按新画布尺寸重新归一化，最后裁剪越界部分。
+
+        原实现有两个缺陷，已在此修正：
+        1. 90/270 度的映射方向反了。cv2.getRotationMatrix2D 的正角度是逆时针，
+           而原公式 (x,y) -> (1-y, x) 是顺时针，导致 90 度和 270 度的标签被互换；
+        2. 非 90 倍数的角度只旋转了框心、宽高原样保留，且不做越界裁剪。
 
         Args:
-            labels: 原始标签列表
-            angle: 旋转角度（度）
-            img_width: 图像宽度
-            img_height: 图像高度
+            labels: 原始标签列表，每项为 [class_id, x_center, y_center, width, height]（归一化）
+            angle: 旋转角度（度），正值为逆时针
+            img_width: 原图宽度（像素）
+            img_height: 原图高度（像素）
 
         Returns:
-            List[List[float]]: 变换后的标签列表
+            List[List[float]]: 变换后的标签列表；完全转出画布的框会被丢弃
         """
-        # 对于90度的倍数旋转，我们可以直接计算
-        transformed = []
+        if not labels:
+            return []
 
-        # 将角度转换为弧度
         angle_rad = math.radians(angle)
+        cos_a, sin_a = math.cos(angle_rad), math.sin(angle_rad)
+        cx, cy = img_width / 2.0, img_height / 2.0
 
-        # 计算旋转中心（归一化坐标）
-        cx, cy = 0.5, 0.5
+        new_width, new_height = OpenCVService.rotated_canvas_size(img_width, img_height, angle)
+        ncx, ncy = new_width / 2.0, new_height / 2.0
 
+        def map_point(px: float, py: float) -> Tuple[float, float]:
+            # 与 cv2.getRotationMatrix2D 的矩阵定义一致：
+            #   x' =  cos*dx + sin*dy ,  y' = -sin*dx + cos*dy
+            dx, dy = px - cx, py - cy
+            return (cos_a * dx + sin_a * dy + ncx,
+                    -sin_a * dx + cos_a * dy + ncy)
+
+        # 框面积裁剪后残留不足该比例就丢弃，避免产生只剩边角的垃圾框
+        min_area_ratio = 0.2
+
+        transformed = []
         for label in labels:
-            # 复制标签
+            x, y, w, h = label[1], label[2], label[3], label[4]
+
+            # 归一化 -> 原图像素坐标的四个角点
+            px0, px1 = (x - w / 2.0) * img_width, (x + w / 2.0) * img_width
+            py0, py1 = (y - h / 2.0) * img_height, (y + h / 2.0) * img_height
+            corners = [map_point(px0, py0), map_point(px1, py0),
+                       map_point(px1, py1), map_point(px0, py1)]
+
+            xs = [c[0] for c in corners]
+            ys = [c[1] for c in corners]
+            nx0, nx1 = min(xs), max(xs)
+            ny0, ny1 = min(ys), max(ys)
+            full_area = (nx1 - nx0) * (ny1 - ny0)
+
+            # 裁剪到新画布内
+            cx0, cx1 = max(0.0, nx0), min(float(new_width), nx1)
+            cy0, cy1 = max(0.0, ny0), min(float(new_height), ny1)
+            if cx1 <= cx0 or cy1 <= cy0:
+                continue
+            if full_area > 0 and ((cx1 - cx0) * (cy1 - cy0)) / full_area < min_area_ratio:
+                continue
+
             new_label = label.copy()
-
-            # 获取归一化坐标
-            x, y = label[1], label[2]
-            w, h = label[3], label[4]
-
-            # 特殊情况处理：90度的倍数
-            if angle == 90:
-                # 90度旋转：(x,y) -> (1-y,x)
-                new_x = 1.0 - y
-                new_y = x
-                # 宽高互换
-                new_w = h
-                new_h = w
-            elif angle == 180:
-                # 180度旋转：(x,y) -> (1-x,1-y)
-                new_x = 1.0 - x
-                new_y = 1.0 - y
-                new_w = w
-                new_h = h
-            elif angle == 270:
-                # 270度旋转：(x,y) -> (y,1-x)
-                new_x = y
-                new_y = 1.0 - x
-                # 宽高互换
-                new_w = h
-                new_h = w
-            else:
-                # 一般角度旋转（不常用，可能会导致标注框变形）
-                # 将归一化坐标转换为像素坐标
-                px = x * img_width
-                py = y * img_height
-
-                # 计算相对于中心的偏移
-                dx = px - img_width / 2
-                dy = py - img_height / 2
-
-                # 应用旋转
-                new_dx = dx * math.cos(angle_rad) - dy * math.sin(angle_rad)
-                new_dy = dx * math.sin(angle_rad) + dy * math.cos(angle_rad)
-
-                # 计算新的像素坐标
-                new_px = new_dx + img_width / 2
-                new_py = new_dy + img_height / 2
-
-                # 转换回归一化坐标
-                new_x = new_px / img_width
-                new_y = new_py / img_height
-
-                # 对于非90度的倍数旋转，宽高计算比较复杂，这里简化处理
-                new_w = w
-                new_h = h
-
-            # 更新标签
-            new_label[1] = max(0, min(1, new_x))
-            new_label[2] = max(0, min(1, new_y))
-            new_label[3] = max(0, min(1, new_w))
-            new_label[4] = max(0, min(1, new_h))
-
+            new_label[1] = ((cx0 + cx1) / 2.0) / new_width
+            new_label[2] = ((cy0 + cy1) / 2.0) / new_height
+            new_label[3] = (cx1 - cx0) / new_width
+            new_label[4] = (cy1 - cy0) / new_height
             transformed.append(new_label)
 
         return transformed
@@ -1104,6 +1158,115 @@ class OpenCVService:
         return mosaic_img
 
     @staticmethod
+    def apply_mosaic_with_labels(
+        images: List[np.ndarray],
+        labels_list: List[List[List[float]]],
+        output_size: int = 640,
+        min_box_pixels: float = 2.0
+    ) -> Tuple[np.ndarray, List[List[float]]]:
+        """
+        Mosaic 拼图，并同步变换 YOLO 标注框
+
+        apply_mosaic 只拼像素、不动标注框，产物直接进训练集等于喂错标数据。
+        本方法与 apply_mosaic 使用完全相同的几何（四张图各自缩放填满一个象限），
+        因此标签与像素严格对齐。
+
+        注意：每张子图是被直接 resize 进 320x320 象限的，不保持长宽比，
+        非正方形的原图会被压扁 —— 这一点与既有的 apply_mosaic 行为一致。
+
+        Args:
+            images: 四张图像
+            labels_list: 与 images 一一对应的标签列表，每项是该图的
+                [[class_id, x, y, w, h], ...]（归一化）；没有标注传 [] 即可
+            output_size: 输出画布边长
+            min_box_pixels: 变换后短边小于该像素数的框会被丢弃，
+                避免产生一堆几乎不可见的小框拉低训练质量
+
+        Returns:
+            (拼图, 合并后的标签列表)
+        """
+        if len(images) != 4:
+            raise ValueError("Mosaic需要四张图像")
+        if len(labels_list) != 4:
+            raise ValueError("labels_list 必须与 images 一一对应")
+
+        half = output_size // 2
+        # 象限左上角偏移，顺序与 apply_mosaic 一致：左上、右上、左下、右下
+        offsets = [(0, 0), (half, 0), (0, half), (half, half)]
+
+        mosaic_img = np.zeros((output_size, output_size, 3), dtype=np.uint8)
+        for img, (ox, oy) in zip(images, offsets):
+            mosaic_img[oy:oy + half, ox:ox + half] = cv2.resize(img, (half, half))
+
+        merged: List[List[float]] = []
+        for labels, (ox, oy) in zip(labels_list, offsets):
+            if not labels:
+                continue
+            for label in labels:
+                x, y, w, h = label[1], label[2], label[3], label[4]
+
+                # 原图整张被缩放填满象限，所以归一化坐标直接按象限缩放再平移
+                nx0 = ox + (x - w / 2.0) * half
+                nx1 = ox + (x + w / 2.0) * half
+                ny0 = oy + (y - h / 2.0) * half
+                ny1 = oy + (y + h / 2.0) * half
+
+                # 原标注可能略微越界（脏数据），裁到象限内
+                nx0, nx1 = max(ox, nx0), min(ox + half, nx1)
+                ny0, ny1 = max(oy, ny0), min(oy + half, ny1)
+
+                box_w, box_h = nx1 - nx0, ny1 - ny0
+                if box_w < min_box_pixels or box_h < min_box_pixels:
+                    continue
+
+                new_label = list(label)
+                new_label[1] = ((nx0 + nx1) / 2.0) / output_size
+                new_label[2] = ((ny0 + ny1) / 2.0) / output_size
+                new_label[3] = box_w / output_size
+                new_label[4] = box_h / output_size
+                merged.append(new_label)
+
+        return mosaic_img, merged
+
+    @staticmethod
+    def draw_yolo_labels(
+        image: np.ndarray,
+        labels: List[List[float]],
+        class_names: Optional[List[str]] = None
+    ) -> np.ndarray:
+        """
+        把归一化的 YOLO 标签画到图上，供人工审核拼图时肉眼校验标签是否跟着拼对了
+
+        Args:
+            image: 输入图像
+            labels: [[class_id, x, y, w, h], ...]（归一化）
+            class_names: 类别名列表，可选
+
+        Returns:
+            np.ndarray: 画好框的图像副本
+        """
+        output = image.copy()
+        height, width = output.shape[:2]
+
+        for label in labels:
+            class_id = int(label[0])
+            x, y, w, h = label[1], label[2], label[3], label[4]
+            x1 = int(round((x - w / 2.0) * width))
+            y1 = int(round((y - h / 2.0) * height))
+            x2 = int(round((x + w / 2.0) * width))
+            y2 = int(round((y + h / 2.0) * height))
+
+            # 每个类别一个固定颜色，方便区分
+            color = ((class_id * 67) % 256, (class_id * 131) % 256, (class_id * 197) % 256)
+            cv2.rectangle(output, (x1, y1), (x2, y2), color, 2)
+
+            name = class_names[class_id] if class_names and 0 <= class_id < len(class_names) else str(class_id)
+            cv2.putText(output, name, (x1, max(12, y1 - 5)),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1, cv2.LINE_AA)
+
+        return output
+
+    @staticmethod
     def apply_weather_effect(img: np.ndarray, weather_type: str, intensity: float = 0.5) -> np.ndarray:
         """
         应用天气效果
@@ -1335,9 +1498,9 @@ class OpenCVService:
                 # 保存帧
                 output_path = output_dir / filename
                 if frame_format.lower() == "jpg":
-                    cv2.imwrite(str(output_path), frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                    OpenCVService.imwrite_unicode(output_path, frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
                 else:
-                    cv2.imwrite(str(output_path), frame)
+                    OpenCVService.imwrite_unicode(output_path, frame)
 
                 # 添加到结果列表
                 extracted_frames.append({
@@ -1692,7 +1855,7 @@ class OpenCVService:
                     # 保存帧
                     filename = f"scene_{i:03d}_frame_{mid_frame:06d}.jpg"
                     output_path = output_dir / "temp" / filename
-                    cv2.imwrite(str(output_path), frame)
+                    OpenCVService.imwrite_unicode(output_path, frame)
 
                     # 添加到帧列表
                     frames.append({
@@ -1740,7 +1903,7 @@ class OpenCVService:
                     # 保存帧
                     filename = f"motion_{i:03d}_frame_{frame_index:06d}.jpg"
                     output_path = output_dir / "temp" / filename
-                    cv2.imwrite(str(output_path), frame)
+                    OpenCVService.imwrite_unicode(output_path, frame)
 
                     # 添加到帧列表
                     frames.append({

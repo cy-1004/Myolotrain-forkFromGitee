@@ -1,6 +1,7 @@
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Query, Body
 from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from sqlalchemy.orm import Session
 from pathlib import Path
 from app.db.session import get_db
@@ -12,6 +13,8 @@ import shutil
 import json
 from pydantic import BaseModel
 
+from app.services.opencv_service import opencv_service
+from app.services.export_service import get_model_imgsz
 from tools.import_default_models import import_default_models
 
 router = APIRouter()
@@ -265,57 +268,62 @@ async def download_model_onnx(model_id: str, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="模型文件不存在")
         
         # 使用临时目录存储ONNX文件
-        with tempfile.TemporaryDirectory() as temp_dir:
-            logger.info(f"创建临时目录: {temp_dir}")
-            
-            try:
-                # 加载PyTorch模型
-                logger.info("正在加载YOLO模型...")
-                yolo_model = YOLO(str(model_path))
-                logger.info("YOLO模型加载成功")
-                
-                # 导出为ONNX格式到临时目录
-                logger.info("开始ONNX模型导出...")
-                # 使用ultralytics推荐的参数
-                onnx_path = yolo_model.export(
-                    format="onnx", 
-                    imgsz=640, 
-                    opset=12,
-                    project=temp_dir,
-                    name="model"
-                )
-                
-                # 检查导出是否成功并返回路径
-                if not onnx_path or not os.path.exists(onnx_path):
-                    # 如果返回的路径不存在，尝试手动查找
-                    temp_files = os.listdir(temp_dir)
-                    logger.warning(f"临时目录内容: {temp_files}")
-                    
-                    # 查找任何.onnx文件
-                    onnx_files = [f for f in temp_files if f.endswith('.onnx')]
-                    if not onnx_files:
-                        logger.error("未找到任何ONNX导出文件")
-                        raise HTTPException(status_code=500, detail="ONNX模型转换失败: 导出过程未生成任何ONNX文件")
-                    
-                    # 使用找到的第一个ONNX文件
-                    onnx_path = os.path.join(temp_dir, onnx_files[0])
-                    logger.info(f"手动找到ONNX文件: {onnx_path}")
-                
-                logger.info(f"ONNX模型导出成功: {onnx_path}")
-                logger.info(f"文件大小: {os.path.getsize(onnx_path)} bytes")
-                
-                # 提供下载响应
-                return FileResponse(
-                    path=onnx_path,
-                    filename=f"{db_model.name}.onnx",
-                    media_type="application/octet-stream"
-                )
-                
-            except Exception as e:
-                logger.error(f"ONNX导出过程中发生错误: {str(e)}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(status_code=500, detail=f"ONNX模型转换失败: {str(e)}")
+        # 注意：不能用 `with tempfile.TemporaryDirectory()`，因为FileResponse是在
+        # 函数返回之后才异步读取文件内容的，with块会在那之前就把临时目录删掉，
+        # 导致"文件不存在"。这里手动创建目录，通过BackgroundTask在响应发送完毕后再清理。
+        temp_dir = tempfile.mkdtemp()
+        logger.info(f"创建临时目录: {temp_dir}")
+
+        try:
+            # 加载PyTorch模型
+            logger.info("正在加载YOLO模型...")
+            yolo_model = YOLO(str(model_path))
+            logger.info("YOLO模型加载成功")
+
+            # 导出为ONNX格式到临时目录
+            logger.info("开始ONNX模型导出...")
+            # 使用ultralytics推荐的参数
+            onnx_path = yolo_model.export(
+                format="onnx",
+                imgsz=get_model_imgsz(str(model_path)),  # TFLite/ONNX 输入尺寸固定，必须与训练一致
+                opset=12,
+                project=temp_dir,
+                name="model"
+            )
+
+            # 检查导出是否成功并返回路径
+            if not onnx_path or not os.path.exists(onnx_path):
+                # 如果返回的路径不存在，尝试手动查找
+                temp_files = os.listdir(temp_dir)
+                logger.warning(f"临时目录内容: {temp_files}")
+
+                # 查找任何.onnx文件
+                onnx_files = [f for f in temp_files if f.endswith('.onnx')]
+                if not onnx_files:
+                    logger.error("未找到任何ONNX导出文件")
+                    raise HTTPException(status_code=500, detail="ONNX模型转换失败: 导出过程未生成任何ONNX文件")
+
+                # 使用找到的第一个ONNX文件
+                onnx_path = os.path.join(temp_dir, onnx_files[0])
+                logger.info(f"手动找到ONNX文件: {onnx_path}")
+
+            logger.info(f"ONNX模型导出成功: {onnx_path}")
+            logger.info(f"文件大小: {os.path.getsize(onnx_path)} bytes")
+
+            # 提供下载响应，响应发送完毕后清理临时目录
+            return FileResponse(
+                path=onnx_path,
+                filename=f"{db_model.name}.onnx",
+                media_type="application/octet-stream",
+                background=BackgroundTask(shutil.rmtree, temp_dir, ignore_errors=True)
+            )
+
+        except Exception as e:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.error(f"ONNX导出过程中发生错误: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"ONNX模型转换失败: {str(e)}")
     except HTTPException:
         raise
     except Exception as e:
@@ -323,6 +331,165 @@ async def download_model_onnx(model_id: str, db: Session = Depends(get_db)):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"ONNX模型处理失败: {str(e)}")
+
+
+@router.get("/{model_id}/download/tflite")
+async def download_model_tflite(
+    model_id: str,
+    imgsz: Optional[int] = Query(None, ge=32, le=2048, description="输入尺寸，默认取模型训练时的尺寸"),
+    db: Session = Depends(get_db)
+):
+    """下载模型的TFLite格式
+
+    转换结果持久化保存，模型文件不变时重复下载直接返回已有文件（转换一次要几十秒到几分钟）。
+    """
+    from app.crud.crud_model import model
+    from app.services import export_service
+    from fastapi.concurrency import run_in_threadpool
+    import logging
+
+    # 检查模型ID是否为有效的UUID格式
+    try:
+        import uuid
+        uuid.UUID(model_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="模型ID格式无效")
+
+    logger = logging.getLogger(__name__)
+    db_model = model.get(db, id=model_id)
+    if not db_model:
+        raise HTTPException(status_code=404, detail="模型未找到")
+    model_path = Path(db_model.path)
+    if not model_path.exists():
+        raise HTTPException(status_code=404, detail="模型文件不存在")
+
+    try:
+        # 转换是 CPU 密集的同步操作，放到线程池里，避免阻塞其他请求
+        tflite_path, meta = await run_in_threadpool(
+            export_service.get_or_export_tflite, model_id, str(model_path), imgsz)
+    except export_service.ExportError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"TFLite导出过程中发生错误: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"TFLite模型转换失败: {str(e)}")
+
+    return FileResponse(
+        path=str(tflite_path),
+        filename=f"{db_model.name}.tflite",
+        media_type="application/octet-stream",
+        headers={"X-Model-Imgsz": str(meta.get("imgsz", ""))},
+    )
+
+
+@router.post("/{model_id}/verify-tflite")
+async def verify_model_tflite(
+    model_id: str,
+    file: UploadFile = File(None),
+    db: Session = Depends(get_db)
+):
+    """转换模型为TFLite并做一次真实推理测试，验证转换后的模型是否可用
+
+    复用已持久化的 TFLite 文件（没有则先转换），
+    然后分别用原始PT模型和转换出的TFLite模型对同一张图片做推理，对比检测结果，
+    从而判断转换后的TFLite模型是否可用。
+    """
+    from app.crud.crud_model import model
+    from app.services import export_service
+    from ultralytics import YOLO
+    import tempfile
+    import logging
+
+    try:
+        import uuid
+        uuid.UUID(model_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="模型ID格式无效")
+
+    logger = logging.getLogger(__name__)
+    logger.info(f"开始验证TFLite模型，模型ID: {model_id}")
+
+    db_model = model.get(db, id=model_id)
+    if not db_model:
+        raise HTTPException(status_code=404, detail="模型未找到")
+
+    model_path = Path(db_model.path)
+    if not model_path.exists():
+        raise HTTPException(status_code=404, detail="模型文件不存在")
+
+    temp_dir = tempfile.mkdtemp()
+    try:
+        # 第一步：准备测试图片，优先使用用户上传的真实图片
+        used_real_image = False
+        test_image_path = os.path.join(temp_dir, "test_image.jpg")
+        if file is not None and file.filename:
+            content = await file.read()
+            with open(test_image_path, "wb") as f:
+                f.write(content)
+            used_real_image = True
+        else:
+            import numpy as np
+            from PIL import Image
+            rng = np.random.default_rng(42)
+            noise = rng.integers(0, 255, size=(640, 640, 3), dtype=np.uint8)
+            Image.fromarray(noise).save(test_image_path)
+
+        # 第二步：转换为TFLite（已导出过且模型未变化时直接复用）
+        tflite_path, meta = export_service.get_or_export_tflite(model_id, str(model_path))
+        imgsz = int(meta["imgsz"])
+
+        # 第三步：用tf.lite.Interpreter做一次基础完整性检查（能否正常加载、输入输出形状）
+        interpreter, input_details, output_details = export_service.load_tflite_interpreter(str(tflite_path))
+
+        # 第四步：分别用PT模型和TFLite模型对同一张图片做推理，对比检测结果
+        pt_model = YOLO(str(model_path))
+        pt_results = pt_model.predict(source=test_image_path, imgsz=imgsz, verbose=False)
+        pt_boxes = pt_results[0].boxes
+        pt_count = int(len(pt_boxes)) if pt_boxes is not None else 0
+        pt_classes = sorted(set(int(c) for c in pt_boxes.cls.cpu().tolist())) if pt_count else []
+
+        # TFLite 侧直接用 tf.lite.Interpreter 推理 + 自己做后处理。
+        # 不走 YOLO(tflite_path).predict()：ultralytics 的 LiteRT 后端与
+        # 已安装的 ai_edge_litert 版本不兼容，会抛
+        # "CreateWrapperFromFile(): incompatible function arguments"。
+        tflite_count, tflite_classes, numeric = export_service.run_tflite_and_compare(
+            interpreter, input_details, output_details,
+            str(model_path), test_image_path, imgsz=imgsz)
+
+        warnings = []
+        if not used_real_image:
+            warnings.append("未提供测试图片，使用的是随机噪声图片，只能验证模型能否正常加载/推理，检测结果本身没有参考意义，建议上传一张真实图片重新验证。")
+        else:
+            if pt_count != tflite_count:
+                warnings.append(f"PT模型检测到{pt_count}个目标，TFLite模型检测到{tflite_count}个目标，数量不一致，转换后的模型效果可能有偏差。")
+            if pt_classes != tflite_classes:
+                warnings.append(f"PT与TFLite模型识别出的类别不完全一致：PT={pt_classes}，TFLite={tflite_classes}。")
+
+        logger.info("TFLite模型验证完成")
+
+        return {
+            "success": True,
+            "used_real_image": used_real_image,
+            "input_shape": [int(x) for x in input_details[0]["shape"]],
+            "output_shape": [int(x) for x in output_details[0]["shape"]],
+            "pt_detection_count": pt_count,
+            "tflite_detection_count": tflite_count,
+            "pt_classes": pt_classes,
+            "tflite_classes": tflite_classes,
+            # 转换前后原始输出的逐元素误差 —— 判断"有没有掉精度"的直接证据
+            "numeric_diff": numeric,
+            "warnings": warnings,
+        }
+    except HTTPException:
+        raise
+    except export_service.ExportError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        logger.error(f"验证TFLite模型时发生错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"验证TFLite模型失败: {str(e)}")
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 class PruneRequest(BaseModel):

@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
+from app.db.types import StoredPath
 
 class TrainingTask(Base):
     __tablename__ = "training_tasks"
@@ -19,10 +20,10 @@ class TrainingTask(Base):
     status = Column(String, default="pending")  # pending, downloading_model, training, completed, failed, cancelled
     start_time = Column(DateTime, nullable=True)
     end_time = Column(DateTime, nullable=True)
-    log_path = Column(String, nullable=True)
-    tensorboard_path = Column(String, nullable=True)
+    log_path = Column(StoredPath, nullable=True)
+    tensorboard_path = Column(StoredPath, nullable=True)
     process_id = Column(String, nullable=True)  # 训练进程的PID
-    last_checkpoint = Column(String, nullable=True)  # 最后一次检查点的路径，用于继续训练
+    last_checkpoint = Column(StoredPath, nullable=True)  # 最后一次检查点的路径，用于继续训练
 
     # Relationships
     dataset = relationship("Dataset", foreign_keys=[dataset_id])

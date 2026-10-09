@@ -461,20 +461,19 @@ Myolotrain/
    - 安装[Docker](https://docs.docker.com/get-docker/)
    - 安装[Docker Compose](https://docs.docker.com/compose/install/)
 
-2. **CPU版本部署**
-   ```bash
-   docker-compose up -d
-   ```
+2. **配置**：`cp .env.example .env`，至少填写 `SECRET_KEY`（≥ 32 位）和 `POSTGRES_PASSWORD`
 
-3. **GPU版本部署**
-   - 确保已安装[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+3. **构建并启动**（自动判断是否启用 GPU；端口被占用时自动顺延到下一个）
    ```bash
-   docker-compose -f docker-compose-gpu.yml up -d
+   docker compose build
+   scripts/start.sh            # Windows: powershell -ExecutionPolicy Bypass -File scripts\start.ps1
    ```
+   - 使用 GPU 需先安装 [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 
 4. **访问系统**
-   - Web界面: http://localhost:8000
-   - TensorBoard: http://localhost:6006
+   - 控制台与 API 共用一个端口，地址以启动脚本的输出为准（默认 http://localhost:8000，实际端口记录在 `.app_port`）
+   - Docker 部署不启动 TensorBoard，训练曲线在“训练日志”弹窗中查看
+   - 详见 [DOCKER_DEPLOYMENT.md](DOCKER_DEPLOYMENT.md)
 
 ## 5 GPU设置
 

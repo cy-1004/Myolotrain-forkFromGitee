@@ -170,11 +170,19 @@ class OpenCVTools {
                 event.preventDefault();
                 console.log('Process image button clicked');
 
-                const imageFile = document.getElementById('image-upload').files[0];
-                if (!imageFile) {
+                const selectedFiles = document.getElementById('image-upload').files;
+                if (!selectedFiles.length) {
                     alert('请选择图像文件');
                     return;
                 }
+
+                // 选了多张就交给"批量处理"tab —— 那边已经有异步任务、
+                // 进度轮询和打包下载，没必要在这里再造一套
+                if (selectedFiles.length > 1) {
+                    if (window.opencvTools.handOffToBatch(selectedFiles)) return;
+                }
+
+                const imageFile = selectedFiles[0];
 
                 // 构建操作列表
                 const operations = [];
@@ -828,6 +836,71 @@ class OpenCVTools {
 }
 
 // 创建全局实例
+/**
+ * 把预处理 tab 里选中的多张图和已勾选的操作搬到"批量处理"tab 并切过去。
+ * 复用那边现成的异步任务 + 进度条 + 打包下载，避免两套并行的实现。
+ * @returns {boolean} 是否成功交接
+ */
+OpenCVTools.prototype.handOffToBatch = function (files) {
+    const batchFiles = document.getElementById('batch-files');
+    const batchTab = document.getElementById('batch-tab');
+    if (!batchFiles || !batchTab || typeof DataTransfer === 'undefined') {
+        return false;
+    }
+
+    try {
+        const dt = new DataTransfer();
+        for (const f of files) dt.items.add(f);
+        batchFiles.files = dt.files;
+    } catch (e) {
+        console.error('转交批量处理失败:', e);
+        return false;
+    }
+
+    // 来源切回"上传"，否则批量 tab 可能停在数据集来源上
+    const sourceSel = document.getElementById('batch-source');
+    if (sourceSel) {
+        sourceSel.value = 'upload';
+        sourceSel.dispatchEvent(new Event('change'));
+    }
+
+    // 把预处理这边勾的操作同步过去，省得用户再勾一遍
+    const mirror = [
+        ['resize-check', 'b-resize', () => {
+            document.getElementById('b-resize-w').value = document.getElementById('resize-width').value;
+            document.getElementById('b-resize-h').value = document.getElementById('resize-height').value;
+        }],
+        ['denoise-check', 'b-denoise', () => {
+            document.getElementById('b-denoise-strength').value = document.getElementById('denoise-strength').value;
+        }],
+        ['brightness-contrast-check', 'b-bc', () => {
+            document.getElementById('b-brightness').value = document.getElementById('brightness').value;
+            document.getElementById('b-contrast').value = document.getElementById('contrast').value;
+        }],
+        ['sharpen-check', 'b-sharpen', () => {
+            document.getElementById('b-sharpen-amount').value = document.getElementById('sharpen-amount').value;
+        }]
+    ];
+
+    mirror.forEach(([srcId, dstId, copyParams]) => {
+        const src = document.getElementById(srcId);
+        const dst = document.getElementById(dstId);
+        if (!src || !dst) return;
+        dst.checked = src.checked;
+        dst.dispatchEvent(new Event('change'));
+        if (src.checked) copyParams();
+    });
+
+    if (typeof bootstrap !== 'undefined' && bootstrap.Tab) {
+        bootstrap.Tab.getOrCreateInstance(batchTab).show();
+    } else {
+        batchTab.click();
+    }
+
+    alert(`已选择 ${files.length} 张图片，已转到「批量处理」并带上当前勾选的操作。\n确认参数后点"开始批量处理"。`);
+    return true;
+};
+
 window.opencvTools = new OpenCVTools();
 
 // 导出供其他模块使用

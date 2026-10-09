@@ -9,7 +9,7 @@ from app.schemas.user import UserCreate
 from app.models.user import UserRole
 
 # 导入所有模型以确保它们被注册
-from app.models import Dataset, Model, TrainingTask, DetectionTask, AnnotationProject, ImageAnnotation, User
+from app.models import Dataset, Model, TrainingTask, DetectionTask, AnnotationProject, ImageAnnotation, User, MosaicCandidate
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,21 @@ def create_initial_admin():
         # 检查是否已存在管理员用户
         admin_user = get_user_by_username(db, username="admin")
         if not admin_user:
-            # 创建初始管理员用户
+            # 创建初始管理员用户。密码来源：
+            #   1. ADMIN_INITIAL_PASSWORD；
+            #   2. 未配置且为对外部署模式：随机生成，只在本次日志里打印一次——
+            #      公开的默认密码 admin@123 对外暴露等于没有密码；
+            #   3. 未配置的本地开发环境：沿用默认密码 admin@123
+            generated = False
+            if settings.ADMIN_INITIAL_PASSWORD:
+                admin_password = settings.ADMIN_INITIAL_PASSWORD
+            elif settings.EXTERNAL_MODE:
+                import secrets
+                admin_password = secrets.token_urlsafe(12)
+                generated = True
+            else:
+                admin_password = "admin@123"  # 默认密码，用户应首次登录后修改
             # 确保密码不超过72字节（bcrypt限制）
-            admin_password = "admin@123"  # 默认密码，用户应首次登录后修改
             if len(admin_password.encode('utf-8')) > 72:
                 admin_password = admin_password.encode('utf-8')[:72].decode('utf-8', 'ignore')
             user_in = UserCreate(
@@ -33,6 +45,11 @@ def create_initial_admin():
             )
             admin_user = create_user(db=db, user=user_in)
             logger.info("Initial admin user created successfully")
+            if generated:
+                logger.warning("=" * 60)
+                logger.warning(f"已创建管理员账号 admin，初始密码：{admin_password}")
+                logger.warning("该密码只显示这一次，请登录后立即修改")
+                logger.warning("=" * 60)
         else:
             logger.info("Admin user already exists")
     finally:

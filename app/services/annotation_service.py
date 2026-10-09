@@ -545,10 +545,126 @@ class AnnotationService:
         
         return image_annotation.update(db, db_obj=db_image, obj_in=update_data)
 
+    def import_annotations_from_disk(
+        self,
+        db: Session,
+        project_id: UUID,
+        overwrite: bool = False
+    ) -> Dict[str, Any]:
+        """为已存在的项目补导入磁盘上的 YOLO 标签
+
+        建项目时忘勾（或当时根本勾不上）"导入原标注"的话，图片记录会全是空标注，
+        而盘上的 labels/*.txt 其实一直都在。这个方法用来事后补上，不必删掉重建项目。
+
+        Args:
+            overwrite: 默认 False —— 只填补当前没有标注的图片，
+                绝不覆盖已经标好的内容，避免抹掉人工标注成果
+
+        Returns:
+            统计信息，含各类跳过原因的计数（不静默丢弃）
+        """
+        project = annotation_project.get(db, id=project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="项目未找到")
+
+        stats: Dict[str, Any] = {
+            'total_images': 0,
+            'imported_images': 0,
+            'imported_annotations': 0,
+            'skipped_has_annotations': 0,
+            'skipped_no_label_file': 0,
+            'skipped_empty_label': 0,
+            'skipped_class_out_of_range': 0,
+            'labels_dir': None,
+            'errors': [],
+        }
+
+        image_directory = project.image_directory
+        if not image_directory:
+            stats['errors'].append("项目没有配置图片目录")
+            return stats
+
+        image_dir_path = Path(str(image_directory))
+        if not image_dir_path.exists():
+            stats['errors'].append(f"图片目录不存在: {image_directory}")
+            return stats
+
+        # 与 _import_existing_annotations_with_stats 保持同样的查找顺序
+        labels_dir = None
+        for candidate in (image_dir_path / "labels",
+                          image_dir_path.parent / "labels",
+                          image_dir_path / "Annotations"):
+            if candidate.exists():
+                labels_dir = candidate
+                break
+
+        if labels_dir is None:
+            stats['errors'].append(
+                f"没有找到标注目录，已尝试: {image_dir_path / 'labels'}、"
+                f"{image_dir_path.parent / 'labels'}、{image_dir_path / 'Annotations'}"
+            )
+            return stats
+
+        stats['labels_dir'] = str(labels_dir)
+        label_files = {f.stem: f for f in labels_dir.rglob("*.txt")}
+
+        classes = list(project.classes or [])
+        project_type = str(project.project_type or 'detection')
+        all_images = self.get_project_images(db, project_id)
+        stats['total_images'] = len(all_images)
+
+        for img in all_images:
+            existing = img.annotations if img.annotations is not None else []
+            if existing and not overwrite:
+                stats['skipped_has_annotations'] += 1
+                continue
+
+            stem = Path(str(img.image_name)).stem
+            label_file = label_files.get(stem)
+            if label_file is None:
+                stats['skipped_no_label_file'] += 1
+                continue
+
+            try:
+                # 先数一下有多少行会因为 class_id 超出类别表而被丢掉 ——
+                # 解析器对这种行是静默 continue 的，不数就查不出"标注凭空少了"
+                out_of_range = 0
+                with open(label_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        parts = line.split()
+                        if not parts:
+                            continue
+                        try:
+                            if int(parts[0]) >= len(classes):
+                                out_of_range += 1
+                        except ValueError:
+                            continue
+                stats['skipped_class_out_of_range'] += out_of_range
+
+                annotations = self._parse_yolo_label_file(
+                    str(label_file), classes, project_type)
+                if annotations:
+                    self.save_annotations(db, img.id, annotations)
+                    stats['imported_images'] += 1
+                    stats['imported_annotations'] += len(annotations)
+                else:
+                    stats['skipped_empty_label'] += 1
+            except Exception as e:
+                stats['errors'].append(f"{img.image_name}: {str(e)}")
+
+        if stats['skipped_class_out_of_range']:
+            stats['errors'].append(
+                f"有 {stats['skipped_class_out_of_range']} 个标注框的 class_id 超出了项目类别表"
+                f"（项目只有 {len(classes)} 个类别：{classes}），这些框被跳过了。"
+                f"请确认项目类别与数据集的 classes.txt 一致。"
+            )
+
+        return stats
+
     def export_annotations(
-        self, 
-        db: Session, 
-        project_id: UUID, 
+        self,
+        db: Session,
+        project_id: UUID,
         export_request: ExportRequest
     ) -> str:
         """导出项目标注数据"""
@@ -1964,7 +2080,9 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
                 predictor = Predictor(cfg, model_path=str(model_path))
                 
                 # 加载图片
-                img = cv2.imread(str(image_file_path))
+                # 中文路径下 cv2.imread 会返回 None，走 unicode 安全读取
+                from app.services.opencv_service import opencv_service
+                img = opencv_service.imread_unicode(str(image_file_path))
                 if img is None:
                     raise HTTPException(status_code=404, detail="图片加载失败")
                 

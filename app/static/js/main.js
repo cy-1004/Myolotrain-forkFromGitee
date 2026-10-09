@@ -227,6 +227,22 @@ function changePassword() {
     });
 }
 
+// 部署形态（是否有 TensorBoard、是否对外部署模式），各页面据此隐藏不可用的入口。
+// 只请求一次；请求失败时按"全部可用"处理，保持与旧版本行为一致
+let runtimeConfigPromise = null;
+function getRuntimeConfig() {
+    if (!runtimeConfigPromise) {
+        runtimeConfigPromise = authenticatedFetch(`${API_URL}/settings/runtime`)
+            .then(response => response.ok ? response.json() : {})
+            .catch(() => ({}))
+            .then(cfg => ({
+                tensorboard_enabled: cfg.tensorboard_enabled !== false,
+                external_mode: cfg.external_mode === true,
+            }));
+    }
+    return runtimeConfigPromise;
+}
+
 // 带认证的fetch请求
 function authenticatedFetch(url, options = {}) {
     // 添加认证头
@@ -597,12 +613,23 @@ function loadPage(page) {
                 window.opencvTools.loadOpenCVPage();
                 window.opencvTools.bindOpenCVEvents();
             }
+            // 批量处理与拼图工坊：页面由模板渲染，每次进来都要重新绑定
+            if (typeof window.batchProcessingManager !== 'undefined') {
+                window.batchProcessingManager.destroy();
+                window.batchProcessingManager.init();
+            }
             break;
         case 'video':
             // 使用已拆分的模块
             if (typeof window.videoProcessor !== 'undefined') {
                 window.videoProcessor.loadVideoPage();
                 window.videoProcessor.bindVideoEvents();
+            }
+            break;
+        case 'frame-extraction':
+            // 视频抽帧与自动命名
+            if (typeof window.frameExtraction !== 'undefined') {
+                window.frameExtraction.bindEvents();
             }
             break;
         case 'annotation':

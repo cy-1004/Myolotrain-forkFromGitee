@@ -33,6 +33,12 @@ app/static/advanced_augmentations/*
 app/static/processed_images/*
 bak/
 models/
+app/static/extracted_frames/*
+app/static/batch_tasks/*
+app/static/mosaic_candidates/*
+# 数据根目录（DATA_DIR 默认值）与启动脚本记录的实际端口
+/data/
+.app_port
 
 # 数据库
 postgres_data/
@@ -50,3 +56,6 @@ postgres_data/
 .DS_Store
 Thumbs.db
 sam3_config.json
+
+# Docker 构建用的本地权重
+docker/weights/*.pt

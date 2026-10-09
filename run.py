@@ -1,5 +1,6 @@
 import logging
-import uvicorn
+import sys
+from app.core.server import run_server
 from app.db.init_db import init_db
 # from app.services.tensorboard_service import tensorboard_manager
 
@@ -24,8 +25,9 @@ if __name__ == "__main__":
         # else:
         #     logger.warning("Failed to start TensorBoard service")
 
-        # Start server
+        # Start server（端口被占用时自动顺延，见 app/core/server.py）
         logger.info("Starting server...")
-        uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+        run_server()
     except Exception as e:
         logger.error(f"Error during startup: {e}", exc_info=True)
+        sys.exit(1)

@@ -10,6 +10,7 @@ from app.db.session import get_db
 from app.crud import annotation_project, image_annotation
 from app.crud.crud_model import model
 from app.api.deps import get_current_active_user
+from app.api.deps import forbid_in_external_mode
 from app.models.annotation import ANNOTATION_LEASE_TTL, ImageAnnotation as ImageAnnotationModel
 from app.models.user import User, UserRole
 from app.schemas.annotation import (
@@ -141,7 +142,7 @@ def create_annotation_project(
     else:
         return proj
 
-@router.post("/projects/from-directory", response_model=AnnotationProjectResponse)
+@router.post("/projects/from-directory", response_model=AnnotationProjectResponse, dependencies=[Depends(forbid_in_external_mode)])
 def create_project_from_directory(
     name: str = Body(...),
     description: str = Body(""),
@@ -280,10 +281,17 @@ def get_project_images(
     project_id: UUID,
     skip: int = 0,
     limit: int = 50,
+    order_by: str = "name",
     db: Session = Depends(get_db)
 ):
-    """获取项目图片列表"""
-    return image_annotation.get_by_project_id(db, project_id=project_id, skip=skip, limit=limit)
+    """获取项目图片列表
+
+    order_by: name(文件名) / created(扫描顺序) / updated(最近修改)
+    默认按文件名排序，保证多人协作下顺序稳定。
+    """
+    return image_annotation.get_by_project_id(
+        db, project_id=project_id, skip=skip, limit=limit, order_by=order_by
+    )
 
 @router.get("/images/{image_id}", response_model=ImageAnnotation)
 def get_image_annotation(
@@ -656,7 +664,7 @@ def create_project_with_folder(
         except:
             pass
 
-@router.get("/browse-directories")
+@router.get("/browse-directories", dependencies=[Depends(forbid_in_external_mode)])
 def browse_directories(path: str = ""): 
     """浏览本地目录"""
     import os
@@ -722,7 +730,7 @@ def browse_directories(path: str = ""):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"浏览目录失败: {str(e)}")
 
-@router.get("/scan-directory-images")
+@router.get("/scan-directory-images", dependencies=[Depends(forbid_in_external_mode)])
 def scan_directory_images(directory_path: str):
     """扫描目录中的图片数量"""
     from pathlib import Path
@@ -993,6 +1001,30 @@ def mark_all_completed(
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
+
+
+@router.post("/projects/{project_id}/import-annotations")
+def import_project_annotations(
+    project_id: UUID,
+    overwrite: bool = Form(False),
+    db: Session = Depends(get_db)
+):
+    """为已存在的项目补导入磁盘上的 YOLO 标签
+
+    建项目时没勾"导入原标注"（服务器目录模式下以前根本勾不上），
+    图片记录会全是空标注，但盘上的 labels/*.txt 一直都在。
+    这个接口用来事后补上，不必删掉项目重建。
+
+    overwrite 默认 False：只填补当前没有标注的图片，不覆盖已标好的内容。
+    """
+    project = annotation_project.get(db, id=project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目未找到")
+
+    service = AnnotationService()
+    stats = service.import_annotations_from_disk(
+        db, project_id, overwrite=overwrite)
+    return {"message": "导入完成", **stats}
 
 
 # 扩展数据功能

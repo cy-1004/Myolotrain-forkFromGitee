@@ -20,6 +20,8 @@ from app.services.upload_service import upload_manager
 from app.crud import dataset
 from app.core.config import settings
 
+from app.api.deps import forbid_in_external_mode
+
 router = APIRouter()
 
 class UploadResponse(BaseModel):
@@ -124,7 +126,7 @@ def get_directory_info(name: str):
     """
     return dataset_service.get_directory_info(name)
 
-@router.get("/browse-filesystem", response_model=Dict[str, Any])
+@router.get("/browse-filesystem", response_model=Dict[str, Any], dependencies=[Depends(forbid_in_external_mode)])
 def browse_filesystem(path: Optional[str] = None):
     """
     浏览本地文件系统
@@ -133,21 +135,21 @@ def browse_filesystem(path: Optional[str] = None):
 
 # 我们使用browse-filesystem API来浏览文件系统
 
-@router.get("/validate-external-directory", response_model=Dict[str, Any])
+@router.get("/validate-external-directory", response_model=Dict[str, Any], dependencies=[Depends(forbid_in_external_mode)])
 def validate_external_directory(path: str):
     """
     验证外部数据集目录是否有效
     """
     return dataset_service.validate_external_directory(path)
 
-@router.get("/validate-local-directory", response_model=Dict[str, Any])
+@router.get("/validate-local-directory", response_model=Dict[str, Any], dependencies=[Depends(forbid_in_external_mode)])
 def validate_local_directory(path: str):
     """
     验证本地数据集目录是否有效
     """
     return dataset_service.validate_external_directory(path)  # 复用现有的验证函数
 
-@router.post("/register-external", response_model=Dataset)
+@router.post("/register-external", response_model=Dataset, dependencies=[Depends(forbid_in_external_mode)])
 def register_external_dataset(
     name: str = Body(...),
     description: Optional[str] = Body(None),
@@ -456,7 +458,7 @@ async def convert_coco_json(
             detail=f"转换失败: {str(e)}"
         )
 
-@router.post("/open-folder", response_model=Dict[str, Any])
+@router.post("/open-folder", response_model=Dict[str, Any], dependencies=[Depends(forbid_in_external_mode)])
 async def open_folder(data: Dict[str, str]):
     """
     打开本地文件夹
