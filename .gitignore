@@ -1,5 +1,7 @@
 # 所有说明文档
 *.md
+# 设计/交接文档需要随代码一起版本管理
+!docs/**/*.md
 
 # 开发测试文件
 dev-test/
@@ -32,7 +34,10 @@ app/static/augmented_datasets/*
 app/static/advanced_augmentations/*
 app/static/processed_images/*
 bak/
-models/
+# 模型权重与上传的模型文件（只忽略这几个数据目录；不能写成 models/，否则会把 app/models/ 下的代码也忽略掉）
+/models/
+/app/static/models/
+/tests/models/
 app/static/extracted_frames/*
 app/static/batch_tasks/*
 app/static/mosaic_candidates/*

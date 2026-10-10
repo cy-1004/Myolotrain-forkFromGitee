@@ -64,6 +64,9 @@ class FrameExtractionService:
         except (KeyError, ValueError, IndexError) as e:
             return False, f"命名模板不合法: {e}。仅支持变量 {{video_name}}、{{index}}、{{timestamp}}"
 
+    # 抽帧步长不超过该帧数时顺序读取，超过则逐帧 seek
+    SEQUENTIAL_READ_MAX_STEP = 60
+
     @classmethod
     def extract_from_video(
         cls,
@@ -82,8 +85,14 @@ class FrameExtractionService:
         resize: Optional[Tuple[int, int]] = None,
         subfolder: bool = False,
         progress_cb=None,
+        on_frame=None,
+        should_stop=None,
     ) -> Dict[str, Any]:
-        """对单个视频抽帧。返回该视频的处理结果。抛出异常表示该视频处理失败（由调用方捕获记录）。"""
+        """对单个视频抽帧。返回该视频的处理结果。抛出异常表示该视频处理失败（由调用方捕获记录）。
+
+        on_frame(output_path, frame_index, timestamp)：每写出一帧回调一次，调用方据此记录逐帧清单；
+        should_stop()：返回 True 时提前结束（返回结果中 status 为 stopped）。
+        """
         video_stem = Path(original_name).stem
 
         # 目标目录：扁平则直接写 output_dir，按视频建子目录则写 output_dir/<video_stem>
@@ -116,9 +125,20 @@ class FrameExtractionService:
             index = 1
             frame_index = start_frame
             total_expected = max(1, (end_frame - start_frame) // step)
+            stopped = False
+
+            # 步长较小时顺序读取（grab 跳过中间帧）：逐帧 seek 在很多编码格式上既慢又不精确
+            # （只能定位到关键帧附近）；步长很大时 seek 仍然更快
+            sequential = step <= cls.SEQUENTIAL_READ_MAX_STEP
+            if sequential and start_frame > 0:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
             while frame_index < end_frame:
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+                if should_stop and should_stop():
+                    stopped = True
+                    break
+                if not sequential:
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
                 ret, frame = cap.read()
                 if not ret:
                     break
@@ -144,16 +164,25 @@ class FrameExtractionService:
                 if not ok:
                     raise IOError(f"写入图像失败: {output_path}")
 
+                if on_frame:
+                    on_frame(output_path, frame_index, timestamp)
+
                 extracted += 1
                 index += 1
                 frame_index += step
+                if sequential:
+                    # 跳过两帧之间的 step-1 帧；grab 只解码不转换，比 read 快
+                    for _ in range(step - 1):
+                        if not cap.grab():
+                            frame_index = end_frame
+                            break
 
                 if progress_cb and extracted % 10 == 0:
                     progress_cb(min(99, int(extracted / total_expected * 100)), extracted)
 
             return {
                 "video": original_name,
-                "status": "success",
+                "status": "stopped" if stopped else "success",
                 "extracted_frames": extracted,
                 "fps": round(fps, 2),
                 "duration": round(duration, 2),

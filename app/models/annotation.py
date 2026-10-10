@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timedelta
-from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, Boolean, ForeignKey, Index
+from sqlalchemy import Column, String, Integer, DateTime, JSON, Text, Boolean, ForeignKey, Index, Float
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -27,6 +27,10 @@ class AnnotationProject(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     status = Column(String, default="active")  # active, completed, archived
 
+    # 流水线创建的项目：禁用"一键全部完成"，图片状态以 review_status 为准，类别顺序冻结不可修改
+    review_required = Column(Boolean, default=False, server_default="false")
+    pipeline_run_id = Column(UUID(as_uuid=True), nullable=True, index=True)
+
     # 关联关系
     dataset = relationship("Dataset", back_populates="annotation_projects")
     image_annotations = relationship("ImageAnnotation", back_populates="project", cascade="all, delete-orphan")
@@ -49,6 +53,16 @@ class ImageAnnotation(Base):
     locked_at = Column(DateTime, nullable=True)  # 租约最后续期时间，配合 ANNOTATION_LEASE_TTL 判断是否过期
     last_edited_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # 最后修改者
 
+    # 流水线自动标注与复核字段（普通标注项目中均为空）
+    auto_annotations = Column(JSON, nullable=True)   # {"vlm": [...], "sam": [...], "meta": {...}}，annotations 为最终框
+    # auto_accepted（自动通过）/ to_review（待复核）/ accepted（人工通过）/ modified（人工修改后通过）/ discarded（丢弃）
+    review_status = Column(String(20), nullable=True)
+    risk_score = Column(Float, nullable=True)        # 0~1，越高越需要人看
+    risk_reasons = Column(JSON, nullable=True)       # ["sam_fallback", "temporal_outlier", ...]
+    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_at = Column(DateTime, nullable=True)
+    pipeline_meta = Column(JSON, nullable=True)      # 来源视频、帧号、时间戳、清洗指标、所属划分
+
     # 关联关系
     project = relationship("AnnotationProject", back_populates="image_annotations")
     locker = relationship("User", foreign_keys=[locked_by])
@@ -57,4 +71,6 @@ class ImageAnnotation(Base):
     # 认领接口按 (项目, 未完成, 租约) 过滤，走该索引避免全表扫描
     __table_args__ = (
         Index("ix_image_annotations_claim", "project_id", "is_completed", "locked_at"),
+        # 复核视图按 (项目, 复核状态) 筛选
+        Index("ix_image_annotations_review", "project_id", "review_status"),
     )

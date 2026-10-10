@@ -9,7 +9,7 @@ from app.schemas.user import UserCreate
 from app.models.user import UserRole
 
 # 导入所有模型以确保它们被注册
-from app.models import Dataset, Model, TrainingTask, DetectionTask, AnnotationProject, ImageAnnotation, User, MosaicCandidate
+from app.models import Dataset, Model, TrainingTask, DetectionTask, AnnotationProject, ImageAnnotation, User, MosaicCandidate, ApiKey, PipelineRun, PipelineVideo, PipelineEvent, PipelineUpload, WebhookDelivery
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +54,52 @@ def create_initial_admin():
             logger.info("Admin user already exists")
     finally:
         db.close()
+
+# 已有表需要补的列：{表名: {列名: 列定义}}。create_all 只建缺失的表，不会给已有表加列，
+# 新增字段在这里声明一次即可，启动时自动补齐（幂等）。更早的字段仍由 init_db 中逐个检查的旧代码处理。
+EXTRA_COLUMNS = {
+    "annotation_projects": {
+        "review_required": "BOOLEAN NOT NULL DEFAULT FALSE",
+        "pipeline_run_id": "UUID",
+    },
+    "image_annotations": {
+        "auto_annotations": "JSON",
+        "review_status": "VARCHAR(20)",
+        "risk_score": "DOUBLE PRECISION",
+        "risk_reasons": "JSON",
+        "reviewed_by": "INTEGER REFERENCES users(id) ON DELETE SET NULL",
+        "reviewed_at": "TIMESTAMP",
+        "pipeline_meta": "JSON",
+    },
+    "pipeline_videos": {
+        "class_names": "JSON",
+    },
+}
+
+EXTRA_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS ix_annotation_projects_pipeline_run_id ON annotation_projects (pipeline_run_id)",
+    "CREATE INDEX IF NOT EXISTS ix_image_annotations_review ON image_annotations (project_id, review_status)",
+]
+
+
+def ensure_columns(extra_columns=None, extra_indexes=None):
+    """按 EXTRA_COLUMNS 给已有表补齐缺失的列和索引"""
+    extra_columns = EXTRA_COLUMNS if extra_columns is None else extra_columns
+    extra_indexes = EXTRA_INDEXES if extra_indexes is None else extra_indexes
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in extra_columns.items():
+            if table not in tables:
+                continue  # 表刚由 create_all 按最新模型创建，列已齐全
+            existing = {col["name"] for col in inspector.get_columns(table)}
+            for name, definition in columns.items():
+                if name not in existing:
+                    logger.info(f"Adding {table}.{name}")
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {definition}"))
+        for statement in extra_indexes:
+            conn.execute(text(statement))
+
 
 def init_db():
     try:
@@ -401,6 +447,9 @@ def init_db():
                     """))
                     conn.commit()
                     logger.info("Added test_count column to datasets table")
+
+        # 补齐新增字段（流水线、复核等）
+        ensure_columns()
 
         # 创建初始管理员用户
         create_initial_admin()

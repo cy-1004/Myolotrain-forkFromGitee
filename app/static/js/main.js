@@ -138,6 +138,21 @@ function getCurrentUser() {
         });
 }
 
+// 通用模态框：bodyHtml 由调用方负责转义；onConfirm 为空时隐藏"确定"按钮；size 可选 'lg' / 'xl'
+function showModal(title, bodyHtml, onConfirm = null, size = 'lg') {
+    const dialog = document.querySelector('#mainModal .modal-dialog');
+    dialog.classList.remove('modal-lg', 'modal-xl');
+    if (size) dialog.classList.add(`modal-${size}`);
+    document.querySelector('#mainModal .modal-title').textContent = title;
+    document.querySelector('#mainModal .modal-body').innerHTML = bodyHtml;
+    const submit = document.getElementById('modalSubmit');
+    submit.textContent = '确定';
+    submit.style.display = onConfirm ? 'inline-block' : 'none';
+    submit.onclick = onConfirm;
+    window.__showModalActive = true;   // 告诉 show 事件处理器：外观是这里设置的，不要恢复默认
+    modal.show();
+}
+
 // 显示修改密码模态框
 function showChangePasswordModal() {
     const modalTitle = document.querySelector('#mainModal .modal-title');
@@ -442,6 +457,16 @@ document.addEventListener('DOMContentLoaded', function() {
     try {
         if (typeof bootstrap !== 'undefined' && bootstrap.Modal) {
             modal = new bootstrap.Modal(document.getElementById('mainModal'));
+            // 其他页面直接 modal.show() 复用这个模态框时，恢复默认外观（showModal 可能隐藏过"确定"按钮或放大过对话框）。
+            // 放在打开时而不是关闭时做：show 事件同步触发；hidden 事件依赖过渡动画结束，页面在后台时可能不触发
+            document.getElementById('mainModal').addEventListener('show.bs.modal', () => {
+                if (window.__showModalActive) {
+                    window.__showModalActive = false;
+                    return;
+                }
+                document.getElementById('modalSubmit').style.display = 'inline-block';
+                document.querySelector('#mainModal .modal-dialog').classList.remove('modal-lg', 'modal-xl');
+            });
             log('Bootstrap模态框初始化成功');
         } else {
             warn('Bootstrap未加载，跳过模态框初始化');
@@ -531,6 +556,9 @@ function loadPage(page) {
     // 在切换页面之前清理当前页面的资源
     if (currentPage === 'training' && typeof stopTrainingTasksAutoRefresh === 'function') {
         stopTrainingTasksAutoRefresh();
+    }
+    if (currentPage === 'pipeline' && window.pipelineCenter) {
+        window.pipelineCenter.stop();
     }
     
     // 清理视频检测页面的资源
@@ -624,6 +652,12 @@ function loadPage(page) {
             if (typeof window.videoProcessor !== 'undefined') {
                 window.videoProcessor.loadVideoPage();
                 window.videoProcessor.bindVideoEvents();
+            }
+            break;
+        case 'pipeline':
+            // 流水线任务中心（一键训练）
+            if (window.pipelineCenter) {
+                window.pipelineCenter.init();
             }
             break;
         case 'frame-extraction':

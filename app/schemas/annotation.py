@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Union
 from uuid import UUID
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 # 标注框数据结构
 class BoundingBox(BaseModel):
@@ -45,6 +45,10 @@ class SegmentationAnnotation(BaseModel):
 
 # 通用标注数据结构
 class Annotation(BaseModel):
+    # 允许附加字段：自动标注会给每个框带上 source（vlm/sam/manual）、edited、conf 等溯源信息，
+    # 默认的 ignore 会在保存时把它们悄悄丢掉，复核统计就无从算起
+    model_config = ConfigDict(extra="allow")
+
     # 共同字段
     class_id: int
     
@@ -96,6 +100,8 @@ class AnnotationProject(AnnotationProjectBase):
     created_at: datetime
     updated_at: datetime
     status: str
+    review_required: Optional[bool] = False
+    pipeline_run_id: Optional[UUID] = None
     
     class Config:
         from_attributes = True
@@ -130,6 +136,14 @@ class ImageAnnotation(ImageAnnotationBase):
     locked_by: Optional[int] = None
     locked_at: Optional[datetime] = None
     last_edited_by: Optional[int] = None
+    # 流水线自动标注 / 复核信息（普通项目为空）
+    auto_annotations: Optional[Dict[str, Any]] = None
+    review_status: Optional[str] = None
+    risk_score: Optional[float] = None
+    risk_reasons: Optional[List[str]] = None
+    reviewed_by: Optional[int] = None
+    reviewed_at: Optional[datetime] = None
+    pipeline_meta: Optional[Dict[str, Any]] = None
 
     class Config:
         from_attributes = True

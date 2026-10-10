@@ -104,6 +104,48 @@ class Settings(BaseSettings):
     YOLO_MODEL_TYPES: List[str] = ["yolov8n", "yolov8s", "yolov8m", "yolov8l", "yolov8x"]
     YOLO_TASK_TYPES: List[str] = ["detect", "segment", "pose", "obb", "detection", "segmentation", "keypoints"]
 
+    # ---------------- 文物视频一键训练流水线 ----------------
+    # 是否在本进程内运行流水线调度器。以后拆出独立 worker 容器时，Web 容器设为 false
+    PIPELINE_WORKER_ENABLED: bool = True
+    # 同时执行的 Run 数（训练阶段另有全局 GPU 锁，同一时刻只有一个 Run 在训练）
+    PIPELINE_MAX_PARALLEL_RUNS: int = 2
+    # 服务重启导致中断后自动续跑的最多次数，超过则判为失败
+    PIPELINE_MAX_ATTEMPTS: int = 3
+    PIPELINE_MAX_VIDEOS_PER_JOB: int = 50
+    PIPELINE_MAX_VIDEO_MB: int = 4096
+    PIPELINE_MAX_VIDEO_SECONDS: int = 1800
+    # 数据目录剩余空间低于该值时拒绝新任务（返回 507）
+    PIPELINE_MIN_FREE_DISK_GB: float = 10.0
+    # 分片上传：单片大小、未完成上传的保留时长
+    UPLOAD_CHUNK_BYTES: int = 8 * 1024 * 1024
+    UPLOAD_EXPIRE_HOURS: int = 24
+
+    # 自动标注用的视觉大模型（OpenAI 兼容接口）
+    # openrouter：云端；openai_compatible：本地 llama.cpp / vLLM 等；mock：本地轮廓检测（离线测试用）
+    VLM_PROVIDER: str = "openrouter"
+    # 在真实文物视频上校准过（tools/calibrate_vlm.py）：235b 配合放大 + 参考图召回 0.72、精确 0.84，约 $0.0004/帧；
+    # 30b 同样设置下召回只有约 0.53
+    VLM_MODEL: str = "qwen/qwen3-vl-235b-a22b-instruct"
+    OPENROUTER_API_KEY: str = ""
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENAI_COMPATIBLE_BASE_URL: str = "http://127.0.0.1:8887/v1"
+    OPENAI_COMPATIBLE_API_KEY: str = ""
+    VLM_MAX_CONCURRENCY: int = 8   # 235b + 1280 + 参考图单次约 10~15 秒，并发 4 时每分钟只能标约 20 帧
+    VLM_TIMEOUT_SECONDS: int = 60
+    VLM_MAX_RETRIES: int = 3
+    # 管理员总开关：false 时禁止把图片发到云端，只能用 openai_compatible（本地）或 mock
+    ALLOW_CLOUD_VLM: bool = True
+    # 单个 Run 的 VLM 费用上限（美元），0 表示不限；达到上限时 Run 暂停等待处理
+    VLM_BUDGET_PER_RUN_USD: float = 0.0
+
+    # SAM 收框：权重文件名（在 WEIGHTS_DIR 下查找，找不到时自动下载）
+    SAM_MODEL: str = "sam2.1_b.pt"
+
+    # webhook：默认禁止回调到内网/本机地址（防 SSRF）。本地化部署回调内网系统时，
+    # 把目标主机名或 IP 加进来，例如 '["10.0.0.8", "erp.internal"]'；"*" 表示放行全部内网地址
+    WEBHOOK_ALLOWED_HOSTS: List[str] = []
+    WEBHOOK_TIMEOUT_SECONDS: int = 10
+
     # Celery
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"

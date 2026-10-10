@@ -216,6 +216,11 @@ def update_annotation_project(
     db: Session = Depends(get_db)
 ):
     """更新标注项目"""
+    project = annotation_project.get(db, id=project_id)
+    if project and project.review_required and project_update.classes is not None \
+            and list(project_update.classes) != list(project.classes or []):
+        # 流水线项目的类别顺序即 class_id，一路带到 labels.txt；改动会让已有标注和端侧的类别对不上
+        raise HTTPException(status_code=403, detail="流水线项目的类别列表已冻结，不能修改")
     service = AnnotationService()
     return service.update_annotation_project(db, project_id, project_update)
 
@@ -249,6 +254,35 @@ def delete_annotation_project(
     
     annotation_project.remove(db, id=project_id)
     return {"message": "项目删除成功"}
+
+@router.get("/projects/{project_id}/class-stats")
+def get_project_class_stats(project_id: UUID, db: Session = Depends(get_db)):
+    """每个类别的框数与图片数，以及复核状态分布（只读查看/定位问题用）"""
+    project = annotation_project.get(db, id=project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="项目未找到")
+    classes = list(project.classes or [])
+    per_class = [{"class_id": i, "name": name, "boxes": 0, "images": 0} for i, name in enumerate(classes)]
+    review = {}
+    total = no_box = 0
+    rows = db.query(ImageAnnotationModel.annotations, ImageAnnotationModel.review_status).filter(
+        ImageAnnotationModel.project_id == project_id).all()
+    for annotations, review_status in rows:
+        total += 1
+        review[review_status or "none"] = review.get(review_status or "none", 0) + 1
+        seen = set()
+        for ann in annotations or []:
+            cid = ann.get("class_id") if isinstance(ann, dict) else None
+            if isinstance(cid, int) and 0 <= cid < len(per_class):
+                per_class[cid]["boxes"] += 1
+                seen.add(cid)
+        for cid in seen:
+            per_class[cid]["images"] += 1
+        no_box += not annotations
+    return {"project_id": str(project_id), "total_images": total, "images_without_boxes": no_box,
+            "classes": per_class, "review_status": review, "review_required": bool(project.review_required),
+            "pipeline_run_id": str(project.pipeline_run_id) if project.pipeline_run_id else None}
+
 
 @router.get("/projects/{project_id}/stats", response_model=ProjectStats)
 def get_project_stats(
@@ -970,6 +1004,9 @@ def mark_all_completed(
     project = annotation_project.get(db, id=project_id)
     if not project:
         raise HTTPException(status_code=404, detail="项目未找到")
+    if project.review_required:
+        # 流水线项目以逐帧复核状态为准，一键全部完成等于绕过复核
+        raise HTTPException(status_code=403, detail="该项目来自自动训练流水线，需在“流水线任务中心”逐帧复核或放行，不能一键全部完成")
 
     try:
         total_count = db.query(func.count(ImageAnnotationModel.id)).filter(

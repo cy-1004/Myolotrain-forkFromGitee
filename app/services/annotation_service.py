@@ -1808,10 +1808,14 @@ flip_idx: []  # 镜像翻转时需要交换的关键点索引"""
             db_image_annotations = db_image.annotations if db_image.annotations is not None else []
             db_image_annotations_value = db_image_annotations if isinstance(db_image_annotations, list) else []
             if overwrite or not db_image_annotations_value:
-                update_data = {
-                    "annotations": annotations,
-                    "is_completed": len(annotations) > 0
-                }
+                if getattr(project, "review_required", False):
+                    # 流水线/需复核的项目：模型标出的框只是候选，交给人确认，不能直接算"已完成"
+                    update_data = {"annotations": annotations, "review_status": "to_review"}
+                else:
+                    update_data = {
+                        "annotations": annotations,
+                        "is_completed": len(annotations) > 0
+                    }
                 image_annotation.update(db, db_obj=db_image, obj_in=update_data)
             
             return annotations

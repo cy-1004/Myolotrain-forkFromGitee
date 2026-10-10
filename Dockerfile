@@ -50,7 +50,7 @@ FROM ${PYTHON_IMAGE}
 ARG APT_MIRROR=mirrors.ustc.edu.cn
 # 预置到镜像里的权重。离线部署必须预置；构建机无法访问 GitHub 时，
 # 可先把同名 .pt 文件放进 docker/weights/，构建时优先使用本地文件
-ARG BAKE_WEIGHTS="yolo11n.pt yolo11s.pt yolov8n.pt"
+ARG BAKE_WEIGHTS="yolo11n.pt yolo11s.pt yolov8n.pt sam2.1_b.pt"
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \

@@ -1315,6 +1315,8 @@ class AnnotationTool {
     async loadProject() {
         const urlParams = new URLSearchParams(window.location.search);
         this.projectId = urlParams.get('project_id');
+        // mode=view：只读查看（排查问题用），不申请租约、不自动保存、不自动标记完成，不会挡住正在标注的人
+        this.viewMode = urlParams.get('mode') === 'view';
         
         if (!this.projectId) {
             alert('未指定项目ID');
@@ -1696,11 +1698,19 @@ class AnnotationTool {
         this.currentImageIndex = index;
         this.currentImageData = this.imageList[index];
         
-        // 申请当前图片的租约；被他人占用时会自动转入只读模式
-        await this.acquireLease(this.currentImageData.id);
+        // 申请当前图片的租约；被他人占用时会自动转入只读模式。只读查看模式不申请租约
+        if (this.viewMode) {
+            this.enterReadOnly(null);
+        } else {
+            await this.acquireLease(this.currentImageData.id);
+        }
 
-        // 检查并自动标记上一张图片（如果有标注且未完成）
-        if (previousImageData &&
+        // 检查并自动标记上一张图片（如果有标注且未完成）。
+        // 只读查看模式、以及流水线项目（以复核状态为准，"切走即完成"等于绕过复核）都不做
+        const reviewRequired = this.projectData && this.projectData.review_required;
+        if (this.viewMode) {
+            // 什么都不写
+        } else if (!reviewRequired && previousImageData &&
             previousImageData.annotations &&
             previousImageData.annotations.length > 0 &&
             !previousImageData.is_completed) {
@@ -2146,6 +2156,12 @@ class AnnotationTool {
 
         if (!this.isReadOnly) {
             banner.style.setProperty('display', 'none', 'important');
+            return;
+        }
+        if (this.viewMode) {
+            text.textContent = '只读查看模式：不会锁定图片，也不会保存任何修改。需要修改请去掉网址中的 mode=view。';
+            takeoverBtn.style.display = 'none';
+            banner.style.setProperty('display', 'flex', 'important');
             return;
         }
 

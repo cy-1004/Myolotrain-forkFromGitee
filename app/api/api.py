@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends
 
 
 from app.api.deps import require_console_user
-from app.api.endpoints import auth, datasets, models, training, detection, opencv, video, tracking, streaming, annotation, settings, tools, sync_detection, monitoring, comparison, sam3, frame_extraction, health
+from app.api.endpoints import auth, datasets, models, training, detection, opencv, video, tracking, streaming, annotation, settings, tools, sync_detection, monitoring, comparison, sam3, frame_extraction, health, pipeline_console
 
 api_router = APIRouter()
 # 无需登录的路由：健康检查；认证路由内部各接口自行鉴权（/token 登录接口本身必须开放）
@@ -29,3 +29,4 @@ api_router.include_router(settings.router, prefix="/settings", tags=["settings"]
 api_router.include_router(tools.router, prefix="/tools", tags=["tools"], dependencies=_console)
 api_router.include_router(monitoring.router, prefix="/monitoring", tags=["monitoring"], dependencies=_console)
 api_router.include_router(comparison.router, prefix="/comparison", tags=["comparison"], dependencies=_console)
+api_router.include_router(pipeline_console.router, prefix="/pipeline", tags=["pipeline"], dependencies=_console)

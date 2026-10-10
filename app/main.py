@@ -149,6 +149,10 @@ async def startup_event():
         process_monitor.start()
         logger.info("Process monitor started")
 
+        # 启动流水线调度器（放在进程监控之后：先把重启前遗留的训练任务收尾，流水线续跑时才能正确判断）
+        from app.services.pipeline.orchestrator import orchestrator
+        orchestrator.start()
+
         # 启动TensorBoard服务（需要额外占用一个端口，单端口部署时关闭）
         if not settings.TENSORBOARD_ENABLED:
             logger.info("TensorBoard 已关闭（TENSORBOARD_ENABLED=false），训练曲线请在训练详情中查看")
@@ -249,6 +253,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": str(exc)},
     )
 
+from app.services.pipeline.service import ServiceError
+
+
+@app.exception_handler(ServiceError)
+async def service_error_handler(request: Request, exc: ServiceError):
+    # 控制台接口沿用前端熟悉的 {"detail": ...} 格式，同时带上稳定的错误码
+    return JSONResponse(status_code=exc.http_status,
+                        content={"detail": exc.message, "code": exc.code, "details": exc.details})
+
+
 # 记录日志时要去掉的请求头：里面是登录令牌，写进日志等于把账号交给能看日志的人
 _SENSITIVE_HEADERS = {"authorization", "cookie", "x-api-key"}
 
@@ -279,6 +293,9 @@ async def shutdown_event():
 
     # 停止进程监控服务
     process_monitor.stop()
+
+    from app.services.pipeline.orchestrator import orchestrator
+    orchestrator.stop()
     logger.info("Process monitor stopped")
 
     # 停止TensorBoard服务
@@ -286,6 +303,10 @@ async def shutdown_event():
         logger.info("TensorBoard service stopped")
     else:
         logger.warning("Failed to stop TensorBoard service")
+
+# 对外接口（API Key 鉴权，独立文档 /api/v1/docs）。先于 /api 挂载，路径匹配时优先命中
+from app.api.v1 import create_v1_app
+app.mount("/api/v1", create_v1_app(), name="api_v1")
 
 # Include API router
 app.include_router(api_router, prefix="/api")

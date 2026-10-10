@@ -102,6 +102,38 @@ def download_base_weights(model_file: Path) -> Path:
     return model_file
 
 
+# 允许通过 parameters.extra_train_args 传给 Ultralytics 的训练参数及其类型。
+# 值会以 Python 字面量写进生成的训练脚本，所以只放行基本类型，字符串只允许枚举值
+_EXTRA_TRAIN_ARGS = {
+    "patience": int, "seed": int, "close_mosaic": int, "save_period": int, "workers": int,
+    "deterministic": bool, "cos_lr": bool, "amp": bool, "plots": bool, "val": bool,
+    "lr0": float, "lrf": float, "mosaic": float, "mixup": float, "fliplr": float, "flipud": float,
+    "degrees": float, "translate": float, "scale": float, "hsv_h": float, "hsv_s": float, "hsv_v": float,
+}
+_EXTRA_TRAIN_ENUMS = {
+    "optimizer": {"auto", "SGD", "Adam", "AdamW", "NAdam", "RAdam", "RMSProp"},
+    "cache": {"ram", "disk"},
+}
+
+
+def sanitize_extra_train_args(extra) -> Dict[str, Any]:
+    if not isinstance(extra, dict):
+        return {}
+    clean = {}
+    for key, value in extra.items():
+        if key in _EXTRA_TRAIN_ARGS:
+            typ = _EXTRA_TRAIN_ARGS[key]
+            if typ is bool and isinstance(value, bool):
+                clean[key] = value
+            elif typ is int and isinstance(value, int) and not isinstance(value, bool):
+                clean[key] = value
+            elif typ is float and isinstance(value, (int, float)) and not isinstance(value, bool):
+                clean[key] = float(value)
+        elif key in _EXTRA_TRAIN_ENUMS and value in _EXTRA_TRAIN_ENUMS[key]:
+            clean[key] = value
+    return clean
+
+
 def _training_subprocess_env() -> Dict[str, str]:
     """训练子进程的环境变量（首次训练与续训共用）"""
     env = os.environ.copy()
@@ -1183,7 +1215,17 @@ def start_training(db: Session, task_id: str) -> TrainingTask:
     # 修改双花括号为单花括号，因为在这里我们不需要转义
     script_content = script_content.replace("train_args = {{", "train_args = {")
     script_content = script_content.replace("}}", "}")
-    
+
+    # 额外的 Ultralytics 训练参数（如流水线传入的 patience），只接受白名单内、类型正确的值
+    extra_train_args = sanitize_extra_train_args(db_task.parameters.get("extra_train_args"))
+    if extra_train_args:
+        marker = "        # 如果启用矩形训练，添加rect参数"
+        if marker in script_content:
+            script_content = script_content.replace(
+                marker, f"        train_args.update({extra_train_args!r})\n{marker}", 1)
+        else:
+            print("\n=== 警告: 训练脚本模板中找不到插入点，额外训练参数未生效 ===")
+
     # 添加多GPU支持
     gpu_indices = hardware_config.get("gpu_indices", None)
     if gpu_indices and isinstance(gpu_indices, list):

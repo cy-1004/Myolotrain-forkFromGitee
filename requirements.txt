@@ -67,6 +67,9 @@ onnx2tf>=1.19.0
 # 剪枝
 torch-pruning>=1.6.1
 
+# HTTP 客户端（自动标注调用视觉大模型、投递 webhook）
+httpx>=0.28.1
+
 # Authentication
 passlib[bcrypt]>=1.7.4
 python-jose[cryptography]>=3.3.0
